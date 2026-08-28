@@ -1,16 +1,14 @@
 {
   "name": "admin",
-  "version": "0.0.0",
   "private": true,
+  "version": "0.0.0",
   "type": "module",
-  "engines": {
-    "node": ">=24"
-  },
-  "packageManager": "pnpm@11.24.0",
   "scripts": {
     "dev": "vite",
-    "check": "tsc -b",
-    "build": "tsc -b && vite build"
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "check": "tsc -b"
   },
   "dependencies": {
     "react": "19.2.8",
@@ -21,7 +19,12 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.1.1",
+    "oxlint": "1.80.0",
     "typescript": "6.0.3",
     "vite": "8.2.2"
-  }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.24.0"
 }

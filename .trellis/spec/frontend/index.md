@@ -18,7 +18,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
 | [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
 | [State Management](./state-management.md) | Local state, global state, server state | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Independent admin configuration, template artifacts, and verification | Initial implementation |
+| [Quality Guidelines](./quality-guidelines.md) | Official React TS provenance, independent admin tooling, artifact and runtime verification | Official baseline |
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
 
 ---

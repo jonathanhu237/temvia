@@ -14,7 +14,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Scaffolding Contract](./scaffolding-contract.md) | CLI generation, Git safety, npm packing, and Go health contract | Initial implementation |
+| [Scaffolding Contract](./scaffolding-contract.md) | CLI generation, nested seed files, Git safety, npm packing, and Go health contract | Official baseline integrated |
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
 | [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |

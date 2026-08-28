@@ -9,6 +9,24 @@ export const root = fileURLToPath(new URL('../', import.meta.url));
 export const cli = join(root, 'dist/cli.js');
 export const modulePath = 'example.com/my-project/api';
 
+// Exercise the same development pollution at both copy and npm-pack boundaries.
+export const templateContaminants = [
+  'admin/node_modules/local/package.json', 'admin/dist/index.html',
+  'admin/dist-ssr/index.js', 'api/bin/server', '.git/config', '.gitignore',
+  'admin/.gitignore', 'admin/.npmignore', 'admin/.env', 'admin/.env.local',
+  'admin/pnpm-lock.yaml', 'admin/pnpm-workspace.yaml', 'admin/package-lock.json',
+  'admin/npm-shrinkwrap.json', 'admin/yarn.lock', 'admin/tsconfig.tsbuildinfo',
+  'admin/debug.log', 'admin/temp.tmp', 'admin/archive.tgz', 'admin/.DS_Store',
+  'admin/.mise.local.toml',
+];
+
+export async function contaminateTemplate(directory) {
+  for (const path of templateContaminants) {
+    await fs.mkdir(join(directory, path, '..'), { recursive: true });
+    await fs.writeFile(join(directory, path), 'must not ship');
+  }
+}
+
 export async function temporaryDirectory(t) {
   const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'temvia-test-')));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

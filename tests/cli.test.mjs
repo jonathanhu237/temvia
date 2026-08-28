@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import { parseArguments, run } from '../dist/cli.js';
 import { generate, validateModulePath } from '../dist/generate.js';
 import { createGit } from '../dist/git.js';
-import { cli, fakeGit, modulePath, root, temporaryDirectory } from './helpers.mjs';
+import { cli, contaminateTemplate, fakeGit, modulePath, root, templateContaminants, temporaryDirectory } from './helpers.mjs';
+import { adminTemplateFiles, assertAdminBaseline, generatedPath } from './react-ts-baseline.mjs';
 
 test('arguments require one directory and module, reject unsupported options before writes', () => {
   assert.deepEqual(parseArguments(['my project', '--module', modulePath]), {
@@ -95,21 +96,69 @@ test('nonempty, file and symlink targets and bad module leave existing bytes unc
   assert.deepEqual(git.calls, []);
 });
 
-test('template preflight rejects missing files and filters template development artifacts', async (t) => {
+test('bundled admin preserves the official baseline and only documented customizations', async (t) => {
+  const cwd = await temporaryDirectory(t);
+  await generate({ directory: 'output', modulePath, cwd }, fakeGit());
+  const admin = join(cwd, 'output/admin');
+  await assertAdminBaseline(admin);
+  for (const path of adminTemplateFiles) {
+    assert.deepEqual(await fs.readFile(join(admin, generatedPath(path))),
+      await fs.readFile(join(root, 'template/admin', path)), `Source bytes preserved: ${path}`);
+  }
+});
+
+test('generation filters template development artifacts without losing official assets or dotfiles', async (t) => {
   const cwd = await temporaryDirectory(t);
   const template = join(cwd, 'template');
   await fs.cp(join(root, 'template'), template, { recursive: true });
-  for (const path of ['admin/node_modules/cache.js', 'admin/dist/index.html', 'api/bin/server', 'admin/.env.local', 'admin/pnpm-lock.yaml', 'admin/pnpm-workspace.yaml', 'admin/tsconfig.tsbuildinfo']) {
-    await fs.mkdir(join(template, path, '..'), { recursive: true });
-    await fs.writeFile(join(template, path), 'must not ship');
-  }
+  await contaminateTemplate(template);
   await generate({ directory: 'output', modulePath, cwd, templateDirectory: template }, fakeGit());
-  assert.deepEqual((await fs.readdir(join(cwd, 'output/admin'))).sort(), ['index.html', 'package.json', 'src', 'tsconfig.app.json', 'tsconfig.json', 'tsconfig.node.json', 'vite.config.ts']);
-  await fs.unlink(join(template, 'api/go.mod'));
-  const git = fakeGit();
-  await assert.rejects(generate({ directory: 'incomplete', modulePath, cwd, templateDirectory: template }, git), /Template is incomplete/);
-  await assert.rejects(fs.stat(join(cwd, 'incomplete')), { code: 'ENOENT' });
-  assert.deepEqual(git.calls, []);
+  const output = join(cwd, 'output');
+  await assertAdminBaseline(join(output, 'admin'));
+  for (const path of templateContaminants) {
+    if (path.endsWith('.gitignore')) continue; // Generated from the inert seeds, not the contaminant.
+    await assert.rejects(fs.stat(join(output, path)), { code: 'ENOENT' }, path);
+  }
+  assert.deepEqual(await fs.readFile(join(output, '.gitignore')), await fs.readFile(join(template, '_gitignore')));
+});
+
+test('template preflight rejects missing API, frontend asset, lint and provenance files before writes', async (t) => {
+  const cwd = await temporaryDirectory(t);
+  for (const [index, missing] of [
+    'api/go.mod', 'admin/src/assets/hero.png', 'admin/public/icons.svg',
+    'admin/.oxlintrc.json', 'admin/_gitignore', 'admin/UPSTREAM.md',
+  ].entries()) {
+    const template = join(cwd, `template-${index}`);
+    await fs.cp(join(root, 'template'), template, { recursive: true });
+    await fs.unlink(join(template, missing));
+    const target = join(cwd, `incomplete-${index}`);
+    const git = fakeGit();
+    await assert.rejects(generate({ directory: target, modulePath, templateDirectory: template }, git), {
+      message: `Template is incomplete: missing ${generatedPath(missing)}. Reinstall create-temvia.`,
+    });
+    await assert.rejects(fs.stat(target), { code: 'ENOENT' });
+    assert.deepEqual(git.calls, []);
+  }
+});
+
+test('only the exact _gitignore basename is materialized at every nesting level', async (t) => {
+  const cwd = await temporaryDirectory(t);
+  const template = join(cwd, 'template');
+  await fs.cp(join(root, 'template'), template, { recursive: true });
+  const nested = join(template, 'admin/nested');
+  await fs.mkdir(nested);
+  const extra = { _gitignore: 'nested-ignore\n', '_gitignore.txt': 'keep suffix\n', _notes: 'keep underscore\n' };
+  for (const [path, contents] of Object.entries(extra)) await fs.writeFile(join(nested, path), contents);
+  await generate({ directory: 'output', modulePath, cwd, templateDirectory: template }, fakeGit());
+  const output = join(cwd, 'output');
+  for (const path of ['_gitignore', 'admin/_gitignore', 'admin/nested/_gitignore']) {
+    assert.deepEqual(await fs.readFile(join(output, generatedPath(path))), await fs.readFile(join(template, path)));
+    await assert.rejects(fs.stat(join(output, path)), { code: 'ENOENT' });
+  }
+  for (const path of ['_gitignore.txt', '_notes']) {
+    assert.equal(await fs.readFile(join(output, 'admin/nested', path), 'utf8'), extra[path]);
+  }
+  await assert.rejects(fs.stat(join(output, 'admin/_oxlintrc.json')), { code: 'ENOENT' });
 });
 
 test('write failure removes only owned unchanged files and retains concurrent content', async (t) => {

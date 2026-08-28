@@ -7,7 +7,7 @@ import type { Git, RepositoryState } from './git.js';
 
 const templateDirectory = fileURLToPath(new URL('../template/', import.meta.url));
 const ignoredNames = new Set([
-  'node_modules', 'dist', 'bin', '.git', '.gitignore', '.npmignore', '.DS_Store',
+  'node_modules', 'dist', 'dist-ssr', 'bin', '.git', '.gitignore', '.npmignore', '.DS_Store',
   'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock',
   '.mise.local.toml',
 ]);
@@ -92,8 +92,9 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
       if (entry.isDirectory()) {
         await visit(path);
       } else if (entry.isFile()) {
-        const name = relative(root, path).split('\\').join('/');
-        files.push({ name: name === '_gitignore' ? '.gitignore' : name, contents: await fs.readFile(path) });
+        const outputPath = entry.name === '_gitignore' ? join(directory, '.gitignore') : path;
+        const name = relative(root, outputPath).split('\\').join('/');
+        files.push({ name, contents: await fs.readFile(path) });
       } else {
         throw new Error(`Template contains an unsupported file: ${path}`);
       }
@@ -102,10 +103,13 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
   await visit(root);
   for (const required of [
     '.gitignore', 'README.md', 'api/go.mod', 'api/cmd/server/main.go',
-    'api/cmd/server/main_test.go', 'admin/package.json', 'admin/index.html',
+    'api/cmd/server/main_test.go', 'admin/.gitignore', 'admin/.oxlintrc.json',
+    'admin/README.md', 'admin/UPSTREAM.md', 'admin/package.json', 'admin/index.html',
     'admin/vite.config.ts', 'admin/tsconfig.json', 'admin/tsconfig.app.json',
     'admin/tsconfig.node.json', 'admin/src/main.tsx', 'admin/src/App.tsx',
-    'admin/src/style.css',
+    'admin/src/App.css', 'admin/src/index.css', 'admin/src/assets/hero.png',
+    'admin/src/assets/react.svg', 'admin/src/assets/vite.svg',
+    'admin/public/favicon.svg', 'admin/public/icons.svg',
   ]) {
     if (!files.some((file) => file.name === required)) {
       throw new Error(`Template is incomplete: missing ${required}. Reinstall create-temvia.`);
