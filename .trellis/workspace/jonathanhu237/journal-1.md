@@ -41,3 +41,24 @@ Implemented and accepted the initial TypeScript CLI generating independent Go ap
 ### Next Steps
 
 - Discuss admin i18n with English primary and Chinese secondary; CLI localization and locale-selection policy remain undecided.
+
+
+## Session 2: Official React TS template baseline
+
+**Date**: 2026-08-29
+**Task**: Official React TS template baseline
+**Branch**: `main`
+
+### Summary
+
+Vendored the verified create-vite 9.2.0 react-ts template with only documented manifest/listener customizations and provenance. Updated nested seed handling, asset completeness, packing exclusions, regression coverage, and frontend/scaffolding specs. Independent review, all 19 local tests, and actual generated-app lint/check/build plus browser/HMR/preview/port-fallback validation on Centaurus passed. Final pre-commit checks confirmed the reviewed artifact and all 30 packed files were unchanged. Committed after explicit user LGTM and archived only this task; Bootstrap Guidelines remains active. No push or publication.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e361531` | (see git log) |
+
+### Status
+
+[OK] **Completed**
