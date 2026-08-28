@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/index.md","reason":"Read the backend index and implemented scaffolding contract; other backend guides remain bootstrap placeholders."}
+{"file":".trellis/spec/frontend/index.md","reason":"Read the frontend index and concrete admin quality rules; do not infer a workspace or UI library from placeholder guides."}
+{"file":".trellis/tasks/08-28-starter-cli-planning/research/cli-packaging.md","reason":"Preserve the delegated TypeScript/Node/npm decision and the generator-versus-application boundary."}
+{"file":".trellis/tasks/08-28-starter-cli-planning/research/initialization-stack.md","reason":"Use the researched baseline and actual-tarball packaging checks; distinguish metadata evidence from completed builds."}
+{"file":".trellis/tasks/08-28-starter-cli-planning/research/validation-environment.md","reason":"Keep all Git operations local and run application builds/services on Centaurus after one-way synchronization."}
+{"file":".trellis/spec/backend/scaffolding-contract.md","reason":"Preserve implemented CLI/Git/module validation, package-output, health API, and cross-environment test contracts."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Preserve independent admin tooling, template-development artifact exclusions, and actual generated-output browser/build checks."}
