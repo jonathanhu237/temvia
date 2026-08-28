@@ -1,0 +1,8 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Identify the frontend layer and the applicable quality contract; placeholder guides are not implemented conventions."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Preserve independent admin tooling, local-only listeners, port fallback, artifact exclusions, and generated-output validation; accepted task requirements replace obsolete no-linter/static-page statements."}
+{"file":".trellis/spec/backend/index.md","reason":"Identify the generator/scaffolding spec layer without expanding into Go business features."}
+{"file":".trellis/spec/backend/scaffolding-contract.md","reason":"Preserve CLI/Git/target safety, complete template packing, generated independence, and the local-only Git boundary."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Search every asset-list and filename-mapping consumer; avoid divergent source/package/generated inventories or duplicated helper logic."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace verified upstream bytes through local template, npm artifact, generated application, and runtime checks."}
+{"file":".trellis/tasks/08-28-official-react-ts-baseline/research/official-react-ts.md","reason":"Review against actual released-template evidence and the approved demo; verify minimal documented adaptations instead of inferring correctness from a successful build alone."}
+{"file":".trellis/tasks/08-28-official-react-ts-baseline/research/upstream-inventory.json","reason":"Audit offline provenance, unchanged upstream bytes, real tarball/generated correspondence, and binary integrity against the independent upstream inventory."}
