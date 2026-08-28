@@ -1,0 +1,15 @@
+node_modules/
+dist/
+bin/
+*.tsbuildinfo
+*.tgz
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+.mise.local.toml
+/template/admin/pnpm-lock.yaml
+/template/admin/pnpm-workspace.yaml
+/template/admin/package-lock.json
+/template/admin/yarn.lock

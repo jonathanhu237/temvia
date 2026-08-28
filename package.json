@@ -1,0 +1,27 @@
+{
+  "name": "create-temvia",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A CLI for scaffolding Go backends and React admin frontends.",
+  "type": "module",
+  "bin": {
+    "create-temvia": "dist/cli.js"
+  },
+  "files": ["dist", "template"],
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.24.0",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node --test tests/cli.test.mjs",
+    "test:git": "node --test tests/git.test.mjs",
+    "test:package": "pnpm build && node --test tests/package.test.mjs",
+    "prepack": "pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "6.0.3"
+  }
+}
