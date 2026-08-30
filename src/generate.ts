@@ -7,7 +7,7 @@ import type { Git, RepositoryState } from './git.js';
 
 const templateDirectory = fileURLToPath(new URL('../template/', import.meta.url));
 const ignoredNames = new Set([
-  'node_modules', 'dist', 'dist-ssr', 'bin', '.git', '.gitignore', '.npmignore', '.DS_Store',
+  'node_modules', 'dist', 'dist-ssr', 'bin', 'postgres-data', 'redis-data', '.git', '.gitignore', '.npmignore', '.DS_Store',
   'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock',
   '.mise.local.toml',
 ]);
@@ -87,7 +87,7 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
   async function visit(directory: string): Promise<void> {
     const entries = await fs.readdir(directory, { withFileTypes: true });
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (ignoredNames.has(entry.name) || /^\.env(?:\.|$)|\.(?:tsbuildinfo|log|tmp|tgz)$/.test(entry.name)) continue;
+      if (ignoredNames.has(entry.name) || entry.name === '.env' || (/^\.env\./.test(entry.name) && entry.name !== '.env.example') || /\.(?:tsbuildinfo|log|tmp|tgz)$/.test(entry.name)) continue;
       const path = join(directory, entry.name);
       if (entry.isDirectory()) {
         await visit(path);
@@ -102,8 +102,25 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
   }
   await visit(root);
   for (const required of [
-    '.gitignore', 'README.md', 'api/go.mod', 'api/cmd/server/main.go',
-    'api/cmd/server/main_test.go', 'admin/.gitignore', 'admin/.oxlintrc.json',
+    '.env.example', '.gitignore', 'Makefile', 'README.md', 'compose.yaml',
+    'api/Dockerfile', 'api/go.mod', 'api/go.sum', 'api/cmd/server/main.go',
+    'api/cmd/server/main_test.go', 'api/migrations/Dockerfile',
+    'api/migrations/000001_auth.up.sql', 'api/migrations/000001_auth.down.sql', 'api/migrations/migrate-entrypoint.sh',
+    'api/internal/config/config.go', 'api/internal/config/config_test.go',
+    'api/internal/auth/domain/credentials.go', 'api/internal/auth/domain/credentials_test.go',
+    'api/internal/auth/domain/user.go', 'api/internal/auth/application/errors.go',
+    'api/internal/auth/application/ports.go', 'api/internal/auth/application/setup.go',
+    'api/internal/auth/application/authentication.go', 'api/internal/auth/application/application_test.go',
+    'api/internal/auth/adapter/password/argon2id.go',
+    'api/internal/auth/adapter/password/argon2id_test.go',
+    'api/internal/auth/adapter/postgres/store.go', 'api/internal/auth/adapter/postgres/accounts.go',
+    'api/internal/auth/adapter/postgres/store_test.go', 'api/internal/auth/adapter/postgres/store_integration_test.go',
+    'api/internal/auth/adapter/redis/scripts.go', 'api/internal/auth/adapter/redis/store.go',
+    'api/internal/auth/adapter/redis/store_test.go', 'api/internal/auth/adapter/redis/store_integration_test.go',
+    'api/internal/auth/adapter/httpapi/problem.go', 'api/internal/auth/adapter/httpapi/json.go',
+    'api/internal/auth/adapter/httpapi/routes.go', 'api/internal/auth/adapter/httpapi/response.go',
+    'api/internal/auth/adapter/httpapi/httpapi_test.go',
+    'admin/.gitignore', 'admin/.oxlintrc.json',
     'admin/README.md', 'admin/UPSTREAM.md', 'admin/package.json', 'admin/index.html',
     'admin/vite.config.ts', 'admin/tsconfig.json', 'admin/tsconfig.app.json',
     'admin/tsconfig.node.json', 'admin/src/main.tsx', 'admin/src/App.tsx',
@@ -121,6 +138,11 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
     throw new Error('Template has an unexpected Go module declaration.');
   }
   goMod.contents = Buffer.from(seed.replace(/^module example\.com\/temvia\/api/, `module ${modulePath}`));
+  for (const file of files) {
+    if (file.name.endsWith('.go')) {
+      file.contents = Buffer.from(file.contents.toString('utf8').replaceAll('example.com/temvia/api', modulePath));
+    }
+  }
   return files;
 }
 

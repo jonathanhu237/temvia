@@ -18,6 +18,8 @@ export const templateContaminants = [
   'admin/npm-shrinkwrap.json', 'admin/yarn.lock', 'admin/tsconfig.tsbuildinfo',
   'admin/debug.log', 'admin/temp.tmp', 'admin/archive.tgz', 'admin/.DS_Store',
   'admin/.mise.local.toml',
+  '.env', '.env.local', 'api/.env', 'api/.env.production',
+  'postgres-data/PG_VERSION', 'redis-data/dump.rdb',
 ];
 
 export async function contaminateTemplate(directory) {

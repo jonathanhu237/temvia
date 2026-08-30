@@ -71,6 +71,13 @@ export function nextSteps(result: GenerateResult): string {
   return `Created ${result.directory}
 ${result.repository === 'existing' ? 'Using the existing Git working tree; no nested repository created.' : 'Initialized Git; no files staged or committed.'}
 
+Container backend:
+  cd ${quotePath(result.directory)}
+  cp .env.example .env  # fill POSTGRES_PASSWORD and REDIS_PASSWORD
+  make build
+  make migrate-up
+  make up
+
 API (Go 1.27+):
   cd ${quotePath(join(result.directory, 'api'))}
   go run ./cmd/server

@@ -17,16 +17,18 @@ The npm bin is dist/cli.js. Build TypeScript with NodeNext; resolve template ass
 
 ## 3. Contracts
 
-- Generated peers: api/ (Go module) and admin/ (private React package). No root package.json, frontend workspace, web/, or generator runtime dependency.
+- Generated peers: api/ (Go module) and admin/ (private React package), plus root `.env.example`, `compose.yaml`, `Makefile`, and deployment README. No root package.json, frontend workspace, web/, or generator runtime dependency.
 - Only new/empty targets are accepted. Symlink/file targets and nonempty directories fail before writes. Use exclusive file creation and conservative cleanup of owned output.
 - A standalone target gets git init; a target inside an existing working tree does not. Preserve the existing index, branch, configuration, remotes, and history.
 - Git discovery uses the target's nearest existing ancestor, supports linked worktrees, and clears location-overriding Git environment variables. It never stages, commits, adds remotes, or pushes.
 - Module paths use the documented conservative subset: lowercase domain-like host and ordinary ASCII path segments. Windows reserved-name checks apply to the host as well as later segments. gopkg.in's special syntax is unsupported.
-- Generation does not install dependencies or start services. Missing Git fails preflight; a later git init failure retains output with a nonzero exit and recovery instructions.
-- The installed package determines the complete template. Generation never fetches upstream or executes create-vite. Keep the explicit required-file preflight synchronized with all 19 final admin files, including official source, images, public SVGs, lint/ignore configuration, README, and UPSTREAM.md.
+- Generation does not install dependencies, create `.env`, migrate a database, issue setup authority, or start services. Missing Git fails preflight; a later git init failure retains output with a nonzero exit and recovery instructions.
+- The installed package determines the complete template. Generation never fetches upstream or executes create-vite. Keep the explicit required-file preflight synchronized with all 58 current template files, including all 19 final admin files and every required Go/config/migration/container file.
 - Transform only the exact _gitignore basename at any directory depth into .gitignore. The bundled admin/.oxlintrc.json is already materialized and is copied unchanged. Preserve file bytes, including binary assets, across packing and generation.
-- GET /health returns 200, application/json, and status=ok. POST /health returns 405; unknown routes return 404.
-- HTTP_ADDR overrides the default 127.0.0.1:8080. The initial API has no third-party dependencies or database.
+- The exact root `.env.example` is allowed through copy/pack filters; `.env` and every other `.env.*` file remain excluded. Generated secrets are never invented.
+- The seed module `example.com/temvia/api` is replaced in `api/go.mod` and every generated `.go` file. No seed import may remain for a non-seed module path.
+- GET /health returns 200, application/json, and status=ok. POST /health returns 405; unknown routes return 404. Setup/auth routes follow [Setup and Authentication](./authentication-contract.md).
+- HTTP_ADDR overrides the direct-process default 127.0.0.1:8080; Compose injects its container listener. The API has pinned PostgreSQL, Redis, Argon2id, and Unicode-normalization dependencies.
 
 ## 4. Validation & Error Matrix
 
@@ -50,7 +52,7 @@ Set LC_ALL=C for Git diagnostics. The normal absence message starts with “fata
 - Good: a new standalone directory with module example.com/team/project/api produces both apps and an unstaged Git repository.
 - Base: an empty subdirectory of an existing linked working tree produces both apps without a nested .git.
 - Bad: a nonempty target, malformed Go path, or broken ancestor .git pointer fails without overwriting files.
-- Development artifacts in template/ must not affect output. Pack/copy filters exclude node_modules, dist, dist-ssr, secrets, temporary files, template lockfiles, and pnpm-workspace.yaml. The repository also ignores local installs, dist/dist-ssr, and the documented admin lock/workspace files; its ignore list is not identical to the stricter pack/copy filters.
+- Development artifacts in template/ must not affect output. Pack/copy filters exclude node_modules, dist, dist-ssr, secrets other than the safe `.env.example` inventory, PostgreSQL/Redis data directories, temporary files, template lockfiles, and pnpm-workspace.yaml. The repository also ignores local installs, dist/dist-ssr, and the documented admin lock/workspace files; its ignore list is not identical to the stricter pack/copy filters.
 - Store ignore seeds as template/_gitignore and template/admin/_gitignore; generate independent root/admin .gitignore files. Packaging-only .npmignore must not be copied; legitimate .oxlintrc.json must survive packing and copying.
 
 ## 6. Tests Required

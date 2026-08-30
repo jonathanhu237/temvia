@@ -6,12 +6,15 @@ bin/
 .gitignore
 .env
 .env.*
+!.env.example
 *.tsbuildinfo
 *.log
 *.tmp
 *.tgz
 .DS_Store
 .mise.local.toml
+postgres-data/
+redis-data/
 pnpm-lock.yaml
 pnpm-workspace.yaml
 package-lock.json

@@ -1,0 +1,16 @@
+{"file":".trellis/spec/backend/scaffolding-contract.md","reason":"Check source, packed, and generated template contracts plus unchanged GET /health behavior."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Check the implemented auth module/package layout against project backend structure guidance, updating the placeholder through the spec workflow if needed."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Check SQL, migration, transaction, pool, and persistence choices against the finalized project convention."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check error wrapping, adapter mapping, client-safe Problem Details, and secret exclusion."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Check the intentional one-time setup-link log and redaction of all other credentials and dependency details."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check formatting, vet, tests, integration coverage, generated output, and review requirements."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace setup/login/session/logout data and errors across every layer without missing mappings."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check for duplicated validators, HTTP contracts, configuration, and asymmetric template inventories."}
+{"file":".trellis/tasks/08-29-backend-architecture/research/architecture-options.md","reason":"Review dependency direction and guard against generic layer buckets or speculative architecture."}
+{"file":".trellis/tasks/08-29-backend-architecture/research/data-access-options.md","reason":"Review database/sql usage, direct SQL, and transaction boundaries."}
+{"file":".trellis/tasks/08-29-backend-architecture/research/migration-options.md","reason":"Review external migration artifacts and the explicit deployment-only workflow."}
+{"file":".trellis/tasks/08-29-backend-architecture/research/configuration-options.md","reason":"Review environment inventory, validation, development/production behavior, and secret handling."}
+{"file":".trellis/tasks/08-29-backend-architecture/research/password-storage-options.md","reason":"Review Argon2id encoding, bounded parsing, comparison, and resource limits."}
+{"file":".trellis/tasks/08-29-backend-architecture/research/http-error-contract.md","reason":"Review the RFC 9457 registry, validation shape, i18n boundary, and status mappings."}
+{"file":".trellis/tasks/08-29-backend-architecture/research/http-response-shapes.md","reason":"Review exact success JSON and the absence of a redundant universal envelope."}
+{"file":".trellis/tasks/08-29-backend-architecture/research/redis-client-options.md","reason":"Review go-redis scripting/deadline behavior while treating PRD/design ephemeral Redis decisions as authoritative."}

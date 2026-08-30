@@ -6,7 +6,7 @@
 
 ## Overview
 
-This directory contains guidelines for backend development. Fill in each file with your project's specific conventions.
+This directory contains the executable contracts and conventions for Temvia's generated Go API and its deployment template.
 
 ---
 
@@ -14,23 +14,24 @@ This directory contains guidelines for backend development. Fill in each file wi
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Scaffolding Contract](./scaffolding-contract.md) | CLI generation, nested seed files, Git safety, npm packing, and Go health contract | Official baseline integrated |
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
-| [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
+| [Scaffolding Contract](./scaffolding-contract.md) | CLI generation, nested seed files, Git safety, npm packing, and generated application contract | Active |
+| [Setup and Authentication](./authentication-contract.md) | Cross-layer setup/login, HTTP, PostgreSQL, Redis, cookie, and environment contract | Active |
+| [Directory Structure](./directory-structure.md) | Feature-oriented modular-monolith boundaries and layout | Active |
+| [Database Guidelines](./database-guidelines.md) | `database/sql`, direct SQL, transactions, and external migrations | Active |
+| [Error Handling](./error-handling.md) | Domain/application errors and Problem Details/i18n mapping | Active |
+| [Quality Guidelines](./quality-guidelines.md) | Required gates, forbidden patterns, and generated-output verification | Active |
+| [Logging Guidelines](./logging-guidelines.md) | Standard-library operator logs and credential redaction | Active |
 
 ---
 
-## How to Fill These Guidelines
+## How to Maintain These Guidelines
 
-For each guideline file:
+When behavior changes:
 
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
+1. Update the concrete signatures, payloads, variables, or validation matrix.
+2. Update the production required-file inventory and its independent test oracle together.
+3. Add the exact test assertion that proves the new behavior.
+4. Keep planning rationale in task artifacts; keep stable executable contracts here.
 
 The goal is to help AI assistants and new team members understand how YOUR project works.
 

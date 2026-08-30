@@ -70,8 +70,8 @@ test('new and empty targets produce independent apps and quote paths with spaces
     assert.match(output, /go run .\/cmd\/server/);
     assert.match(output, /pnpm install/);
     assert.match(output, /Dependencies were not installed/);
-    assert.deepEqual(await fs.readdir(target), ['.gitignore', 'README.md', 'admin', 'api']);
-    assert.equal(await fs.readFile(join(target, 'api/go.mod'), 'utf8'), `module ${modulePath}\n\ngo 1.27.0\n`);
+    assert.deepEqual(await fs.readdir(target), ['.env.example', '.gitignore', 'Makefile', 'README.md', 'admin', 'api', 'compose.yaml'].sort());
+    assert.match(await fs.readFile(join(target, 'api/go.mod'), 'utf8'), new RegExp(`^module ${modulePath.replaceAll('/', '\\/')}\\n\\ngo 1\\.27\\.0\\n`));
     assert.equal(JSON.parse(await fs.readFile(join(target, 'admin/package.json'), 'utf8')).name, 'admin');
     assert.deepEqual(git.calls.map(([operation]) => operation), ['inspect', 'init']);
     if (!preexisting && process.platform !== 'win32') assert.ok(output.includes("project'\\''s app/api'"));

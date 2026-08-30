@@ -1,51 +1,33 @@
-# Logging Guidelines
-
-> How logging is done in this project.
-
----
+# Backend Logging Guidelines
 
 ## Overview
 
-<!--
-Document your project's logging conventions here.
-
-Questions to answer:
-- What logging library do you use?
-- What are the log levels and when to use each?
-- What should be logged?
-- What should NOT be logged (PII, secrets)?
--->
-
-(To be filled by the team)
-
----
-
-## Log Levels
-
-<!-- When to use each level: debug, info, warn, error -->
-
-(To be filled by the team)
-
----
-
-## Structured Logging
-
-<!-- Log format, required fields -->
-
-(To be filled by the team)
-
----
+The generated API currently uses Go's standard `log` package for operator-facing process logs. Do not introduce a logging framework until request correlation or deployment ingestion creates a concrete need. Logs are diagnostics, never an API contract.
 
 ## What to Log
 
-<!-- Important events to log -->
+- Fatal configuration, PostgreSQL startup/schema, setup initialization, and listener failures with enough context to identify the stage.
+- The listen address after dependencies and schema checks succeed.
+- A clear development warning when `APP_PUBLIC_URL` is HTTP on a non-loopback host.
+- The initial setup link only when durable setup remains incomplete and token persistence succeeded.
 
-(To be filled by the team)
+The setup link is an intentional bootstrap secret delivered through trusted deployment logs. It is the sole credential-value exception; operators must protect log access and allow the 30-minute default expiry to limit exposure.
 
----
+## What Not to Log
 
-## What NOT to Log
+- PostgreSQL or Redis passwords, DSNs containing passwords, `.env` contents, cookies, session IDs, setup request bodies, password values/hashes, or full account records.
+- Raw canonical email in limiter/Redis diagnostics.
+- Expected invalid credentials, invalid setup token, or unauthenticated requests as noisy security events in the current milestone.
+- Dependency details in HTTP responses.
 
-<!-- Sensitive data, PII, secrets -->
+## Levels and Format
 
-(To be filled by the team)
+Standard `log.Printf` is used for informational/warning lines; `log.Fatalf` is used only when the process cannot safely start or continue. The warning text begins with `WARNING:`. Do not call `Fatal*` from reusable packages or request handlers.
+
+If structured logging is later adopted, preserve these redaction rules and add stable event names rather than changing Problem Details or application errors to suit a log sink.
+
+## Common Mistakes and Tests
+
+- Wrong: log a generated connection URL to debug migration startup. Correct: log only the failing stage and keep credentials in `PGPASSWORD`/process environment.
+- Wrong: log request JSON after decoding fails. Correct: log a safe request classification, if needed, without body values.
+- Capture startup/smoke logs in tests and assert secrets, session credentials, passwords, and normal API response bodies are absent. Setup-link extraction tests may inspect the deliberate fragment only in the isolated test log.

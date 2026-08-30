@@ -11,8 +11,25 @@ export const adminTemplateFiles = [
   ...baseline.addedFiles,
 ];
 export const requiredTemplateFiles = [
-  '_gitignore', 'README.md', 'api/go.mod', 'api/cmd/server/main.go',
-  'api/cmd/server/main_test.go', ...adminTemplateFiles.map((path) => `admin/${path}`),
+  '_gitignore', '.env.example', 'Makefile', 'README.md', 'compose.yaml',
+  'api/Dockerfile', 'api/go.mod', 'api/go.sum', 'api/cmd/server/main.go',
+  'api/cmd/server/main_test.go', 'api/migrations/Dockerfile',
+  'api/migrations/000001_auth.up.sql', 'api/migrations/000001_auth.down.sql', 'api/migrations/migrate-entrypoint.sh',
+  'api/internal/config/config.go', 'api/internal/config/config_test.go',
+  'api/internal/auth/domain/credentials.go', 'api/internal/auth/domain/credentials_test.go',
+  'api/internal/auth/domain/user.go', 'api/internal/auth/application/errors.go',
+  'api/internal/auth/application/ports.go', 'api/internal/auth/application/setup.go',
+  'api/internal/auth/application/authentication.go', 'api/internal/auth/application/application_test.go',
+  'api/internal/auth/adapter/password/argon2id.go',
+  'api/internal/auth/adapter/password/argon2id_test.go',
+  'api/internal/auth/adapter/postgres/store.go', 'api/internal/auth/adapter/postgres/accounts.go',
+  'api/internal/auth/adapter/postgres/store_test.go', 'api/internal/auth/adapter/postgres/store_integration_test.go',
+  'api/internal/auth/adapter/redis/scripts.go', 'api/internal/auth/adapter/redis/store.go',
+  'api/internal/auth/adapter/redis/store_test.go', 'api/internal/auth/adapter/redis/store_integration_test.go',
+  'api/internal/auth/adapter/httpapi/problem.go', 'api/internal/auth/adapter/httpapi/json.go',
+  'api/internal/auth/adapter/httpapi/routes.go', 'api/internal/auth/adapter/httpapi/response.go',
+  'api/internal/auth/adapter/httpapi/httpapi_test.go',
+  ...adminTemplateFiles.map((path) => `admin/${path}`),
 ];
 
 export function generatedPath(path) {
