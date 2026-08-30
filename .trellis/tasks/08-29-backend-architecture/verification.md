@@ -1,7 +1,8 @@
 # Backend setup/login verification
 
-Date: 2026-08-30  
-Branch: `backend-auth-setup`  
+Date: 2026-08-30
+
+Branch: `backend-auth-setup`
 State: uncommitted implementation after independent review
 
 ## Scope verified
