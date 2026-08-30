@@ -62,3 +62,26 @@ Vendored the verified create-vite 9.2.0 react-ts template with only documented m
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Implement backend setup and login
+<!-- trellis-session: v=2 fp=bd69093426a95d02 -->
+
+**Date**: 2026-08-30
+**Task**: Implement backend setup and login
+**Branch**: `backend-auth-setup`
+
+### Summary
+
+Implemented and verified the generated Go API initial-admin setup and email/password login with PostgreSQL migrations, Redis sessions and rate limits, Argon2id hashing, RFC 9457 errors, Compose infrastructure, generator packaging, backend specs, and Centaurus integration coverage; React admin remained unchanged.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8b474a0` | feat(template): add backend setup and login |
+| `a5f323d` | docs(trellis): clean verification formatting |
+
+### Status
+
+[OK] **Completed**
