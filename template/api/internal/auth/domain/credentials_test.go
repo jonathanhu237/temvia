@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestName(t *testing.T) {
 	got, err := NewName(" \u0065\u0301  Ada  ")
@@ -27,13 +30,79 @@ func TestEmail(t *testing.T) {
 }
 
 func TestPassword(t *testing.T) {
-	got, err := NewPassword("12345678901234e\u0301")
-	if err != nil || got != "12345678901234é" {
+	got, err := NewPassword("Aa1!e\u0301xxx")
+	if err != nil || got != "Aa1!éxxx" {
 		t.Fatalf("NewPassword() = %q, %v", got, err)
 	}
-	for _, value := range []string{"short", "123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"} {
-		if _, err := NewPassword(value); err == nil {
-			t.Errorf("NewPassword(%q) accepted invalid value", value)
-		}
+	if got, err := NewPassword(" Aa1!xxx"); err != nil || got != " Aa1!xxx" {
+		t.Fatalf("NewPassword() should preserve password whitespace, got %q, %v", got, err)
 	}
+	if got, err := NewPassword("Aa1!😀xxx"); err != nil || got != "Aa1!😀xxx" {
+		t.Fatalf("NewPassword() should allow additional Unicode characters, got %q, %v", got, err)
+	}
+	if got, err := NewPassword("Aa1!" + strings.Repeat("x", 124)); err != nil || len([]rune(got)) != 128 {
+		t.Fatalf("NewPassword() accepted 128-rune password as %q, %v", got, err)
+	}
+
+	for _, test := range []struct {
+		name     string
+		value    string
+		wantCode string
+	}{
+		{name: "below minimum", value: "Aa1!xxx", wantCode: "invalid_password"},
+		{name: "above maximum", value: "Aa1!" + strings.Repeat("x", 125), wantCode: "invalid_password"},
+		{name: "missing uppercase", value: "aa1!xxxx", wantCode: "invalid_password"},
+		{name: "missing lowercase", value: "AA1!XXXX", wantCode: "invalid_password"},
+		{name: "missing digit", value: "Aax!xxxx", wantCode: "invalid_password"},
+		{name: "missing special", value: "Aa1xxxxx", wantCode: "invalid_password"},
+		{name: "non ASCII uppercase does not substitute", value: "aá1!xxxx", wantCode: "invalid_password"},
+		{name: "non ASCII lowercase does not substitute", value: "AÁ1!XXXX", wantCode: "invalid_password"},
+		{name: "non ASCII digit does not substitute", value: "Aa１!xxxx", wantCode: "invalid_password"},
+		{name: "non ASCII special does not substitute", value: "Aa1！xxxx", wantCode: "invalid_password"},
+		{name: "invalid UTF-8", value: string([]byte{'A', 'a', '1', '!', 0xff, 'x', 'x', 'x'}), wantCode: "invalid_password"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := NewPassword(test.value); validationCode(err) != test.wantCode {
+				t.Fatalf("NewPassword(%q) error code = %q, want %q", test.value, validationCode(err), test.wantCode)
+			}
+		})
+	}
+}
+
+func TestLoginPasswordPreservesLegacyValues(t *testing.T) {
+	legacy := "correct horse battery"
+	got, err := NewLoginPassword(legacy)
+	if err != nil || got != Password(legacy) {
+		t.Fatalf("NewLoginPassword(%q) = %q, %v", legacy, got, err)
+	}
+	got, err = NewLoginPassword("e\u0301")
+	if err != nil || got != "é" {
+		t.Fatalf("NewLoginPassword() did not normalize NFC: %q, %v", got, err)
+	}
+	if got, err := NewLoginPassword("password"); err != nil || got != "password" {
+		t.Fatalf("NewLoginPassword() unexpectedly applied composition policy: %q, %v", got, err)
+	}
+
+	for _, test := range []struct {
+		name  string
+		value string
+	}{
+		{name: "empty", value: ""},
+		{name: "above maximum", value: strings.Repeat("x", 129)},
+		{name: "invalid UTF-8", value: string([]byte{'x', 0xff})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := NewLoginPassword(test.value); validationCode(err) != "invalid_login_password" {
+				t.Fatalf("NewLoginPassword(%q) error code = %q, want invalid_login_password", test.value, validationCode(err))
+			}
+		})
+	}
+}
+
+func validationCode(err error) string {
+	validation, ok := err.(*ValidationErrors)
+	if !ok || len(validation.Items) != 1 {
+		return ""
+	}
+	return validation.Items[0].Code
 }

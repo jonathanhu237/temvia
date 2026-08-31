@@ -53,15 +53,15 @@ describe('authentication forms', () => {
     await user.click(name)
     await user.paste('  Admin  ')
     await user.type(email, ' admin@example.com ')
-    await user.type(password, 'correct horse battery')
-    await user.type(confirmation, 'correct horse battery')
+    await user.type(password, 'Admin1!x')
+    await user.type(confirmation, 'Admin1!x')
     await user.click(screen.getByRole('button', { name: 'Create administrator' }))
 
     await waitFor(() => expect(api.setup).toHaveBeenCalledWith({
       token,
       name: 'Admin',
       email: 'admin@example.com',
-      password: 'correct horse battery',
+      password: 'Admin1!x',
     }))
     expect(onSuccess).toHaveBeenCalledOnce()
   })
@@ -77,7 +77,7 @@ describe('authentication forms', () => {
       messages: [
         'Enter a name between 1 and 100 characters without control characters.',
         'Enter a valid email address.',
-        'Use a password between 15 and 128 characters.',
+        'Use a password between 8 and 128 characters with uppercase, lowercase, a number, and a special character.',
         'The passwords do not match.',
       ],
     },
@@ -91,7 +91,7 @@ describe('authentication forms', () => {
       messages: [
         '请输入 1 到 100 个字符的名称，且不能包含控制字符。',
         '请输入有效的邮箱地址。',
-        '请输入 15 到 128 个字符的密码。',
+        '请输入 8 到 128 个字符的密码，并至少包含大写字母、小写字母、数字和特殊符号。',
         '两次输入的密码不一致。',
       ],
     },
@@ -114,8 +114,8 @@ describe('authentication forms', () => {
   })
 
   it.each([
-    ['en', 'Email', 'Password', 'Sign in', 'Enter a valid email address.', 'Use a password between 15 and 128 characters.'],
-    ['zh-CN', '邮箱', '密码', '登录', '请输入有效的邮箱地址。', '请输入 15 到 128 个字符的密码。'],
+    ['en', 'Email', 'Password', 'Sign in', 'Enter a valid email address.', 'Enter a non-empty password of at most 128 characters.'],
+    ['zh-CN', '邮箱', '密码', '登录', '请输入有效的邮箱地址。', '请输入非空且不超过 128 个字符的密码。'],
   ] as const)('localizes login client validation errors in %s', async (locale, email, password, submit, emailMessage, passwordMessage) => {
     const user = userEvent.setup()
     await i18n.changeLanguage(locale)
@@ -127,7 +127,7 @@ describe('authentication forms', () => {
     expect(await screen.findByText(passwordMessage)).toBeVisible()
     expect(screen.getByLabelText(email)).toHaveAttribute('aria-describedby', 'email-error')
     expect(screen.getByLabelText(password, { exact: true })).toHaveAttribute('aria-describedby', 'password-error')
-    expect(view.container.textContent).not.toMatch(/invalid_(?:email|password)/)
+    expect(view.container.textContent).not.toMatch(/invalid_(?:email|password|login_password)/)
   })
 
   it('shows localized invalid credentials without exposing server diagnostics', async () => {
@@ -174,8 +174,8 @@ describe('authentication forms', () => {
 
     await user.type(screen.getByLabelText('Name'), 'Admin')
     await user.type(screen.getByLabelText('Email'), 'admin@example.com')
-    await user.type(screen.getByLabelText('Password', { exact: true }), 'correct horse battery')
-    await user.type(screen.getByLabelText('Confirm password'), 'correct horse battery')
+    await user.type(screen.getByLabelText('Password', { exact: true }), 'Admin1!x')
+    await user.type(screen.getByLabelText('Confirm password'), 'Admin1!x')
     await user.click(screen.getByRole('button', { name: 'Create administrator' }))
 
     await waitFor(() => expect(onSetupComplete).toHaveBeenCalledOnce())
@@ -199,8 +199,8 @@ describe('authentication forms', () => {
     await user.type(screen.getByLabelText('Name'), 'Admin')
     const email = screen.getByLabelText('Email')
     await user.type(email, 'admin@example.com')
-    await user.type(screen.getByLabelText('Password', { exact: true }), 'correct horse battery')
-    await user.type(screen.getByLabelText('Confirm password'), 'correct horse battery')
+    await user.type(screen.getByLabelText('Password', { exact: true }), 'Admin1!x')
+    await user.type(screen.getByLabelText('Confirm password'), 'Admin1!x')
     await user.click(screen.getByRole('button', { name: 'Create administrator' }))
 
     expect(await screen.findByText('Enter a valid email address.')).toBeVisible()

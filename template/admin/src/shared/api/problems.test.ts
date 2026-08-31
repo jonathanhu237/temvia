@@ -32,12 +32,21 @@ describe('localized problem mapping', () => {
   })
 
   it.each([
-    ['en', 'Use a password between 15 and 128 characters.', 'invalid_password'],
-    ['zh-CN', '请输入 15 到 128 个字符的密码。', 'invalid_password'],
+    ['en', 'Use a password between 8 and 128 characters with uppercase, lowercase, a number, and a special character.', 'invalid_password'],
+    ['zh-CN', '请输入 8 到 128 个字符的密码，并至少包含大写字母、小写字母、数字和特殊符号。', 'invalid_password'],
   ] as const)('localizes client field codes in %s', async (locale, message, code) => {
     await i18n.changeLanguage(locale)
     expect(fieldMessageKey(code)).toBe('problems:fields.invalidPassword')
     expect(translateClientFieldError({ type: 'custom', message: code }, i18n.t.bind(i18n))).toBe(message)
+  })
+
+  it.each([
+    ['en', 'Enter a non-empty password of at most 128 characters.'],
+    ['zh-CN', '请输入非空且不超过 128 个字符的密码。'],
+  ] as const)('localizes the login password code in %s', async (locale, message) => {
+    await i18n.changeLanguage(locale)
+    expect(fieldMessageKey('invalid_login_password')).toBe('problems:fields.invalidLoginPassword')
+    expect(translateClientFieldError({ type: 'custom', message: 'invalid_login_password' }, i18n.t.bind(i18n))).toBe(message)
   })
 
   it('uses the localized generic field message for unknown or missing client codes', async () => {

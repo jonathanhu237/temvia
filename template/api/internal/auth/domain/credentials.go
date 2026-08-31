@@ -112,13 +112,53 @@ func isEmailAtom(r rune) bool {
 type Password string
 
 func NewPassword(value string) (Password, error) {
+	return newPassword(value, "invalid_password", true)
+}
+
+// NewLoginPassword validates only the input boundary needed before password
+// verification. It deliberately does not apply the creation policy so that a
+// password accepted by an earlier policy remains usable after an upgrade.
+func NewLoginPassword(value string) (Password, error) {
+	return newPassword(value, "invalid_login_password", false)
+}
+
+func newPassword(value, code string, requireComposition bool) (Password, error) {
 	if !utf8.ValidString(value) {
-		return "", &ValidationErrors{Items: []FieldError{{Field: "password", Code: "invalid_password"}}}
+		return "", passwordValidationError(code)
 	}
 	value = norm.NFC.String(value)
 	runes := utf8.RuneCountInString(value)
-	if runes < 15 || runes > 128 {
-		return "", &ValidationErrors{Items: []FieldError{{Field: "password", Code: "invalid_password"}}}
+	if runes == 0 || runes > 128 || (requireComposition && runes < 8) {
+		return "", passwordValidationError(code)
+	}
+	if requireComposition {
+		var upper, lower, digit, special bool
+		for _, r := range value {
+			switch {
+			case r >= 'A' && r <= 'Z':
+				upper = true
+			case r >= 'a' && r <= 'z':
+				lower = true
+			case r >= '0' && r <= '9':
+				digit = true
+			case isPasswordSpecial(r):
+				special = true
+			}
+		}
+		if !upper || !lower || !digit || !special {
+			return "", passwordValidationError(code)
+		}
 	}
 	return Password(value), nil
+}
+
+func passwordValidationError(code string) error {
+	return &ValidationErrors{Items: []FieldError{{Field: "password", Code: code}}}
+}
+
+func isPasswordSpecial(r rune) bool {
+	return (r >= 0x21 && r <= 0x2f) ||
+		(r >= 0x3a && r <= 0x40) ||
+		(r >= 0x5b && r <= 0x60) ||
+		(r >= 0x7b && r <= 0x7e)
 }

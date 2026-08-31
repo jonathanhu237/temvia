@@ -55,7 +55,13 @@ Adapters may implement multiple narrow application ports. Do not introduce gener
 - Login JSON: `email`, `password`, both strings and no extra or duplicate keys.
 - Name: trim Unicode surrounding whitespace, normalize NFC, reject control characters, allow 1-100 runes.
 - Email: trimmed ASCII mailbox syntax, at most 254 bytes, one `@`, DNS-style host labels; canonical identity is the lowercase full value.
-- Password: normalize NFC, do not trim, require 15-128 runes.
+- Password creation: normalize NFC, do not trim, require 8-128 Unicode code
+  points plus at least one ASCII uppercase letter (`A-Z`), lowercase letter
+  (`a-z`), digit (`0-9`), and printable ASCII punctuation character
+  (`U+0021-U+002F`, `U+003A-U+0040`, `U+005B-U+0060`, or `U+007B-U+007E`).
+  Spaces and other Unicode code points are allowed but do not satisfy a class.
+  Login normalizes the same way and only requires a non-empty value of at most
+  128 code points so credentials created under an earlier policy remain usable.
 - Setup/session credentials: 32 random bytes encoded as canonical unpadded Base64URL (43 characters).
 
 Setup links are logged as `${APP_PUBLIC_URL}/setup#token=<credential>`. Only the SHA-256 digest and PostgreSQL-time expiry are stored. API restart replaces an uncompleted token; completed setup never issues another token.
@@ -102,6 +108,11 @@ Errors use `application/problem+json` and RFC 9457 fields. `type`, `title`, and 
 | Login buckets deny | `429 /problems/rate-limited`, no reset disclosure |
 | PostgreSQL, Redis, random source, or Argon capacity uncertainty | `503 /problems/service-unavailable` |
 | Unknown API path / wrong known-path method | `404` / `405` Problem Details; `Allow` on `405` |
+
+Password creation failures use `errors[].code = "invalid_password"`; login input
+boundary failures use `errors[].code = "invalid_login_password"`. These codes
+are stable identifiers for frontend localization and are never rendered as
+user-facing text.
 
 No `401` response advertises Basic or Bearer authentication. A valid-looking logout credential is cleared only after Redis acknowledges deletion; uncertain deletion returns `503` and preserves the cookie for retry.
 

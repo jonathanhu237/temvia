@@ -43,11 +43,38 @@ function validateEmail(value: string, ctx: z.RefinementCtx): void {
   }
 }
 
+function isPasswordSpecial(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x21 && codePoint <= 0x2f) ||
+    (codePoint >= 0x3a && codePoint <= 0x40) ||
+    (codePoint >= 0x5b && codePoint <= 0x60) ||
+    (codePoint >= 0x7b && codePoint <= 0x7e)
+  )
+}
+
 function validatePassword(value: string, ctx: z.RefinementCtx): void {
   const normalized = normalizePassword(value)
-  const length = Array.from(normalized).length
-  if (length < 15 || length > 128) {
+  const characters = Array.from(normalized)
+  let hasUppercase = false
+  let hasLowercase = false
+  let hasDigit = false
+  let hasSpecial = false
+  for (const character of characters) {
+    const codePoint = character.codePointAt(0) ?? 0
+    hasUppercase ||= codePoint >= 0x41 && codePoint <= 0x5a
+    hasLowercase ||= codePoint >= 0x61 && codePoint <= 0x7a
+    hasDigit ||= codePoint >= 0x30 && codePoint <= 0x39
+    hasSpecial ||= isPasswordSpecial(codePoint)
+  }
+  if (characters.length < 8 || characters.length > 128 || !hasUppercase || !hasLowercase || !hasDigit || !hasSpecial) {
     addIssue(ctx, ['password'], 'invalid_password')
+  }
+}
+
+function validateLoginPassword(value: string, ctx: z.RefinementCtx): void {
+  const length = Array.from(normalizePassword(value)).length
+  if (length === 0 || length > 128) {
+    addIssue(ctx, ['password'], 'invalid_login_password')
   }
 }
 
@@ -73,7 +100,7 @@ export const loginFormSchema = z
   .object({ email: z.string(), password: z.string() })
   .superRefine((value, ctx) => {
     validateEmail(value.email, ctx)
-    validatePassword(value.password, ctx)
+    validateLoginPassword(value.password, ctx)
   })
 
 export type LoginFormValues = z.infer<typeof loginFormSchema>

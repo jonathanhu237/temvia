@@ -43,6 +43,11 @@ Problem responses use `Content-Type: application/problem+json`:
 
 Unknown email and wrong password must produce byte-equivalent public fields. A dependency that prevents an authoritative answer returns `503`; it must not be downgraded to `401`, treated as an empty record, or expose the dependency name.
 
+New-password policy failures use the field code `invalid_password`. Login input
+boundary failures use `invalid_login_password`; login must not reuse the
+current creation policy because credentials accepted under an earlier policy
+still need to reach password-hash verification after an upgrade.
+
 ## Validation and Precedence
 
 - Unsafe-route Origin authorization runs before body or credential work.

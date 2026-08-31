@@ -33,7 +33,7 @@ func (a *Authentication) Login(ctx context.Context, input LoginInput) (domain.Us
 	if err != nil {
 		return domain.User{}, "", err
 	}
-	password, err := domain.NewPassword(input.Password)
+	password, err := domain.NewLoginPassword(input.Password)
 	if err != nil {
 		return domain.User{}, "", err
 	}

@@ -103,11 +103,11 @@ func TestSetupTokenReplacementAndCompletion(t *testing.T) {
 	if string(store.digest) != string(digest[:]) {
 		t.Fatal("store did not receive token digest")
 	}
-	user, err := setup.Complete(context.Background(), SetupInput{Token: token, Name: " Ada ", Email: "ADA@EXAMPLE.COM", Password: "a sufficiently long password"})
+	user, err := setup.Complete(context.Background(), SetupInput{Token: token, Name: " Ada ", Email: "ADA@EXAMPLE.COM", Password: "Admin1!x"})
 	if err != nil || user.Name != "Ada" || user.Email != "ADA@EXAMPLE.COM" || !store.complete || hasher.hashCalls != 1 {
 		t.Fatalf("Complete() = %#v, %v; store=%#v hasher=%d", user, err, store, hasher.hashCalls)
 	}
-	if _, err := setup.Complete(context.Background(), SetupInput{Token: token, Name: "Ada", Email: "ada@example.com", Password: "a sufficiently long password"}); !errors.Is(err, ErrSetupComplete) {
+	if _, err := setup.Complete(context.Background(), SetupInput{Token: token, Name: "Ada", Email: "ada@example.com", Password: "Admin1!x"}); !errors.Is(err, ErrSetupComplete) {
 		t.Fatalf("replay error = %v, want setup complete", err)
 	}
 }

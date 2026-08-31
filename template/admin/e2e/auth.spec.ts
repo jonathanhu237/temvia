@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright'
 
 const setupURL = process.env.E2E_SETUP_URL
 const email = process.env.E2E_ADMIN_EMAIL ?? 'admin@example.com'
-const password = process.env.E2E_ADMIN_PASSWORD ?? 'correct horse battery staple'
+const password = process.env.E2E_ADMIN_PASSWORD ?? 'Admin1!x'
 const name = process.env.E2E_ADMIN_NAME ?? 'Admin User'
 
 function collectBrowserErrors(page: Page): string[] {

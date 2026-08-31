@@ -6,7 +6,16 @@ import {
   setupFormSchema,
 } from './schemas'
 
-const password = 'correct horse battery'
+const password = 'Admin1!x'
+
+function setupValues(value: string) {
+  return {
+    name: 'Admin',
+    email: 'admin@example.com',
+    password: value,
+    passwordConfirmation: value,
+  }
+}
 
 describe('auth form schemas', () => {
   it('normalizes names and email identifiers but keeps password whitespace', () => {
@@ -41,17 +50,32 @@ describe('auth form schemas', () => {
     expect(codes).toEqual(expect.arrayContaining(['invalid_name', 'invalid_email', 'invalid_password', 'password_mismatch']))
   })
 
-  it('accepts unicode passwords based on code points', () => {
-    expect(loginFormSchema.safeParse({ email: 'admin@example.com', password: '😀'.repeat(15) }).success).toBe(true)
-    expect(loginFormSchema.safeParse({ email: 'admin@example.com', password: '😀'.repeat(14) }).success).toBe(false)
+  it('enforces the creation length and ASCII character classes', () => {
+    expect(setupFormSchema.safeParse(setupValues('Aa1!xxx')).success).toBe(false)
+    expect(setupFormSchema.safeParse(setupValues('Aa1!xxxx')).success).toBe(true)
+    expect(setupFormSchema.safeParse(setupValues(`Aa1!${'x'.repeat(124)}`)).success).toBe(true)
+    expect(setupFormSchema.safeParse(setupValues(`Aa1!${'x'.repeat(125)}`)).success).toBe(false)
+
+    for (const value of ['aa1!xxxx', 'AA1!XXXX', 'Aax!xxxx', 'Aa1xxxxx', 'aá1!xxxx', 'AÁ1!XXXX', 'Aa１!xxxx', 'Aa1！xxxx']) {
+      expect(setupFormSchema.safeParse(setupValues(value)).success, value).toBe(false)
+    }
+    expect(setupFormSchema.safeParse(setupValues('Aa1!😀xxx')).success).toBe(true)
+  })
+
+  it('keeps login validation compatible with legacy passwords', () => {
+    expect(loginFormSchema.safeParse({ email: 'admin@example.com', password: 'correct horse battery' }).success).toBe(true)
+    expect(loginFormSchema.safeParse({ email: 'admin@example.com', password: 'password' }).success).toBe(true)
+    expect(loginFormSchema.safeParse({ email: 'admin@example.com', password: '' }).success).toBe(false)
+    expect(loginFormSchema.safeParse({ email: 'admin@example.com', password: '😀'.repeat(128) }).success).toBe(true)
+    expect(loginFormSchema.safeParse({ email: 'admin@example.com', password: '😀'.repeat(129) }).success).toBe(false)
   })
 
   it('compares passwords after the same NFC normalization sent to the API', () => {
     const result = setupFormSchema.safeParse({
       name: 'Admin',
       email: 'admin@example.com',
-      password: 'a\u0301'.repeat(15),
-      passwordConfirmation: 'á'.repeat(15),
+      password: 'Aa1!e\u0301xxx',
+      passwordConfirmation: 'Aa1!éxxx',
     })
     expect(result.success).toBe(true)
   })

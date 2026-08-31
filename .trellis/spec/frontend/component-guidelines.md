@@ -88,14 +88,22 @@ unknown or missing codes use the localized `problems:fields.invalidValue`
 fallback. Messages stored by `react-hook-form` with `type: 'server'` have
 already been localized by the submit handler and must not be translated again.
 
+The setup password schema mirrors the API creation policy after NFC
+normalization: 8-128 Unicode code points, with ASCII `A-Z`, `a-z`, `0-9`, and
+printable ASCII punctuation (`U+0021-U+002F`, `U+003A-U+0040`,
+`U+005B-U+0060`, or `U+007B-U+007E`). The login schema only checks a non-empty
+value of at most 128 code points so existing credentials remain usable. Keep
+these schemas separate when the server changes password creation policy.
+
 ## Common mistakes
 
 - Do not place raw `fetch` calls or query caches inside presentational
   components.
 - Do not display RFC 9457 `detail` or transport error strings directly; map
   stable problem codes through i18next.
-- Do not render Zod validation codes such as `invalid_password` from
-  `FieldError`; translate them through the shared field-code mapping.
+- Do not render Zod validation codes such as `invalid_password` or
+  `invalid_login_password` from `FieldError`; translate them through the shared
+  field-code mapping.
 - Do not introduce another icon library, theme provider, or notification
   system. Sonner is mounted once and is not used for recoverable auth errors.
 - Do not leave `aria-describedby` pointing at a removed helper or conditional
