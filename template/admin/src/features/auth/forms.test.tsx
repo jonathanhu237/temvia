@@ -36,12 +36,17 @@ describe('authentication forms', () => {
     const user = userEvent.setup()
     const api = mockApi({ setup: vi.fn().mockResolvedValue(undefined) })
     const onSuccess = vi.fn()
-    renderWithQueryClient(<SetupForm api={api} token={token} onSuccess={onSuccess} />)
+    const view = renderWithQueryClient(<SetupForm api={api} token={token} onSuccess={onSuccess} />)
 
     const name = screen.getByLabelText('Name')
     const email = screen.getByLabelText('Email')
     const password = screen.getByLabelText('Password', { exact: true })
     const confirmation = screen.getByLabelText('Confirm password')
+    expect(view.container.querySelectorAll('[data-slot="field-description"]')).toHaveLength(0)
+    expect(name).not.toHaveAttribute('aria-describedby')
+    expect(email).not.toHaveAttribute('aria-describedby')
+    expect(password).not.toHaveAttribute('aria-describedby')
+    expect(confirmation).not.toHaveAttribute('aria-describedby')
     expect(name).toHaveAttribute('autocomplete', 'name')
     expect(email).toHaveAttribute('autocomplete', 'email')
     expect(password).toHaveAttribute('autocomplete', 'new-password')
@@ -135,6 +140,7 @@ describe('authentication forms', () => {
     await user.click(screen.getByRole('button', { name: 'Create administrator' }))
 
     expect(await screen.findByText('Enter a valid email address.')).toBeVisible()
+    expect(email).toHaveAttribute('aria-describedby', 'email-error')
     await waitFor(() => expect(email).toHaveFocus())
   })
 

@@ -36,7 +36,7 @@ function SetupRoute() {
 
   if (error) {
     return (
-      <AuthPage eyebrow={t('setupEyebrow')} title={t('setupDependencyTitle')} description={t('setupDependencyDescription')}>
+      <AuthPage title={t('setupDependencyTitle')} description={t('setupDependencyDescription')}>
         <div className="flex flex-col gap-5">
           <AuthAlert title={t('setupDependencyTitle')} description={translateProblem(error, t)} />
           <Button type="button" className="w-full" onClick={() => void router.invalidate()}>{commonT('retry')}</Button>
@@ -48,14 +48,14 @@ function SetupRoute() {
 
   if (!authority) {
     return (
-      <AuthPage eyebrow={t('setupEyebrow')} title={t('setupNoAuthorityTitle')} description={t('setupNoAuthorityDescription')}>
+      <AuthPage title={t('setupNoAuthorityTitle')}>
         <RecoveryState title={t('setupNoAuthorityTitle')} description={t('setupNoAuthorityDescription')} instruction={t('setupNoAuthorityInstruction')} />
       </AuthPage>
     )
   }
 
   return (
-    <AuthPage eyebrow={t('setupEyebrow')} title={t('setupTitle')} description={t('setupDescription')}>
+    <AuthPage title={t('setupTitle')}>
       <SetupForm api={api} token={authority} onSuccess={() => void router.navigate({ to: '/login', replace: true })} onInvalidAuthority={() => setAuthority(undefined)} onSetupComplete={() => void router.navigate({ to: '/login', replace: true })} />
     </AuthPage>
   )

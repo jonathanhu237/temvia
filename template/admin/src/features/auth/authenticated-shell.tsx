@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { House, Layers3, LogOut } from 'lucide-react'
+import { House, LogOut } from 'lucide-react'
 import { useState } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
@@ -13,7 +13,6 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
-  SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
@@ -50,14 +49,6 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
   return (
     <SidebarProvider defaultOpen>
       <Sidebar variant="inset" collapsible="icon" role="navigation" aria-label={t('menu')}>
-        <SidebarHeader>
-          <div className="flex h-10 items-center gap-3 px-2 text-sm font-semibold tracking-tight">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-              <Layers3 aria-hidden="true" />
-            </span>
-            <span className="truncate group-data-[collapsible=icon]:hidden">{t('productName')}</span>
-          </div>
-        </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupLabel>{t('menu')}</SidebarGroupLabel>

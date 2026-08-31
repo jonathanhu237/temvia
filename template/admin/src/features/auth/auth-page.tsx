@@ -1,23 +1,22 @@
-import { Globe2, Layers3 } from 'lucide-react'
+import { Globe2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Separator } from '@/components/ui/separator'
 import { changeLocale } from '@/shared/i18n'
 import type { Locale } from '@/shared/i18n/resources'
 
-export function LanguageMenu({ compact = false }: { compact?: boolean }) {
+export function LanguageMenu() {
   const { t, i18n } = useTranslation('common')
   const locale: Locale = i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size={compact ? 'icon' : 'sm'} aria-label={t('language')}>
+        <Button variant="ghost" size="sm" className="max-sm:size-11 max-sm:shrink-0 max-sm:px-0" aria-label={t('language')}>
           <Globe2 aria-hidden="true" data-icon="inline-start" />
-          {!compact && <span>{locale === 'zh-CN' ? t('chinese') : t('english')}</span>}
+          <span className="hidden sm:inline">{locale === 'zh-CN' ? t('chinese') : t('english')}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -32,40 +31,28 @@ export function LanguageMenu({ compact = false }: { compact?: boolean }) {
 }
 
 export function AuthPage({
-  eyebrow,
   title,
   description,
   children,
 }: {
-  eyebrow: string
   title: string
-  description: string
+  description?: string
   children: React.ReactNode
 }) {
-  const { t } = useTranslation('common')
   return (
-    <main className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-background px-4 py-10 sm:px-6">
-      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-primary" />
-      <div className="relative flex w-full max-w-md flex-col gap-8">
-        <header className="flex items-center justify-between">
-          <div className="flex items-center gap-3 text-sm font-semibold tracking-tight text-foreground">
-            <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Layers3 aria-hidden="true" />
-            </span>
-            <span>{t('productName')}</span>
+    <main className="flex min-h-dvh items-center justify-center overflow-hidden bg-background px-4 py-10 sm:px-6">
+      <Card className="w-full max-w-md">
+        <CardHeader className="flex-row items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <CardTitle>
+              <h1 className="text-2xl font-semibold leading-tight tracking-tight sm:text-3xl">{title}</h1>
+            </CardTitle>
+            {description && <CardDescription className="mt-3 max-w-[38ch] text-base leading-relaxed">{description}</CardDescription>}
           </div>
           <LanguageMenu />
-        </header>
-        <Card className="border-border/80 shadow-lg shadow-foreground/5">
-          <CardHeader className="gap-3 pb-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{eyebrow}</p>
-            <h1 className="text-2xl font-semibold leading-none tracking-tight sm:text-3xl">{title}</h1>
-            <CardDescription className="max-w-[38ch] text-base leading-relaxed">{description}</CardDescription>
-          </CardHeader>
-          <Separator />
-          <CardContent className="pt-6">{children}</CardContent>
-        </Card>
-      </div>
+        </CardHeader>
+        <CardContent>{children}</CardContent>
+      </Card>
     </main>
   )
 }

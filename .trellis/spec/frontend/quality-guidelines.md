@@ -77,6 +77,15 @@ link. Cover setup, login, reload session restoration, locale selection,
 responsive Sidebar navigation, logout and an axe smoke. Save screenshots and
 traces only when a test fails or a targeted review needs them.
 
+Set `PLAYWRIGHT_BASE_URL` to the exact forwarded Caddy origin whenever a flow
+uses relative navigation such as `page.goto('/')`; an absolute setup URL does
+not configure later tests, and a default port can silently open another local
+service. For mobile Sidebar evidence, create the browser context at the mobile
+viewport before navigation, wait for `[data-sidebar="sidebar"][data-mobile="true"]`
+to become visible, and let the Sheet transition settle before capturing. A
+desktop context resized immediately before clicking can race `useIsMobile` and
+produce a misleading screenshot of the desktop state.
+
 ## Wrong vs correct
 
 Wrong: update an old fixture from the current template and treat that as an

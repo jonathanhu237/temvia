@@ -13,7 +13,7 @@ export const Route = createRootRouteWithContext<AppRouterContext>()({
 function NotFoundPage() {
   const { t } = useTranslation(['common', 'problems'])
   return (
-    <AuthPage eyebrow={t('productName')} title={t('problems:notFound')} description={t('problems:notFound')}>
+    <AuthPage title={t('problems:notFound')}>
       <Button asChild className="w-full"><a href="/login">{t('backToLogin')}</a></Button>
     </AuthPage>
   )
@@ -22,7 +22,7 @@ function NotFoundPage() {
 function RootErrorPage({ reset }: { error: unknown; reset: () => void }) {
   const { t } = useTranslation(['common', 'problems'])
   return (
-    <AuthPage eyebrow={t('productName')} title={t('problems:generic')} description={t('problems:generic')}>
+    <AuthPage title={t('problems:generic')}>
       <Button type="button" className="w-full" onClick={reset}>{t('retry')}</Button>
     </AuthPage>
   )

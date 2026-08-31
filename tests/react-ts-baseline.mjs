@@ -16,7 +16,7 @@ export const adminTemplateFiles = [
   'src/components/ui/label.tsx', 'src/components/ui/separator.tsx', 'src/components/ui/sheet.tsx',
   'src/components/ui/sidebar.tsx', 'src/components/ui/skeleton.tsx', 'src/components/ui/sonner.tsx',
   'src/components/ui/tooltip.tsx',
-  'src/features/auth/auth-page.tsx', 'src/features/auth/authenticated-shell.tsx',
+  'src/features/auth/auth-page.test.tsx', 'src/features/auth/auth-page.tsx', 'src/features/auth/authenticated-shell.tsx',
   'src/features/auth/form-fields.tsx', 'src/features/auth/forms.test.tsx',
   'src/features/auth/login-form.tsx', 'src/features/auth/queries.test.ts', 'src/features/auth/queries.ts', 'src/features/auth/schemas.test.ts',
   'src/features/auth/schemas.ts', 'src/features/auth/session-error.tsx', 'src/features/auth/setup-form.tsx',

@@ -9,7 +9,6 @@ export function SessionError({ error, reset }: { error: unknown; reset: () => vo
   const { t: commonT } = useTranslation('common')
   return (
     <AuthPage
-      eyebrow={t('loginEyebrow')}
       title={t('sessionUnavailableTitle')}
       description={t('sessionUnavailableDescription')}
     >

@@ -1,0 +1,6 @@
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Audit shadcn composition, heading semantics, responsive language control, labels, ARIA errors, and Sidebar behavior."}
+{"file":".trellis/spec/frontend/directory-structure.md","reason":"Check that feature-specific polish stays out of open-code primitives and generated route output is handled correctly."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Run the required admin, generator, packaging, Centaurus, Playwright, and visual quality gates."}
+{"file":".trellis/spec/backend/authentication-contract.md","reason":"Verify that copy/layout changes do not weaken setup authority, session, Origin, or authentication behavior."}
+{"file":".trellis/spec/backend/scaffolding-contract.md","reason":"Verify source, packed artifact, generated output, and runtime delivery remain synchronized."}
+{"file":".trellis/tasks/08-31-admin-interface-polish/research/interface-audit.md","reason":"Compare implementation and screenshots against every accepted interface finding and explicit deferral."}

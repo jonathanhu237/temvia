@@ -54,8 +54,8 @@ export function LoginForm({ api, onSuccess }: { api: ApiClient; onSuccess: () =>
     <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-6">
       {formError && <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{formError}</AlertDescription></Alert>}
       <FieldGroup className="gap-5">
-        <TextField id="email" label={t('emailLabel')} description={t('emailDescription')} registration={form.register('email')} error={form.formState.errors.email} type="email" inputMode="email" autoComplete="username" />
-        <PasswordField id="password" label={t('passwordLabel')} description={t('passwordDescription')} registration={form.register('password')} error={form.formState.errors.password} autoComplete="current-password" />
+        <TextField id="email" label={t('emailLabel')} registration={form.register('email')} error={form.formState.errors.email} type="email" inputMode="email" autoComplete="username" />
+        <PasswordField id="password" label={t('passwordLabel')} registration={form.register('password')} error={form.formState.errors.password} autoComplete="current-password" />
       </FieldGroup>
       <Button type="submit" className="w-full" disabled={mutation.isPending}>
         {mutation.isPending ? t('loggingIn') : t('login')}

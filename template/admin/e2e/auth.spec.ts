@@ -4,7 +4,7 @@ import AxeBuilder from '@axe-core/playwright'
 const setupURL = process.env.E2E_SETUP_URL
 const email = process.env.E2E_ADMIN_EMAIL ?? 'admin@example.com'
 const password = process.env.E2E_ADMIN_PASSWORD ?? 'correct horse battery staple'
-const name = process.env.E2E_ADMIN_NAME ?? 'Temvia Admin'
+const name = process.env.E2E_ADMIN_NAME ?? 'Admin User'
 
 function collectBrowserErrors(page: Page): string[] {
   const errors: string[] = []
@@ -40,6 +40,9 @@ test.describe('administrator authentication', () => {
     const storage = await page.evaluate(() => `${JSON.stringify(localStorage)}${JSON.stringify(sessionStorage)}${document.cookie}`)
     expect(storage).not.toContain(setupToken)
     await expect(page.getByRole('heading', { name: /create your administrator account/i })).toBeVisible()
+    await expect(page.getByRole('heading')).toHaveCount(1)
+    await expect(page.locator('[data-slot="field-description"]')).toHaveCount(0)
+    await expect(page.locator('main > div').getByRole('button', { name: 'Language' })).toBeVisible()
     await expectNoA11yViolations(page)
     await page.getByLabel('Name').fill(name)
     await page.getByLabel('Email').fill(email)
@@ -47,6 +50,9 @@ test.describe('administrator authentication', () => {
     await page.getByLabel('Confirm password').fill(password)
     await page.getByRole('button', { name: /create administrator/i }).click()
     await expect(page).toHaveURL(/\/login$/)
+    await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading')).toHaveCount(1)
+    await expect(page.locator('[data-slot="field-description"]')).toHaveCount(0)
     await expectNoA11yViolations(page)
 
     await page.getByLabel('Email').fill(email)
@@ -55,6 +61,7 @@ test.describe('administrator authentication', () => {
     await expect(page).toHaveURL(/\/$/)
     await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
     await expect(page.getByText(new RegExp(`Welcome back, ${name}`))).toBeVisible()
+    await expect(page.locator('[data-sidebar="header"]')).toHaveCount(0)
 
     const sidebarBox = await page.locator('[data-sidebar="sidebar"]:visible').first().boundingBox()
     const headingBox = await page.getByRole('heading', { name: 'Home' }).boundingBox()

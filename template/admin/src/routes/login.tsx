@@ -35,7 +35,7 @@ function LoginRoute() {
 
   if (error) {
     return (
-      <AuthPage eyebrow={t('loginEyebrow')} title={t('setupDependencyTitle')} description={t('setupDependencyDescription')}>
+      <AuthPage title={t('setupDependencyTitle')} description={t('setupDependencyDescription')}>
         <div className="flex flex-col gap-5">
           <AuthAlert title={t('setupDependencyTitle')} description={translateProblem(error, t)} />
           <Button type="button" className="w-full" onClick={() => void router.invalidate()}>{commonT('retry')}</Button>
@@ -46,13 +46,13 @@ function LoginRoute() {
   if (!status) return null
   if (status.status === 'required') {
     return (
-      <AuthPage eyebrow={t('setupEyebrow')} title={t('loginRequiredTitle')} description={t('loginRequiredDescription')}>
+      <AuthPage title={t('loginRequiredTitle')}>
         <RecoveryState title={t('loginRequiredTitle')} description={t('loginRequiredDescription')} instruction={t('setupNoAuthorityInstruction')} />
       </AuthPage>
     )
   }
   return (
-    <AuthPage eyebrow={t('loginEyebrow')} title={t('loginTitle')} description={t('loginDescription')}>
+    <AuthPage title={t('loginTitle')}>
       <LoginForm api={api} onSuccess={() => void navigate({ to: '/', replace: true })} />
     </AuthPage>
   )

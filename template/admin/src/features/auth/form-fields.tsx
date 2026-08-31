@@ -3,13 +3,12 @@ import { useState } from 'react'
 import type { UseFormRegisterReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
-import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
+import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 
 export function TextField({
   id,
   label,
-  description,
   registration,
   error,
   type = 'text',
@@ -18,14 +17,12 @@ export function TextField({
 }: {
   id: string
   label: string
-  description: string
   registration: UseFormRegisterReturn
   error?: { message?: string }
   type?: 'text' | 'email'
   autoComplete?: string
   inputMode?: 'email' | 'text'
 }) {
-  const descriptionId = `${id}-description`
   const errorId = `${id}-error`
   return (
     <Field data-invalid={Boolean(error)}>
@@ -36,10 +33,9 @@ export function TextField({
         autoComplete={autoComplete}
         inputMode={inputMode}
         aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${descriptionId} ${errorId}` : descriptionId}
+        aria-describedby={error?.message ? errorId : undefined}
         {...registration}
       />
-      <FieldDescription id={descriptionId}>{description}</FieldDescription>
       <FieldError id={errorId} errors={error ? [error] : undefined} />
     </Field>
   )
@@ -48,21 +44,18 @@ export function TextField({
 export function PasswordField({
   id,
   label,
-  description,
   registration,
   error,
   autoComplete,
 }: {
   id: string
   label: string
-  description: string
   registration: UseFormRegisterReturn
   error?: { message?: string }
   autoComplete: 'new-password' | 'current-password'
 }) {
   const { t } = useTranslation('auth')
   const [visible, setVisible] = useState(false)
-  const descriptionId = `${id}-description`
   const errorId = `${id}-error`
   return (
     <Field data-invalid={Boolean(error)}>
@@ -73,7 +66,7 @@ export function PasswordField({
           type={visible ? 'text' : 'password'}
           autoComplete={autoComplete}
           aria-invalid={Boolean(error)}
-          aria-describedby={error ? `${descriptionId} ${errorId}` : descriptionId}
+          aria-describedby={error?.message ? errorId : undefined}
           className="pr-12"
           {...registration}
         />
@@ -88,7 +81,6 @@ export function PasswordField({
           {visible ? <EyeOff aria-hidden="true" data-icon="inline-start" /> : <Eye aria-hidden="true" data-icon="inline-start" />}
         </Button>
       </div>
-      <FieldDescription id={descriptionId}>{description}</FieldDescription>
       <FieldError id={errorId} errors={error ? [error] : undefined} />
     </Field>
   )

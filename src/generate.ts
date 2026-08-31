@@ -133,7 +133,7 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
     'admin/src/components/ui/label.tsx', 'admin/src/components/ui/separator.tsx', 'admin/src/components/ui/sheet.tsx',
     'admin/src/components/ui/sidebar.tsx', 'admin/src/components/ui/skeleton.tsx', 'admin/src/components/ui/sonner.tsx',
     'admin/src/components/ui/tooltip.tsx',
-    'admin/src/features/auth/auth-page.tsx', 'admin/src/features/auth/authenticated-shell.tsx',
+    'admin/src/features/auth/auth-page.test.tsx', 'admin/src/features/auth/auth-page.tsx', 'admin/src/features/auth/authenticated-shell.tsx',
     'admin/src/features/auth/form-fields.tsx', 'admin/src/features/auth/forms.test.tsx',
     'admin/src/features/auth/login-form.tsx', 'admin/src/features/auth/queries.test.ts', 'admin/src/features/auth/queries.ts', 'admin/src/features/auth/schemas.test.ts',
     'admin/src/features/auth/schemas.ts', 'admin/src/features/auth/session-error.tsx', 'admin/src/features/auth/setup-form.tsx',
