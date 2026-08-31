@@ -129,3 +129,25 @@ Removed temporary runtime branding, simplified setup and login Cards, preserved 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: Localize client validation errors
+<!-- trellis-session: v=2 fp=dad88a1fe8211a62 -->
+
+**Date**: 2026-09-01
+**Task**: Localize client validation errors
+**Branch**: `main`
+
+### Summary
+
+Mapped client-side authentication validation codes through the shared i18n field-message table, preserved server-error handling and ARIA wiring, added bilingual regression tests, and verified the generated admin in Chromium on Centaurus.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `33b057e` | fix(admin): localize client validation errors |
+
+### Status
+
+[OK] **Completed**
