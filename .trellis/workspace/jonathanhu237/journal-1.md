@@ -107,3 +107,25 @@ Implemented and verified the generated React setup/login/session UI, i18n, shadc
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: Polish generated admin interfaces
+<!-- trellis-session: v=2 fp=c3a4bf4b574fc530 -->
+
+**Date**: 2026-09-01
+**Task**: Polish generated admin interfaces
+**Branch**: `main`
+
+### Summary
+
+Removed temporary runtime branding, simplified setup and login Cards, preserved conditional accessible validation, moved the responsive language menu into the Card header, removed the Sidebar brand header, updated generator/spec contracts, and verified the packed generated app plus real Centaurus authentication and visual flows.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `356ad91` | feat(template): simplify admin authentication UI |
+
+### Status
+
+[OK] **Completed**

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
-- **Last Active**: 2026-08-31
+- **Total Sessions**: 5
+- **Last Active**: 2026-09-01
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~109 | Active |
+| `journal-1.md` | ~131 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-09-01 | Polish generated admin interfaces | `356ad91` | `main` |
 | 4 | 2026-08-31 | Admin authentication frontend | `b243273` | `main` |
 | 3 | 2026-08-30 | Implement backend setup and login | `8b474a0`, `a5f323d` | `backend-auth-setup` |
 | 2 | 2026-08-29 | Official React TS template baseline | `e361531` | `main` |
