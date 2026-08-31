@@ -173,3 +173,25 @@ Separated new-password policy from login verification, enforced the accepted 8-1
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Restore shadcn neutral theme
+<!-- trellis-session: v=2 fp=7b8e8086654ec02a -->
+
+**Date**: 2026-09-01
+**Task**: Restore shadcn neutral theme
+**Branch**: `main`
+
+### Summary
+
+Replaced the unintended warm admin palette with official shadcn Vega + Neutral light tokens, added a generated-template contract, documented the theme boundary, and verified setup/login/authenticated screens on Centaurus.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c6be6e0` | style(admin): restore shadcn neutral theme |
+
+### Status
+
+[OK] **Completed**
