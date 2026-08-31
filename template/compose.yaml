@@ -96,5 +96,15 @@ services:
       redis:
         condition: service_started
 
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    ports:
+      - 127.0.0.1:${ADMIN_PORT:-5173}:8080
+    depends_on:
+      api:
+        condition: service_started
+
 volumes:
   temvia-postgres:

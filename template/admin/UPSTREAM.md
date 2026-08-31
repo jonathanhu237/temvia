@@ -1,8 +1,9 @@
-# Upstream React TypeScript baseline
+# Upstream React TypeScript seed
 
-This admin starter is derived from the official `create-vite@9.2.0`
-`react-ts` template, verified on 2026-08-28. It is a bundled snapshot, not an
-automatic upstream-update service. Project generation does not fetch or execute
+This admin began from the official `create-vite@9.2.0` `react-ts` template,
+verified on 2026-08-28. Temvia intentionally replaces the demo with an
+independent authentication application; the seed is provenance, not an
+unchanged product invariant. Project generation does not fetch or execute
 create-vite, install dependencies, or start services.
 
 ## Source identity
@@ -13,10 +14,12 @@ create-vite, install dependencies, or start services.
 - SHA-512 integrity: `sha512-Fra5Zj1DLdjGn7qG0R33bRq60da4sKjWZjrJIRtpKWJJtQEAhl7vQ3/snPjheqY7Ryzqi3pJsozIG1JRWbG3ig==`
 - Archive SHA-256: `c370c3eafa839d8b16b51fbf28bf521b5beffab816ee236de5fa7e0c513a2eb4`
 
-All 18 upstream template files are retained. Sixteen keep their exact upstream
-bytes; only `package.json` and `vite.config.ts` are customized. The official
-demo, counter, HTML, styles, five image/icon assets, TypeScript settings, Oxlint
-configuration, and technical `README.md` are unchanged.
+The original demo, counter, images, icons, CSS and technical README were
+removed or replaced because they do not belong to the Temvia admin experience.
+The current application owns its package manifest, Vite/Tailwind/router
+configuration, source tree, tests, Caddy container and documentation. The
+original archive identity and template-specific license notice remain recorded
+below so the origin of the seed is auditable.
 
 ## Filename materialization
 
@@ -24,23 +27,26 @@ configuration, and technical `README.md` are unchanged.
 | --- | --- | --- |
 | `_gitignore` | `_gitignore` | `.gitignore` |
 | `_oxlintrc.json` | `.oxlintrc.json` | `.oxlintrc.json` |
-| All other upstream files | Same relative path | Same relative path |
+| All other upstream files | Replaced by the application | Same relative path |
 
-The Oxlint config is already materialized in the template so template-local
-lint works. The ignore seed stays inert until generation so npm retains it.
-There are no omitted upstream files. `UPSTREAM.md` is the sole additional
-admin file; the former handwritten `src/style.css` is no longer used.
+The Oxlint config is materialized in the template so template-local lint works.
+The ignore seed stays inert until generation so npm retains it. `_gitignore` is
+the only seed filename materialized by the generator; all other application
+files are independently maintained. There is no admin lockfile in the bundled
+template because consumers resolve and commit their own lockfile.
 
-## Intentional customizations
+## Intentional application changes
 
+The current application intentionally differs across the whole product surface.
 In `package.json`:
 
 - Change the package name to `admin`; retain `private: true`, version
   `0.0.0`, and module type.
 - Add Node `>=24` and `packageManager: pnpm@11.24.0`.
-- Keep the upstream `dev`, `build`, `lint`, and `preview` scripts.
-  Add `check: tsc -b` to preserve Temvia's existing command.
-- Replace upstream dependency ranges with these exact compatible versions:
+- Keep the Vite development/build commands and add checks, unit tests and
+  Playwright scripts.
+- Pin React, Vite, Tailwind, TanStack, shadcn/Radix, form, validation,
+  localization, transport-test and browser-test dependencies.
 
 | Dependency | Upstream range | Temvia pin |
 | --- | --- | --- |
@@ -53,16 +59,14 @@ In `package.json`:
 | typescript | ~6.0.2 | 6.0.3 |
 | vite | ^8.2.2 | 8.2.2 |
 
-All pins except the newly added Oxlint preserve the previous Temvia starter.
-No optional type-aware lint peers or React Compiler are enabled. There is no
+No React Compiler or optional type-aware lint peers are enabled. There is no
 seed lockfile; the first install resolves transitive dependencies and creates
-the consuming application's own lockfile.
+the consuming application's own `pnpm-lock.yaml`.
 
-In `vite.config.ts`, add only `server.host: '127.0.0.1'` and
-`server.port: 5173`. Keep the official React plugin. Do not set `strictPort`:
-when 5173 is occupied, Vite tries the next available port. Open the URL Vite
-prints. Bind production-preview checks explicitly to loopback, for example
-`pnpm preview --host 127.0.0.1`, and use its printed URL too.
+`vite.config.ts` keeps the loopback preferred port and adds the TanStack Router
+file plugin, Tailwind Vite plugin, `@` source alias and `/api` proxy. Do not set
+`strictPort`: when 5173 is occupied, Vite tries the next available port. Open
+the URL Vite prints. The production image uses Caddy instead of `vite preview`.
 
 ## Template-specific upstream notice
 

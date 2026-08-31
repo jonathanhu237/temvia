@@ -1,51 +1,40 @@
 # Hook Guidelines
 
-> How hooks are used in this project.
+## Data fetching
 
----
+Use TanStack Query through feature-owned option factories. The auth feature
+owns `setupStatusOptions` and `currentUserOptions`; route loaders and UI
+mutations reuse those factories so retry and cache behavior stays consistent.
+Set `retry: false` for setup, current-user and auth mutations. A `401` problem
+confirms an unauthenticated state; transport, protocol and `503` failures must
+remain visible as retryable dependency errors.
 
-## Overview
+```tsx
+const currentUser = useQuery(currentUserOptions(api))
+```
 
-<!--
-Document your project's hook conventions here.
+The shared Fetch adapter owns request headers, credentials, response parsing,
+Zod validation and `ApiProblemError` conversion. Hooks and components receive
+typed values or typed errors; they do not inspect `Response` objects.
 
-Questions to answer:
-- What custom hooks do you have?
-- How do you handle data fetching?
-- What are the naming conventions?
-- How do you share stateful logic?
--->
+## Local hooks
 
-(To be filled by the team)
+Custom hooks are named `use*` and stay small. `use-mobile.tsx` is a UI media
+query hook used by the shadcn Sidebar. Prefer derived values during render;
+use an effect only for synchronizing with an external browser or server
+system. Do not use a hook to hide a second auth cache or a global mutable
+store.
 
----
+## Effects and navigation
 
-## Custom Hook Patterns
+Keep redirects in route loaders or a narrowly scoped effect tied to a known
+query result. Include all values in effect dependency arrays. Setup authority
+capture runs before React in `main.tsx`; it must not be moved into a component
+effect where a credential could render first.
 
-<!-- How to create and structure custom hooks -->
+## Common mistakes
 
-(To be filled by the team)
-
----
-
-## Data Fetching
-
-<!-- How data fetching is handled (React Query, SWR, etc.) -->
-
-(To be filled by the team)
-
----
-
-## Naming Conventions
-
-<!-- Hook naming rules (use*, etc.) -->
-
-(To be filled by the team)
-
----
-
-## Common Mistakes
-
-<!-- Hook-related mistakes your team has made -->
-
-(To be filled by the team)
+- Do not enable blind retries for login, logout or session resolution.
+- Do not put server state in React Context or localStorage.
+- Do not call `changeLocale` without updating the document language through
+  the shared i18n module.

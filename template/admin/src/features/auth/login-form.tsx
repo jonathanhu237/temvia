@@ -1,0 +1,65 @@
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { useTranslation } from 'react-i18next'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { FieldGroup } from '@/components/ui/field'
+import { ApiProblemError, type ApiClient } from '@/shared/api/client'
+import { fieldProblemFor, translateFieldProblem, translateProblem } from '@/shared/api/problems'
+import { currentUserQueryKey } from './queries'
+import { loginFormSchema, normalizeLoginValues, type LoginFormValues } from './schemas'
+import { PasswordField, TextField } from './form-fields'
+
+export function LoginForm({ api, onSuccess }: { api: ApiClient; onSuccess: () => void }) {
+  const { t } = useTranslation(['auth', 'problems'])
+  const queryClient = useQueryClient()
+  const [formError, setFormError] = useState<string>()
+  const form = useForm<LoginFormValues>({
+    resolver: zodResolver(loginFormSchema),
+    mode: 'onBlur',
+    shouldFocusError: true,
+    defaultValues: { email: '', password: '' },
+  })
+  const mutation = useMutation({
+    mutationFn: (values: LoginFormValues) => api.login(normalizeLoginValues(values)),
+    onSuccess: (user) => {
+      queryClient.setQueryData(currentUserQueryKey, user)
+      onSuccess()
+    },
+  })
+
+  const submit = form.handleSubmit(async (values) => {
+    setFormError(undefined)
+    try {
+      await mutation.mutateAsync(values)
+    } catch (error) {
+      let focused = false
+      if (error instanceof ApiProblemError) {
+        for (const fieldName of ['email', 'password'] as const) {
+          const field = fieldProblemFor(error, `/${fieldName}`)
+          const message = translateFieldProblem(field, t)
+          if (message) {
+            form.setError(fieldName, { type: 'server', message }, { shouldFocus: !focused })
+            focused = true
+          }
+        }
+      }
+      setFormError(translateProblem(error, t))
+    }
+  })
+
+  return (
+    <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-6">
+      {formError && <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{formError}</AlertDescription></Alert>}
+      <FieldGroup className="gap-5">
+        <TextField id="email" label={t('emailLabel')} description={t('emailDescription')} registration={form.register('email')} error={form.formState.errors.email} type="email" inputMode="email" autoComplete="username" />
+        <PasswordField id="password" label={t('passwordLabel')} description={t('passwordDescription')} registration={form.register('password')} error={form.formState.errors.password} autoComplete="current-password" />
+      </FieldGroup>
+      <Button type="submit" className="w-full" disabled={mutation.isPending}>
+        {mutation.isPending ? t('loggingIn') : t('login')}
+      </Button>
+    </form>
+  )
+}

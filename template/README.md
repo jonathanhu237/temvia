@@ -1,6 +1,8 @@
 # Your project
 
-An independent Go API and React admin. This source is yours to change or remove.
+An independent Go API and React admin. The admin uses Vite during development
+and a pinned Caddy runtime in the production Compose stack. This source is
+yours to change or remove.
 
 ## First run
 
@@ -17,27 +19,20 @@ make up
 ```
 
 The API prints a temporary setup link in its logs while initialization is
-incomplete. The link contains a one-time fragment token. The frontend is not
-included in this backend milestone, so the setup and login endpoints can be
-exercised with `curl` (the exact Origin header is required):
+incomplete. Open that link in the browser-visible admin origin. The token is
+kept in the URL fragment only until the admin removes it before rendering; it
+is sent only in the setup request body. Setup creates no session, so sign in
+after the administrator form succeeds.
 
 ```sh
 docker compose logs api
-curl -i http://127.0.0.1:8080/api/setup/status
-curl -i -H 'Origin: http://localhost:5173' \
-  -H 'Content-Type: application/json' \
-  --data '{"token":"TOKEN_FROM_THE_SETUP_LINK","name":"Ada Lovelace","email":"ada@example.com","password":"a long first password"}' \
-  http://127.0.0.1:8080/api/setup
-curl -i -c cookies.txt -H 'Origin: http://localhost:5173' \
-  -H 'Content-Type: application/json' \
-  --data '{"email":"ada@example.com","password":"a long first password"}' \
-  http://127.0.0.1:8080/api/auth/login
-curl -i -b cookies.txt http://127.0.0.1:8080/api/auth/me
-curl -i -b cookies.txt -c cookies.txt -H 'Origin: http://localhost:5173' \
-  -X POST http://127.0.0.1:8080/api/auth/logout
 ```
 
-Setup creates no session. Login is required before `/api/auth/me` succeeds.
+Open `http://localhost:5173` after the first setup, or use the URL printed by
+`pnpm dev` when developing the admin separately. The browser always calls the
+relative `/api` path through Vite or Caddy, so `APP_PUBLIC_URL` must match the
+origin in the address bar exactly.
+
 Redis is intentionally ephemeral: restarting it logs out all users, while the
 PostgreSQL volume keeps the account and completed setup state. `make down`
 does not remove that PostgreSQL volume.
@@ -84,16 +79,18 @@ In another terminal, from the project directory:
 
 ```sh
 cd admin
-pnpm install
+pnpm install --ignore-scripts
 pnpm dev
 ```
 
 Open the URL printed by Vite (by default http://127.0.0.1:5173). If that port is
-in use, Vite automatically tries the next available port.
-The official Vite React TypeScript demo includes a working counter and does not
-require the API. See [admin/UPSTREAM.md](admin/UPSTREAM.md) for its fixed upstream
-version, intentional Temvia customizations, and template-specific license notice.
-The first install creates `admin/pnpm-lock.yaml`; keep it in version control.
+in use, Vite automatically tries the next available port. The first install
+creates `admin/pnpm-lock.yaml`; keep it in version control.
+
+The API's `APP_PUBLIC_URL` must equal that exact printed origin, including the
+selected port. If Vite falls back to another port, update `APP_PUBLIC_URL` in
+the root `.env`, restart the API, and use the new setup link from its log. The
+Vite proxy reads `API_PORT` from the same root `.env`.
 
 ```sh
 pnpm lint
@@ -102,10 +99,14 @@ pnpm build
 pnpm preview --host 127.0.0.1
 ```
 
-`pnpm lint` runs Oxlint; `pnpm check` runs TypeScript. After a successful build,
-the preview command serves the production output locally. Open its printed URL.
-The unchanged [admin/README.md](admin/README.md) describes the upstream tooling.
+`pnpm lint` runs Oxlint; `pnpm check` runs TypeScript; `pnpm test` runs unit and
+component tests. The preview command only inspects a local build. Production
+serving is provided by the Caddy image in `make up`, with `/api` proxied to the
+private API and navigation paths falling back to `index.html`.
 
 Each application owns its dependencies and configuration. There is no root
 workspace or runtime dependency on Temvia, and no dependencies are installed by
-the generator.
+the generator. The generic Compose file does not assume public DNS or TLS;
+configure direct Caddy TLS or an external ingress and keep `APP_PUBLIC_URL`
+equal to the public HTTPS origin. Nginx can replace Caddy if it preserves the
+same exact API proxy and SPA fallback behavior.

@@ -1,39 +1,29 @@
 # Frontend Development Guidelines
 
-> Best practices for frontend development in this project.
-
----
-
-## Overview
-
-This directory contains guidelines for frontend development. Fill in each file with your project's specific conventions.
-
----
+The React admin is an independent Vite application in `template/admin`. It
+uses TypeScript, Tailwind CSS 4, shadcn/ui open-code components, TanStack
+Router, TanStack Query, React Hook Form, Zod, i18next and the Fetch API.
 
 ## Guidelines Index
 
-| Guide | Description | Status |
-|-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
-| [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
-| [State Management](./state-management.md) | Local state, global state, server state | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Official React TS provenance, independent admin tooling, artifact and runtime verification | Official baseline |
-| [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
+| Guide | Description |
+|-------|-------------|
+| [Directory Structure](./directory-structure.md) | Feature and shared module layout |
+| [Component Guidelines](./component-guidelines.md) | shadcn composition, props and accessibility |
+| [Hook Guidelines](./hook-guidelines.md) | Query, mutation and custom hook rules |
+| [State Management](./state-management.md) | Local, URL and server state ownership |
+| [Quality Guidelines](./quality-guidelines.md) | Checks, packaging and runtime verification |
+| [Type Safety](./type-safety.md) | TypeScript and runtime validation boundaries |
 
----
+## Baseline rules
 
-## How to Fill These Guidelines
-
-For each guideline file:
-
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
-
-The goal is to help AI assistants and new team members understand how YOUR project works.
-
----
-
-**Language**: All documentation should be written in **English**.
+- Keep the admin independent from the root package and the Go module. Do not
+  create a root frontend workspace.
+- Browser requests use relative `/api` paths through the shared Fetch adapter;
+  UI components never call `fetch` directly.
+- Authentication state is memory-only. Setup authority is captured from the
+  `/setup#token=...` fragment before React renders, then cleared after use.
+- All user visible copy comes from the typed English and Simplified Chinese
+  i18next resources.
+- Run the admin checks from `template/admin`: `pnpm lint`, `pnpm check`,
+  `pnpm test` and `pnpm build`.

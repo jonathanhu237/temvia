@@ -1,51 +1,40 @@
 # Type Safety
 
-> Type safety patterns in this project.
+TypeScript uses bundler resolution, strict unused checks and no emitted
+browser code. Keep types close to the boundary that owns them and validate
+untrusted data at runtime.
 
----
+## Runtime contracts
 
-## Overview
+Zod schemas in `shared/api/contracts.ts` validate every successful API body
+and RFC 9457 Problem Details response. `ApiClient` returns inferred `User` and
+`SetupStatus` values and converts malformed responses into
+`ApiProtocolError`. Do not cast an API response before parsing it.
 
-<!--
-Document your project's type safety conventions here.
+Browser form schemas in `features/auth/schemas.ts` normalize Unicode name and
+email input, count password code points, and emit stable error codes. The
+server remains authoritative for final validation. `passwordConfirmation` is
+browser-only and is excluded by `normalizeSetupValues`.
 
-Questions to answer:
-- What type system do you use?
-- How are types organized?
-- What validation library do you use?
-- How do you handle type inference?
--->
+```ts
+export type User = z.infer<typeof userSchema>
+```
 
-(To be filled by the team)
+## Type organization
 
----
+Export domain types from the shared contract module when multiple layers use
+them. Keep component prop types at the component boundary. Use
+`UseFormRegisterReturn` and field error shapes for form field wrappers rather
+than `any`.
 
-## Type Organization
+Router context is `AppRouterContext` and contains one `ApiClient` plus one
+`QueryClient`; it does not expose transport internals or duplicate cached
+users.
 
-<!-- Where types are defined, shared types vs local types -->
+## Forbidden patterns
 
-(To be filled by the team)
-
----
-
-## Validation
-
-<!-- Runtime validation patterns (Zod, Yup, io-ts, etc.) -->
-
-(To be filled by the team)
-
----
-
-## Common Patterns
-
-<!-- Type utilities, generics, type guards -->
-
-(To be filled by the team)
-
----
-
-## Forbidden Patterns
-
-<!-- any, type assertions, etc. -->
-
-(To be filled by the team)
+- Do not use `any`, non-null assertions for untrusted API data, or unchecked
+  `JSON.parse` values.
+- Do not use server `title`/`detail` strings as translation keys. Map stable
+  problem `type` and `code` values to bundled resource keys.
+- Do not create a second hand-maintained API response shape in a component.

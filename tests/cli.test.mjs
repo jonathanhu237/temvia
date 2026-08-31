@@ -96,7 +96,7 @@ test('nonempty, file and symlink targets and bad module leave existing bytes unc
   assert.deepEqual(git.calls, []);
 });
 
-test('bundled admin preserves the official baseline and only documented customizations', async (t) => {
+test('bundled admin preserves the application inventory and documented contracts', async (t) => {
   const cwd = await temporaryDirectory(t);
   await generate({ directory: 'output', modulePath, cwd }, fakeGit());
   const admin = join(cwd, 'output/admin');
@@ -107,7 +107,7 @@ test('bundled admin preserves the official baseline and only documented customiz
   }
 });
 
-test('generation filters template development artifacts without losing official assets or dotfiles', async (t) => {
+test('generation filters template development artifacts without losing application files or dotfiles', async (t) => {
   const cwd = await temporaryDirectory(t);
   const template = join(cwd, 'template');
   await fs.cp(join(root, 'template'), template, { recursive: true });
@@ -122,11 +122,11 @@ test('generation filters template development artifacts without losing official 
   assert.deepEqual(await fs.readFile(join(output, '.gitignore')), await fs.readFile(join(template, '_gitignore')));
 });
 
-test('template preflight rejects missing API, frontend asset, lint and provenance files before writes', async (t) => {
+test('template preflight rejects missing API, frontend, deployment, lint and provenance files before writes', async (t) => {
   const cwd = await temporaryDirectory(t);
   for (const [index, missing] of [
-    'api/go.mod', 'admin/src/assets/hero.png', 'admin/public/icons.svg',
-    'admin/.oxlintrc.json', 'admin/_gitignore', 'admin/UPSTREAM.md',
+    'api/go.mod', 'admin/src/shared/api/client.ts', 'admin/Caddyfile',
+    'admin/components.json', 'admin/.oxlintrc.json', 'admin/_gitignore', 'admin/UPSTREAM.md',
   ].entries()) {
     const template = join(cwd, `template-${index}`);
     await fs.cp(join(root, 'template'), template, { recursive: true });

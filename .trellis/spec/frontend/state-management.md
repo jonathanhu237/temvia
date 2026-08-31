@@ -1,51 +1,34 @@
 # State Management
 
-> How state is managed in this project.
+## State categories
 
----
+- **Server state:** TanStack Query owns setup status and the current user. The
+  API is the authority after a reload.
+- **Form state:** React Hook Form owns setup and login values, validation and
+  field focus. Confirmation password is never sent to the API.
+- **Ephemeral UI state:** component `useState` owns password visibility, open
+  menus and an inline logout error.
+- **URL state:** TanStack Router owns route location. The setup token is a
+  short-lived module value captured from a URL fragment and is removed from
+  history before the first render.
+- **Preference state:** i18next stores only an explicitly selected locale in
+  `temvia.locale` localStorage. It never stores auth data.
 
-## Overview
+## Query ownership
 
-<!--
-Document your project's state management conventions here.
+Create one `QueryClient` in `app/query-client.ts` and provide it once at the
+root. Auth query keys and option factories live in `features/auth/queries.ts`:
 
-Questions to answer:
-- What state management solution do you use?
-- How is local vs global state decided?
-- How do you handle server state?
-- What are the patterns for derived state?
--->
+```ts
+export const currentUserQueryKey = ['auth', 'current-user'] as const
+```
 
-(To be filled by the team)
+Successful login seeds that cache. Successful logout removes it only after an
+acknowledged `204`; a failed logout keeps the current user and offers retry.
+Setup invalidates status and navigates to login without creating a session.
 
----
+## Forbidden patterns
 
-## State Categories
-
-<!-- Local state, global state, server state, URL state -->
-
-(To be filled by the team)
-
----
-
-## When to Use Global State
-
-<!-- Criteria for promoting state to global -->
-
-(To be filled by the team)
-
----
-
-## Server State
-
-<!-- How server data is cached and synchronized -->
-
-(To be filled by the team)
-
----
-
-## Common Mistakes
-
-<!-- State management mistakes your team has made -->
-
-(To be filled by the team)
+Do not add Zustand, Redux, a second query client, auth data in Context, or
+credentials in localStorage/cookies managed by browser code. Do not infer
+logout from a network failure or convert a dependency outage into a `401`.

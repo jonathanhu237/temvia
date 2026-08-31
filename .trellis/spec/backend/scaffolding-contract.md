@@ -2,7 +2,7 @@
 
 ## 1. Scope / Trigger
 
-Temvia crosses three boundaries: bundled template files, the npm tarball, and the generated application. Changes to src/, template/, or package metadata must preserve these contracts. The admin snapshot derives from a verified official create-vite release; see the frontend quality spec and template/admin/UPSTREAM.md for provenance and permitted customizations.
+Temvia crosses three boundaries: bundled template files, the npm tarball, and the generated application. Changes to src/, template/, or package metadata must preserve these contracts. The admin application began from a verified official create-vite release; see the frontend quality spec and template/admin/UPSTREAM.md for provenance and the intentional replacement.
 
 ## 2. Signatures
 
@@ -23,7 +23,7 @@ The npm bin is dist/cli.js. Build TypeScript with NodeNext; resolve template ass
 - Git discovery uses the target's nearest existing ancestor, supports linked worktrees, and clears location-overriding Git environment variables. It never stages, commits, adds remotes, or pushes.
 - Module paths use the documented conservative subset: lowercase domain-like host and ordinary ASCII path segments. Windows reserved-name checks apply to the host as well as later segments. gopkg.in's special syntax is unsupported.
 - Generation does not install dependencies, create `.env`, migrate a database, issue setup authority, or start services. Missing Git fails preflight; a later git init failure retains output with a nonzero exit and recovery instructions.
-- The installed package determines the complete template. Generation never fetches upstream or executes create-vite. Keep the explicit required-file preflight synchronized with all 58 current template files, including all 19 final admin files and every required Go/config/migration/container file.
+- The installed package determines the complete template. Generation never fetches upstream or executes create-vite. Keep the explicit required-file preflight synchronized with all 105 current template files, including all 66 final admin files and every required Go/config/migration/container file.
 - Transform only the exact _gitignore basename at any directory depth into .gitignore. The bundled admin/.oxlintrc.json is already materialized and is copied unchanged. Preserve file bytes, including binary assets, across packing and generation.
 - The exact root `.env.example` is allowed through copy/pack filters; `.env` and every other `.env.*` file remain excluded. Generated secrets are never invented.
 - The seed module `example.com/temvia/api` is replaced in `api/go.mod` and every generated `.go` file. No seed import may remain for a non-seed module path.
@@ -42,7 +42,7 @@ The npm bin is dist/cli.js. Build TypeScript with NodeNext; resolve template ass
 | Git reports malformed/missing .git pointer, unsafe repo, bare metadata, or process failure | Fail preflight; do not reinterpret as absence |
 | Unexpected git init failure after writes | Exit 1; retain generated source and explain retry |
 | Template missing required assets | Fail before writes; explain package/template problem |
-| Missing admin image or .oxlintrc.json | Fail preflight with no created target, just like any other required template file |
+| Missing admin source, deployment or .oxlintrc.json | Fail preflight with no created target, just like any other required template file |
 | Packed admin/_gitignore or unrelated _keep file | Materialize only _gitignore; preserve _keep's name and bytes |
 
 Set LC_ALL=C for Git diagnostics. The normal absence message starts with “fatal: not a git repository (or any …”. A colon-form diagnostic such as “fatal: not a git repository: (null)” can mean a broken .git pointer and must not enable nested initialization.
@@ -57,10 +57,10 @@ Set LC_ALL=C for Git diagnostics. The normal absence message starts with “fata
 
 ## 6. Tests Required
 
-- tests/cli.test.mjs: input validation, help/version without Git, module paths, target safety, official baseline hashes/customizations, template completeness/filtering, nested filename rules, conservative cleanup, and Git error classification.
+- tests/cli.test.mjs: input validation, help/version without Git, module paths, target safety, final admin inventory/configuration, template completeness/filtering, nested filename rules, conservative cleanup, and Git error classification.
 - tests/git.test.mjs: real standalone/existing/linked repositories, default branch, preserved index/config/history, inherited Git context, missing Git, and malformed/broken metadata.
 - tests/package.test.mjs: actual npm pack, offline install without dev dependencies, npm bin mapping from an unrelated directory, complete generated files, binary-byte equality, nested dotfiles, and deliberately contaminated template exclusions including dist-ssr.
-- tests/fixtures/react-ts-baseline.json supplies an independent upstream asset/hash oracle, not the production required-file list. Keep tests offline and independent of .trellis task directories.
+- tests/react-ts-baseline.mjs supplies an independent final admin inventory and deployment/dependency assertions. Keep tests offline and independent of .trellis task directories; upstream identity remains provenance in template/admin/UPSTREAM.md.
 - template/api/cmd/server/main_test.go: health JSON/content type/status, unsupported method, and missing route.
 - Run root pnpm check and pnpm build before Node tests. The root generator has no separate JavaScript linter; generated admin has its own pnpm lint (Oxlint), check, build, and preview scripts.
 - All real Git tests run locally. After one-way rsync, run CLI unit tests with fake Git and generated Go/admin checks on Centaurus; forward service ports for HTTP/browser verification.

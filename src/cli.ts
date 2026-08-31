@@ -84,12 +84,14 @@ API (Go 1.27+):
 
 Admin, in another terminal (Node 24+, pnpm 11.24.0):
   cd ${quotePath(join(result.directory, 'admin'))}
-  pnpm install
+  pnpm install --ignore-scripts
   pnpm dev
 
 API health: http://127.0.0.1:8080/health
-Admin: open the URL printed by Vite (default http://127.0.0.1:5173).
+Admin development: open the URL printed by Vite (default http://127.0.0.1:5173).
+Admin container: http://localhost:5173 (Caddy, after make up).
 If port 5173 is in use, Vite tries the next available port.
+APP_PUBLIC_URL must match Vite's exact printed origin; restart the API after changing it.
 Dependencies were not installed. See the generated README.md for more commands.
 `;
 }

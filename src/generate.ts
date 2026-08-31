@@ -7,7 +7,8 @@ import type { Git, RepositoryState } from './git.js';
 
 const templateDirectory = fileURLToPath(new URL('../template/', import.meta.url));
 const ignoredNames = new Set([
-  'node_modules', 'dist', 'dist-ssr', 'bin', 'postgres-data', 'redis-data', '.git', '.gitignore', '.npmignore', '.DS_Store',
+  'node_modules', 'dist', 'dist-ssr', 'bin', 'coverage', 'playwright-report', 'test-results', '.playwright',
+  'postgres-data', 'redis-data', '.git', '.gitignore', '.npmignore', '.DS_Store',
   'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock',
   '.mise.local.toml',
 ]);
@@ -120,13 +121,30 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
     'api/internal/auth/adapter/httpapi/problem.go', 'api/internal/auth/adapter/httpapi/json.go',
     'api/internal/auth/adapter/httpapi/routes.go', 'api/internal/auth/adapter/httpapi/response.go',
     'api/internal/auth/adapter/httpapi/httpapi_test.go',
-    'admin/.gitignore', 'admin/.oxlintrc.json',
-    'admin/README.md', 'admin/UPSTREAM.md', 'admin/package.json', 'admin/index.html',
-    'admin/vite.config.ts', 'admin/tsconfig.json', 'admin/tsconfig.app.json',
-    'admin/tsconfig.node.json', 'admin/src/main.tsx', 'admin/src/App.tsx',
-    'admin/src/App.css', 'admin/src/index.css', 'admin/src/assets/hero.png',
-    'admin/src/assets/react.svg', 'admin/src/assets/vite.svg',
-    'admin/public/favicon.svg', 'admin/public/icons.svg',
+    'admin/.dockerignore', 'admin/.gitignore', 'admin/.oxlintrc.json',
+    'admin/Caddyfile', 'admin/Dockerfile', 'admin/README.md', 'admin/UPSTREAM.md',
+    'admin/components.json', 'admin/package.json', 'admin/index.html',
+    'admin/playwright.config.ts', 'admin/vite.config.ts', 'admin/vitest.config.ts',
+    'admin/tsconfig.json', 'admin/tsconfig.app.json', 'admin/tsconfig.node.json',
+    'admin/src/main.tsx', 'admin/src/index.css', 'admin/src/routeTree.gen.ts',
+    'admin/src/app/context.ts', 'admin/src/app/providers.tsx', 'admin/src/app/query-client.ts', 'admin/src/app/router.tsx',
+    'admin/src/components/ui/alert.tsx', 'admin/src/components/ui/button.tsx', 'admin/src/components/ui/card.tsx',
+    'admin/src/components/ui/dropdown-menu.tsx', 'admin/src/components/ui/field.tsx', 'admin/src/components/ui/input.tsx',
+    'admin/src/components/ui/label.tsx', 'admin/src/components/ui/separator.tsx', 'admin/src/components/ui/sheet.tsx',
+    'admin/src/components/ui/sidebar.tsx', 'admin/src/components/ui/skeleton.tsx', 'admin/src/components/ui/sonner.tsx',
+    'admin/src/components/ui/tooltip.tsx',
+    'admin/src/features/auth/auth-page.tsx', 'admin/src/features/auth/authenticated-shell.tsx',
+    'admin/src/features/auth/form-fields.tsx', 'admin/src/features/auth/forms.test.tsx',
+    'admin/src/features/auth/login-form.tsx', 'admin/src/features/auth/queries.test.ts', 'admin/src/features/auth/queries.ts', 'admin/src/features/auth/schemas.test.ts',
+    'admin/src/features/auth/schemas.ts', 'admin/src/features/auth/session-error.tsx', 'admin/src/features/auth/setup-form.tsx',
+    'admin/src/hooks/use-mobile.tsx', 'admin/src/lib/utils.ts',
+    'admin/src/routes/__root.tsx', 'admin/src/routes/_authenticated.tsx', 'admin/src/routes/_authenticated/index.tsx',
+    'admin/src/routes/login.tsx', 'admin/src/routes/setup.tsx',
+    'admin/src/shared/api/client.test.ts', 'admin/src/shared/api/client.ts', 'admin/src/shared/api/contracts.ts',
+    'admin/src/shared/api/problems.test.ts', 'admin/src/shared/api/problems.ts',
+    'admin/src/shared/bootstrap/setup-authority.test.ts', 'admin/src/shared/bootstrap/setup-authority.ts',
+    'admin/src/shared/i18n/index.test.ts', 'admin/src/shared/i18n/index.ts', 'admin/src/shared/i18n/resources.ts',
+    'admin/src/test/msw.ts', 'admin/src/test/setup.ts', 'admin/e2e/auth.spec.ts',
   ]) {
     if (!files.some((file) => file.name === required)) {
       throw new Error(`Template is incomplete: missing ${required}. Reinstall create-temvia.`);

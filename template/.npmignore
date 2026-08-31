@@ -11,6 +11,10 @@ bin/
 *.log
 *.tmp
 *.tgz
+coverage/
+playwright-report/
+test-results/
+.playwright/
 .DS_Store
 .mise.local.toml
 postgres-data/

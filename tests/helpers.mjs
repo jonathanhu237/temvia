@@ -14,6 +14,7 @@ export const templateContaminants = [
   'admin/node_modules/local/package.json', 'admin/dist/index.html',
   'admin/dist-ssr/index.js', 'api/bin/server', '.git/config', '.gitignore',
   'admin/.gitignore', 'admin/.npmignore', 'admin/.env', 'admin/.env.local',
+  'admin/playwright-report/index.html', 'admin/test-results/run.txt', 'admin/coverage/coverage-final.json',
   'admin/pnpm-lock.yaml', 'admin/pnpm-workspace.yaml', 'admin/package-lock.json',
   'admin/npm-shrinkwrap.json', 'admin/yarn.lock', 'admin/tsconfig.tsbuildinfo',
   'admin/debug.log', 'admin/temp.tmp', 'admin/archive.tgz', 'admin/.DS_Store',
