@@ -61,6 +61,39 @@ export const upstreamProvenance = {
   templatePrefix: 'package/template-react-ts/',
 };
 
+// Keep the approved theme contract independent from the template source. This
+// catches a regression where the generated admin still carries the old warm
+// palette even if the application inventory remains unchanged.
+export const officialNeutralTheme = {
+  background: 'oklch(1 0 0)',
+  foreground: 'oklch(0.145 0 0)',
+  card: 'oklch(1 0 0)',
+  'card-foreground': 'oklch(0.145 0 0)',
+  popover: 'oklch(1 0 0)',
+  'popover-foreground': 'oklch(0.145 0 0)',
+  primary: 'oklch(0.205 0 0)',
+  'primary-foreground': 'oklch(0.985 0 0)',
+  secondary: 'oklch(0.97 0 0)',
+  'secondary-foreground': 'oklch(0.205 0 0)',
+  muted: 'oklch(0.97 0 0)',
+  'muted-foreground': 'oklch(0.556 0 0)',
+  accent: 'oklch(0.97 0 0)',
+  'accent-foreground': 'oklch(0.205 0 0)',
+  destructive: 'oklch(0.577 0.245 27.325)',
+  'destructive-foreground': 'oklch(0.99 0 0)',
+  border: 'oklch(0.922 0 0)',
+  input: 'oklch(0.922 0 0)',
+  ring: 'oklch(0.708 0 0)',
+  sidebar: 'oklch(0.985 0 0)',
+  'sidebar-foreground': 'oklch(0.145 0 0)',
+  'sidebar-primary': 'oklch(0.205 0 0)',
+  'sidebar-primary-foreground': 'oklch(0.985 0 0)',
+  'sidebar-accent': 'oklch(0.97 0 0)',
+  'sidebar-accent-foreground': 'oklch(0.205 0 0)',
+  'sidebar-border': 'oklch(0.922 0 0)',
+  'sidebar-ring': 'oklch(0.708 0 0)',
+};
+
 export function generatedPath(path) {
   return path.replace(/(^|\/)_(gitignore|oxlintrc\.json)$/, '$1.$2');
 }
@@ -157,4 +190,9 @@ export async function assertAdminBaseline(directory, { materialized = true } = {
   const provenance = await fs.readFile(join(directory, 'UPSTREAM.md'), 'utf8');
   for (const identity of Object.values(upstreamProvenance)) assert.ok(provenance.includes(identity), `Documented upstream identity: ${identity}`);
   assert.match(provenance, /application owns|application replacement|provenance/i);
+
+  const css = await fs.readFile(join(directory, 'src/index.css'), 'utf8');
+  for (const [token, value] of Object.entries(officialNeutralTheme)) {
+    assert.match(css, new RegExp(`--${token}:\\s*${value.replace(/[().]/g, '\\$&')};`), `Official Neutral token: --${token}`);
+  }
 }

@@ -46,6 +46,15 @@ Use Tailwind utility classes and semantic shadcn variables (`bg-background`,
 layout spacing; do not add arbitrary z-index values or duplicate Radix
 primitives.
 
+The light color contract is the official shadcn Vega + Neutral palette. Keep
+its values in the `:root` semantic tokens in `src/index.css`; components must
+consume those tokens instead of introducing raw neutral, beige, or brand
+colors. Product branding may replace this palette only after an explicit
+configuration contract exists. When the palette changes intentionally, update
+the independently maintained `officialNeutralTheme` generator assertion and
+verify both a packed/generated admin and the rendered setup and authenticated
+screens.
+
 Tailwind 4 CSS-variable utilities use the parenthesized shorthand, such as
 `w-(--sidebar-width)` and `max-w-(--skeleton-width)`. Do not retain older
 registry spellings such as `w-[--sidebar-width]`: this project's Vite build
@@ -106,6 +115,9 @@ these schemas separate when the server changes password creation policy.
   field-code mapping.
 - Do not introduce another icon library, theme provider, or notification
   system. Sonner is mounted once and is not used for recoverable auth errors.
+- Do not apply a shadcn preset wholesale when the task is color-only; the CLI
+  can also change radius, dark-mode variables, chart tokens, imports, and
+  component configuration. Merge the approved semantic color values only.
 - Do not leave `aria-describedby` pointing at a removed helper or conditional
   error node; automated accessibility checks do not always report this broken
   reference.

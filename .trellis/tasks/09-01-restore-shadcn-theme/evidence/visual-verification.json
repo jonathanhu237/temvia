@@ -1,0 +1,11 @@
+{
+  "homeAxeViolations": 0,
+  "browserErrors": [],
+  "theme": {
+    "background": "oklch(100% 0 0)",
+    "foreground": "oklch(14.5% 0 0)",
+    "primary": "oklch(20.5% 0 0)",
+    "accent": "oklch(97% 0 0)",
+    "sidebar": "oklch(98.5% 0 0)"
+  }
+}
