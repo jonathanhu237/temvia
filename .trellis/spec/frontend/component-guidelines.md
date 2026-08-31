@@ -81,12 +81,21 @@ Keep form-level failures in an `Alert` with `role="alert"`. Preserve keyboard
 focus, visible `:focus-visible` styles, native autocomplete, and paste
 behavior. Run the axe smoke in the Chromium flow when changing a screen.
 
+Client schemas emit stable field codes in the Zod issue `message`. Translate
+those codes at the field-rendering boundary with the same code-to-i18next-key
+mapping used for RFC 9457 field problems. Never render a client code directly;
+unknown or missing codes use the localized `problems:fields.invalidValue`
+fallback. Messages stored by `react-hook-form` with `type: 'server'` have
+already been localized by the submit handler and must not be translated again.
+
 ## Common mistakes
 
 - Do not place raw `fetch` calls or query caches inside presentational
   components.
 - Do not display RFC 9457 `detail` or transport error strings directly; map
   stable problem codes through i18next.
+- Do not render Zod validation codes such as `invalid_password` from
+  `FieldError`; translate them through the shared field-code mapping.
 - Do not introduce another icon library, theme provider, or notification
   system. Sonner is mounted once and is not used for recoverable auth errors.
 - Do not leave `aria-describedby` pointing at a removed helper or conditional

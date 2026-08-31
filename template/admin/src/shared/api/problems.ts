@@ -40,6 +40,10 @@ const fieldKeys: Record<string, string> = {
   password_mismatch: 'problems:fields.passwordMismatch',
 }
 
+export function fieldMessageKey(code: string | undefined): string {
+  return fieldKeys[code ?? ''] ?? 'problems:fields.invalidValue'
+}
+
 export function isUnauthenticated(error: unknown): boolean {
   return error instanceof ApiProblemError && error.problem.status === 401 && (
     error.problem.type === '/problems/unauthenticated' || error.problem.code === 'unauthenticated'
@@ -76,7 +80,7 @@ export function translateProblem(error: unknown, t: unknown): string {
 }
 
 export function problemFieldKey(field: FieldProblem): string {
-  return fieldKeys[field.code] ?? 'problems:fields.invalidValue'
+  return fieldMessageKey(field.code)
 }
 
 export function fieldProblemFor(error: unknown, pointer: string): FieldProblem | undefined {
@@ -86,4 +90,13 @@ export function fieldProblemFor(error: unknown, pointer: string): FieldProblem |
 
 export function translateFieldProblem(field: FieldProblem | undefined, t: unknown): string | undefined {
   return field ? (t as (key: string) => string)(problemFieldKey(field)) : undefined
+}
+
+export function translateClientFieldError(
+  error: { type?: string; message?: string } | undefined,
+  t: unknown,
+): string | undefined {
+  if (!error) return undefined
+  if (error.type === 'server') return error.message
+  return (t as (key: string) => string)(fieldMessageKey(error.message))
 }

@@ -66,6 +66,70 @@ describe('authentication forms', () => {
     expect(onSuccess).toHaveBeenCalledOnce()
   })
 
+  it.each([
+    {
+      locale: 'en' as const,
+      name: 'Name',
+      email: 'Email',
+      password: 'Password',
+      confirmation: 'Confirm password',
+      submit: 'Create administrator',
+      messages: [
+        'Enter a name between 1 and 100 characters without control characters.',
+        'Enter a valid email address.',
+        'Use a password between 15 and 128 characters.',
+        'The passwords do not match.',
+      ],
+    },
+    {
+      locale: 'zh-CN' as const,
+      name: '名称',
+      email: '邮箱',
+      password: '密码',
+      confirmation: '确认密码',
+      submit: '创建管理员',
+      messages: [
+        '请输入 1 到 100 个字符的名称，且不能包含控制字符。',
+        '请输入有效的邮箱地址。',
+        '请输入 15 到 128 个字符的密码。',
+        '两次输入的密码不一致。',
+      ],
+    },
+  ])('localizes setup client validation errors in $locale', async ({ locale, name, email, password, confirmation, submit, messages }) => {
+    const user = userEvent.setup()
+    await i18n.changeLanguage(locale)
+    const view = renderWithQueryClient(<SetupForm api={mockApi()} token={token} onSuccess={vi.fn()} />)
+
+    await user.type(screen.getByLabelText(confirmation), 'x')
+    await user.click(screen.getByRole('button', { name: submit }))
+
+    for (const message of messages) {
+      expect(await screen.findByText(message)).toBeVisible()
+    }
+    expect(view.container.textContent).not.toMatch(/invalid_(?:name|email|password)|password_mismatch/)
+    expect(screen.getByLabelText(name)).toHaveAttribute('aria-describedby', 'name-error')
+    expect(screen.getByLabelText(email)).toHaveAttribute('aria-describedby', 'email-error')
+    expect(screen.getByLabelText(password, { exact: true })).toHaveAttribute('aria-describedby', 'password-error')
+    expect(screen.getByLabelText(confirmation)).toHaveAttribute('aria-describedby', 'passwordConfirmation-error')
+  })
+
+  it.each([
+    ['en', 'Email', 'Password', 'Sign in', 'Enter a valid email address.', 'Use a password between 15 and 128 characters.'],
+    ['zh-CN', '邮箱', '密码', '登录', '请输入有效的邮箱地址。', '请输入 15 到 128 个字符的密码。'],
+  ] as const)('localizes login client validation errors in %s', async (locale, email, password, submit, emailMessage, passwordMessage) => {
+    const user = userEvent.setup()
+    await i18n.changeLanguage(locale)
+    const view = renderWithQueryClient(<LoginForm api={mockApi()} onSuccess={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: submit }))
+
+    expect(await screen.findByText(emailMessage)).toBeVisible()
+    expect(await screen.findByText(passwordMessage)).toBeVisible()
+    expect(screen.getByLabelText(email)).toHaveAttribute('aria-describedby', 'email-error')
+    expect(screen.getByLabelText(password, { exact: true })).toHaveAttribute('aria-describedby', 'password-error')
+    expect(view.container.textContent).not.toMatch(/invalid_(?:email|password)/)
+  })
+
   it('shows localized invalid credentials without exposing server diagnostics', async () => {
     const user = userEvent.setup()
     const api = mockApi({

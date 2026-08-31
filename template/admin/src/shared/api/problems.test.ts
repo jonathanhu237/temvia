@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { ApiProblemError } from './client'
 import {
   fieldProblemFor,
+  fieldMessageKey,
   isInvalidSetupToken,
   isSetupComplete,
   isUnauthenticated,
   problemMessageKey,
   translateFieldProblem,
+  translateClientFieldError,
   translateProblem,
 } from './problems'
 import { i18n, initializeI18n } from '@/shared/i18n'
@@ -27,6 +29,23 @@ describe('localized problem mapping', () => {
     const field = fieldProblemFor(error, '/email')
     expect(translateFieldProblem(field, i18n.t.bind(i18n))).toBe('Enter a valid email address.')
     expect(translateProblem(new Error('private'), i18n.t.bind(i18n))).toBe('Something went wrong. Try again.')
+  })
+
+  it.each([
+    ['en', 'Use a password between 15 and 128 characters.', 'invalid_password'],
+    ['zh-CN', '请输入 15 到 128 个字符的密码。', 'invalid_password'],
+  ] as const)('localizes client field codes in %s', async (locale, message, code) => {
+    await i18n.changeLanguage(locale)
+    expect(fieldMessageKey(code)).toBe('problems:fields.invalidPassword')
+    expect(translateClientFieldError({ type: 'custom', message: code }, i18n.t.bind(i18n))).toBe(message)
+  })
+
+  it('uses the localized generic field message for unknown or missing client codes', async () => {
+    await i18n.changeLanguage('zh-CN')
+    const translate = i18n.t.bind(i18n)
+    expect(translateClientFieldError({ type: 'custom', message: 'unknown_code' }, translate)).toBe('请输入有效的值。')
+    expect(translateClientFieldError({ type: 'custom' }, translate)).toBe('请输入有效的值。')
+    expect(translateClientFieldError(undefined, translate)).toBeUndefined()
   })
 
   it('selects Chinese resources and synchronizes document metadata', async () => {

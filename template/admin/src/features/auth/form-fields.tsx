@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { translateClientFieldError } from '@/shared/api/problems'
 
 export function TextField({
   id,
@@ -23,7 +24,9 @@ export function TextField({
   autoComplete?: string
   inputMode?: 'email' | 'text'
 }) {
+  const { t } = useTranslation('problems')
   const errorId = `${id}-error`
+  const errorMessage = translateClientFieldError(error, t)
   return (
     <Field data-invalid={Boolean(error)}>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
@@ -33,10 +36,10 @@ export function TextField({
         autoComplete={autoComplete}
         inputMode={inputMode}
         aria-invalid={Boolean(error)}
-        aria-describedby={error?.message ? errorId : undefined}
+        aria-describedby={errorMessage ? errorId : undefined}
         {...registration}
       />
-      <FieldError id={errorId} errors={error ? [error] : undefined} />
+      <FieldError id={errorId} errors={errorMessage ? [{ message: errorMessage }] : undefined} />
     </Field>
   )
 }
@@ -54,9 +57,11 @@ export function PasswordField({
   error?: { message?: string }
   autoComplete: 'new-password' | 'current-password'
 }) {
-  const { t } = useTranslation('auth')
+  const { t: authT } = useTranslation('auth')
+  const { t: problemsT } = useTranslation('problems')
   const [visible, setVisible] = useState(false)
   const errorId = `${id}-error`
+  const errorMessage = translateClientFieldError(error, problemsT)
   return (
     <Field data-invalid={Boolean(error)}>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
@@ -66,7 +71,7 @@ export function PasswordField({
           type={visible ? 'text' : 'password'}
           autoComplete={autoComplete}
           aria-invalid={Boolean(error)}
-          aria-describedby={error?.message ? errorId : undefined}
+          aria-describedby={errorMessage ? errorId : undefined}
           className="pr-12"
           {...registration}
         />
@@ -75,13 +80,13 @@ export function PasswordField({
           variant="ghost"
           size="icon"
           className="absolute right-1 top-1/2 -translate-y-1/2"
-          aria-label={visible ? t('hidePassword') : t('showPassword')}
+          aria-label={visible ? authT('hidePassword') : authT('showPassword')}
           onClick={() => setVisible((current) => !current)}
         >
           {visible ? <EyeOff aria-hidden="true" data-icon="inline-start" /> : <Eye aria-hidden="true" data-icon="inline-start" />}
         </Button>
       </div>
-      <FieldError id={errorId} errors={error ? [error] : undefined} />
+      <FieldError id={errorId} errors={errorMessage ? [{ message: errorMessage }] : undefined} />
     </Field>
   )
 }
