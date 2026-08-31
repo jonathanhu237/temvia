@@ -151,3 +151,25 @@ Mapped client-side authentication validation codes through the shared i18n field
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: Revise administrator password policy
+<!-- trellis-session: v=2 fp=04bd61294e3d8e0b -->
+
+**Date**: 2026-09-01
+**Task**: Revise administrator password policy
+**Branch**: `main`
+
+### Summary
+
+Separated new-password policy from login verification, enforced the accepted 8-128 ASCII composition rule across Go and React, preserved legacy-password login compatibility, localized distinct errors, and verified packed generated containers and Chromium flows on Centaurus.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `adef2d4` | feat(auth): revise password policy |
+
+### Status
+
+[OK] **Completed**
