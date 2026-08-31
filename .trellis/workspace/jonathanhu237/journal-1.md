@@ -85,3 +85,25 @@ Implemented and verified the generated Go API initial-admin setup and email/pass
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: Admin authentication frontend
+<!-- trellis-session: v=2 fp=f20d436c6896e575 -->
+
+**Date**: 2026-08-31
+**Task**: Admin authentication frontend
+**Branch**: `main`
+
+### Summary
+
+Implemented and verified the generated React setup/login/session UI, i18n, shadcn Sidebar shell, typed HTTP boundary, Caddy delivery, generator contracts, tests, and documentation on main.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b243273` | feat(template): add admin authentication frontend |
+
+### Status
+
+[OK] **Completed**
