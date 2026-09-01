@@ -239,3 +239,26 @@ Removed the setup recovery page, redirected bare, refreshed, and rejected setup 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: Implement transactional password recovery
+<!-- trellis-session: v=2 fp=ac638fe3fad5d584 -->
+
+**Date**: 2026-09-02
+**Task**: Implement transactional password recovery
+**Branch**: `main`
+
+### Summary
+
+Implemented and verified a secure email password-recovery flow with PostgreSQL transactional outbox leasing, SMTP retries, auth-version session invalidation, bilingual admin UI and polished email templates; validated generated packages and the real Centaurus stack.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7a7bf90` | feat(auth): add transactional password recovery |
+| `efa6f38` | docs(auth): document password recovery contracts |
+
+### Status
+
+[OK] **Completed**
