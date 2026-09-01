@@ -9,6 +9,10 @@ Set `retry: false` for setup, current-user and auth mutations. A `401` problem
 confirms an unauthenticated state; transport, protocol and `503` failures must
 remain visible as retryable dependency errors.
 
+The login route resolves `currentUserOptions` directly and always renders the
+normal login form when no user is returned. It must not query setup status;
+initialization status and setup authority belong to the `/setup` route.
+
 ```tsx
 const currentUser = useQuery(currentUserOptions(api))
 ```

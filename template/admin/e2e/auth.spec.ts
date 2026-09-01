@@ -12,11 +12,11 @@ function collectBrowserErrors(page: Page): string[] {
     if (message.type() !== 'error') return
 
     const sourceURL = message.location().url
-    const isExpectedSessionProbe = message.text().includes('401')
+    const isExpectedAuth401 = message.text().includes('401')
       && sourceURL.length > 0
-      && new URL(sourceURL).pathname === '/api/auth/me'
+      && ['/api/auth/me', '/api/auth/login'].includes(new URL(sourceURL).pathname)
 
-    if (!isExpectedSessionProbe) errors.push(message.text())
+    if (!isExpectedAuth401) errors.push(message.text())
   })
   page.on('pageerror', (error) => errors.push(error.message))
   return errors
@@ -29,6 +29,30 @@ async function expectNoA11yViolations(page: Page): Promise<void> {
 
 test.describe('administrator authentication', () => {
   test.describe.configure({ mode: 'serial' })
+
+  test('keeps the normal login form available before setup', async ({ page }) => {
+    test.skip(!setupURL, 'Set E2E_SETUP_URL to a fresh setup URL from the API log.')
+    const browserErrors = collectBrowserErrors(page)
+    const setupStatusRequests: string[] = []
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/setup/status') setupStatusRequests.push(request.url())
+    })
+
+    await page.goto(new URL('/login', setupURL!).toString())
+    await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible()
+    await expect(page.getByLabel('Email')).toBeVisible()
+    await expect(page.getByLabel('Password', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
+    await expect(page.getByText(/finish initialization|open the latest setup link/i)).toHaveCount(0)
+    await expectNoA11yViolations(page)
+
+    await page.getByLabel('Email').fill('unknown@example.com')
+    await page.getByLabel('Password', { exact: true }).fill('not-a-real-password')
+    await page.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page.getByRole('alert')).toHaveText('The email or password is incorrect.')
+    expect(setupStatusRequests).toEqual([])
+    expect(browserErrors).toEqual([])
+  })
 
   test('initializes, signs in, restores the session, changes locale and logs out', async ({ page }) => {
     test.skip(!setupURL, 'Set E2E_SETUP_URL to a fresh setup URL from the API log.')
@@ -70,6 +94,10 @@ test.describe('administrator authentication', () => {
     expect(headingBox!.x).toBeGreaterThanOrEqual(sidebarBox!.x + sidebarBox!.width)
 
     await expectNoA11yViolations(page)
+
+    await page.goto('/login')
+    await expect(page).toHaveURL(/\/$/)
+    await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
 
     await page.reload()
     await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
