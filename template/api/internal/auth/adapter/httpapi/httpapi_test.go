@@ -47,6 +47,16 @@ type recoveryFake struct {
 	completeErr   error
 }
 
+type invitationAcceptanceFake struct {
+	calls int
+	err   error
+}
+
+func (f *invitationAcceptanceFake) Complete(context.Context, string, string) error {
+	f.calls++
+	return f.err
+}
+
 func (f *recoveryFake) Request(context.Context, application.PasswordResetRequestInput) error {
 	f.requestCalls++
 	return f.requestErr
@@ -237,5 +247,26 @@ func TestPasswordRecoveryHTTPErrorMapping(t *testing.T) {
 	invalid := request(handler, http.MethodPost, "/api/auth/password-reset/complete", `{"token":"v1.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"Aa1!xxxx","locale":"en"}`, true)
 	if invalid.Code != http.StatusForbidden || !strings.Contains(invalid.Body.String(), `"type":"/problems/invalid-password-reset-token"`) {
 		t.Fatalf("invalid-token response = %d, body=%s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestInvitationAcceptanceHTTPContracts(t *testing.T) {
+	acceptance := &invitationAcceptanceFake{}
+	handler := NewHandlerWithAccess(&setupFake{status: application.SetupRequired}, &authFake{}, testConfig(), nil, nil, acceptance)
+	response := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":"token","password":"Aa1!xxxx","locale":"en"}`, true)
+	if response.Code != http.StatusNoContent || acceptance.calls != 1 || len(response.Result().Cookies()) != 1 {
+		t.Fatalf("acceptance response = %d, calls=%d, cookies=%#v", response.Code, acceptance.calls, response.Result().Cookies())
+	}
+	invalidLocale := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":"token","password":"Aa1!xxxx","locale":"fr"}`, true)
+	if invalidLocale.Code != http.StatusUnprocessableEntity || acceptance.calls != 1 {
+		t.Fatalf("invalid locale response = %d, calls=%d", invalidLocale.Code, acceptance.calls)
+	}
+	invalidTokenType := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":123,"password":"Aa1!xxxx","locale":"en"}`, true)
+	if invalidTokenType.Code != http.StatusForbidden || acceptance.calls != 1 || !strings.Contains(invalidTokenType.Body.String(), `"type":"/problems/invalid-invitation"`) {
+		t.Fatalf("invalid token type response = %d, calls=%d, body=%s", invalidTokenType.Code, acceptance.calls, invalidTokenType.Body.String())
+	}
+	missingOrigin := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":"token","password":"Aa1!xxxx","locale":"en"}`, false)
+	if missingOrigin.Code != http.StatusForbidden || acceptance.calls != 1 {
+		t.Fatalf("missing Origin response = %d, calls=%d", missingOrigin.Code, acceptance.calls)
 	}
 }

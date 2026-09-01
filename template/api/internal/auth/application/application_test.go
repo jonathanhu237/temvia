@@ -124,6 +124,16 @@ func (a fakeAccounts) FindPublicByID(context.Context, string) (domain.User, erro
 	return a.account.User, nil
 }
 
+type principalFakeAccounts struct {
+	fakeAccounts
+	principal domain.Principal
+	err       error
+}
+
+func (a principalFakeAccounts) FindPrincipalByID(context.Context, string) (domain.Principal, error) {
+	return a.principal, a.err
+}
+
 type fakeLimiter struct {
 	allow bool
 	reset int
@@ -221,5 +231,109 @@ func TestLoginRejectsMissingAuthVersionForVersionedSessions(t *testing.T) {
 
 	if _, _, err := auth.Login(context.Background(), LoginInput{Email: "ada@example.com", Password: "a sufficiently long password"}); !errors.Is(err, ErrDependencyUnavailable) {
 		t.Fatalf("Login() error = %v, want dependency unavailable for missing auth version", err)
+	}
+}
+
+func TestLoginWithPrincipalRejectsInvalidProjectionAndCleansSession(t *testing.T) {
+	account := domain.Account{User: domain.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}, PasswordHash: "hash"}
+	sessions := &fakeSessions{}
+	accounts := principalFakeAccounts{fakeAccounts: fakeAccounts{account: account}, principal: domain.Principal{User: account.User}}
+	auth := NewAuthentication(accounts, &fakeHasher{valid: true}, sessions, &fakeLimiter{allow: true}, fakeRandom{value: 8})
+
+	if _, _, err := auth.LoginWithPrincipal(context.Background(), LoginInput{Email: account.User.Email, Password: "a sufficiently long password"}); !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("LoginWithPrincipal() error = %v, want dependency unavailable for a zero-role projection", err)
+	}
+	if sessions.created == "" || sessions.deleted != sessions.created {
+		t.Fatalf("LoginWithPrincipal() session cleanup = created %q, deleted %q", sessions.created, sessions.deleted)
+	}
+}
+
+func TestLoginWithPrincipalRejectsMismatchedProjectionAndCleansSession(t *testing.T) {
+	account := domain.Account{User: domain.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}, PasswordHash: "hash"}
+	sessions := &fakeSessions{}
+	accounts := principalFakeAccounts{
+		fakeAccounts: fakeAccounts{account: account},
+		principal: domain.Principal{
+			User:  domain.User{ID: "user-2", Name: "Grace", Email: "grace@example.com"},
+			Roles: []domain.Role{{SystemKey: "super_admin", Name: "Super Admin"}},
+		},
+	}
+	auth := NewAuthentication(accounts, &fakeHasher{valid: true}, sessions, &fakeLimiter{allow: true}, fakeRandom{value: 8})
+
+	if _, _, err := auth.LoginWithPrincipal(context.Background(), LoginInput{Email: account.User.Email, Password: "a sufficiently long password"}); !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("LoginWithPrincipal() error = %v, want dependency unavailable for mismatched identity", err)
+	}
+	if sessions.created == "" || sessions.deleted != sessions.created {
+		t.Fatalf("LoginWithPrincipal() session cleanup = created %q, deleted %q", sessions.created, sessions.deleted)
+	}
+}
+
+func TestCurrentPrincipalRejectsMismatchedProjection(t *testing.T) {
+	account := domain.Account{User: domain.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}}
+	accounts := principalFakeAccounts{
+		fakeAccounts: fakeAccounts{account: account},
+		principal: domain.Principal{
+			User:  domain.User{ID: "user-2", Name: "Grace", Email: "grace@example.com"},
+			Roles: []domain.Role{{SystemKey: "super_admin", Name: "Super Admin"}},
+		},
+	}
+	auth := NewAuthentication(accounts, &fakeHasher{}, &fakeSessions{}, &fakeLimiter{allow: true}, fakeRandom{value: 8})
+	session := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, sessionIDBytes))
+
+	if _, err := auth.CurrentPrincipal(context.Background(), session); !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("CurrentPrincipal() error = %v, want dependency unavailable for mismatched identity", err)
+	}
+}
+
+func TestNormalizePrincipalRejectsUnknownAndEmptyCustomRoleData(t *testing.T) {
+	catalog := domain.DefaultPermissionCatalog()
+	for _, role := range []domain.Role{
+		{ID: "role-1", Name: "Empty"},
+		{ID: "role-2", Name: "Unknown", Permissions: []domain.PermissionKey{"projects.write"}},
+	} {
+		if _, err := normalizePrincipal(catalog, domain.Principal{Roles: []domain.Role{role}}); !errors.Is(err, ErrDependencyUnavailable) {
+			t.Fatalf("normalizePrincipal(%#v) error = %v, want dependency unavailable", role, err)
+		}
+	}
+	if principal, err := normalizePrincipal(catalog, domain.Principal{Roles: []domain.Role{{SystemKey: "super_admin", Name: "Super Admin"}}}); err != nil || !principal.SuperAdmin || !principal.Has(domain.PermissionRolesRead) {
+		t.Fatalf("normalizePrincipal(super) = %#v, %v", principal, err)
+	}
+}
+
+func TestNormalizePrincipalUnionsRolePermissionsWhenProjectionOmitsSummary(t *testing.T) {
+	principal, err := normalizePrincipal(domain.DefaultPermissionCatalog(), domain.Principal{Roles: []domain.Role{
+		{ID: "role-users", Name: "Users", Permissions: []domain.PermissionKey{domain.PermissionUsersRead}},
+		{ID: "role-roles", Name: "Roles", Permissions: []domain.PermissionKey{domain.PermissionRolesRead}},
+	}})
+	if err != nil {
+		t.Fatalf("normalizePrincipal() error = %v", err)
+	}
+	if !principal.Has(domain.PermissionUsersRead) || !principal.Has(domain.PermissionRolesRead) {
+		t.Fatalf("normalized principal permissions = %#v", principal.Permissions)
+	}
+	if got := principal.Permissions; len(got) != 2 || got[0] != domain.PermissionRolesRead || got[1] != domain.PermissionUsersRead {
+		t.Fatalf("normalized principal permissions = %#v, want sorted union", got)
+	}
+}
+
+func TestNormalizePrincipalRejectsPermissionInjectedOutsideRoleAssignments(t *testing.T) {
+	_, err := normalizePrincipal(domain.DefaultPermissionCatalog(), domain.Principal{
+		Roles:       []domain.Role{{ID: "role-users", Name: "Users", Permissions: []domain.PermissionKey{domain.PermissionUsersRead}}},
+		Permissions: []domain.PermissionKey{domain.PermissionUsersRead, domain.PermissionRolesRead},
+	})
+	if !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("normalizePrincipal() error = %v, want dependency unavailable for injected permission", err)
+	}
+}
+
+func TestPermissionSummaryCannotGrantAuthorizationOutsideRoleAssignments(t *testing.T) {
+	accounts := principalFakeAccounts{principal: domain.Principal{
+		User:        domain.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"},
+		Roles:       []domain.Role{{ID: "role-users", Name: "Users", Permissions: []domain.PermissionKey{domain.PermissionUsersRead}}},
+		Permissions: []domain.PermissionKey{domain.PermissionUsersRead, domain.PermissionRolesRead},
+	}}
+	manager := NewAccessManagement(nil, accounts, domain.DefaultPermissionCatalog())
+	if err := manager.require(context.Background(), "user-1", domain.PermissionRolesRead); !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("require() error = %v, want dependency unavailable for injected permission", err)
 	}
 }

@@ -22,10 +22,15 @@ type Authentication struct {
 	sessions SessionStore
 	limiter  LoginLimiter
 	random   RandomSource
+	catalog  domain.PermissionCatalog
 }
 
-func NewAuthentication(accounts AccountStore, hasher PasswordHasher, sessions SessionStore, limiter LoginLimiter, random RandomSource) *Authentication {
-	return &Authentication{accounts: accounts, hasher: hasher, sessions: sessions, limiter: limiter, random: random}
+func NewAuthentication(accounts AccountStore, hasher PasswordHasher, sessions SessionStore, limiter LoginLimiter, random RandomSource, catalogs ...domain.PermissionCatalog) *Authentication {
+	catalog := domain.DefaultPermissionCatalog()
+	if len(catalogs) > 0 && len(catalogs[0].Definitions()) > 0 {
+		catalog = catalogs[0]
+	}
+	return &Authentication{accounts: accounts, hasher: hasher, sessions: sessions, limiter: limiter, random: random, catalog: catalog}
 }
 
 func (a *Authentication) Login(ctx context.Context, input LoginInput) (domain.User, string, error) {
@@ -140,6 +145,67 @@ func (a *Authentication) Current(ctx context.Context, sessionID string) (domain.
 		return domain.User{}, dependencyError(err)
 	}
 	return user, nil
+}
+
+// PrincipalStore enriches the authenticated identity with its current role
+// assignments. It is intentionally optional so the original authentication
+// seams remain usable by small consumers and tests.
+type PrincipalStore interface {
+	FindPrincipalByID(context.Context, string) (domain.Principal, error)
+}
+
+type PrincipalAuthenticationService interface {
+	LoginWithPrincipal(context.Context, LoginInput) (domain.Principal, string, error)
+	CurrentPrincipal(context.Context, string) (domain.Principal, error)
+}
+
+func (a *Authentication) LoginWithPrincipal(ctx context.Context, input LoginInput) (domain.Principal, string, error) {
+	user, sessionID, err := a.Login(ctx, input)
+	if err != nil {
+		return domain.Principal{}, "", err
+	}
+	store, ok := a.accounts.(PrincipalStore)
+	if !ok {
+		return domain.Principal{User: user}, sessionID, nil
+	}
+	principal, err := store.FindPrincipalByID(ctx, user.ID)
+	if err != nil {
+		_ = a.sessions.Delete(ctx, sessionID)
+		return domain.Principal{}, "", dependencyError(err)
+	}
+	if err := ensurePrincipalIdentity(user.ID, principal); err != nil {
+		_ = a.sessions.Delete(ctx, sessionID)
+		return domain.Principal{}, "", err
+	}
+	principal, err = a.normalizePrincipal(principal)
+	if err != nil {
+		_ = a.sessions.Delete(ctx, sessionID)
+		return domain.Principal{}, "", err
+	}
+	return principal, sessionID, nil
+}
+
+func (a *Authentication) CurrentPrincipal(ctx context.Context, sessionID string) (domain.Principal, error) {
+	user, err := a.Current(ctx, sessionID)
+	if err != nil {
+		return domain.Principal{}, err
+	}
+	store, ok := a.accounts.(PrincipalStore)
+	if !ok {
+		return domain.Principal{User: user}, nil
+	}
+	principal, err := store.FindPrincipalByID(ctx, user.ID)
+	if err != nil {
+		return domain.Principal{}, dependencyError(err)
+	}
+	if err := ensurePrincipalIdentity(user.ID, principal); err != nil {
+		return domain.Principal{}, err
+	}
+	return a.normalizePrincipal(principal)
+}
+
+func (a *Authentication) normalizePrincipal(principal domain.Principal) (domain.Principal, error) {
+	return normalizePrincipal(a.catalog, principal)
 }
 
 func (a *Authentication) Logout(ctx context.Context, sessionID string) error {

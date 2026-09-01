@@ -19,6 +19,122 @@ type userResponseBody struct {
 	Email string `json:"email"`
 }
 
+type roleResponseBody struct {
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	System          string   `json:"system,omitempty"`
+	Permissions     []string `json:"permissions"`
+	Revision        int64    `json:"revision"`
+	AssignmentCount int      `json:"assignmentCount,omitempty"`
+	CreatedAt       string   `json:"createdAt,omitempty"`
+	UpdatedAt       string   `json:"updatedAt,omitempty"`
+}
+
+type principalResponseBody struct {
+	User        userResponseBody   `json:"user"`
+	Roles       []roleResponseBody `json:"roles"`
+	Permissions []string           `json:"permissions"`
+	SuperAdmin  bool               `json:"superAdmin"`
+}
+
+type principalEnvelope struct {
+	User        userResponseBody   `json:"user"`
+	Roles       []roleResponseBody `json:"roles"`
+	Permissions []string           `json:"permissions"`
+	SuperAdmin  bool               `json:"superAdmin"`
+}
+
+type roleListResponse struct {
+	Roles       []roleResponseBody       `json:"roles"`
+	Permissions []permissionResponseBody `json:"permissions"`
+}
+
+type permissionResponseBody struct {
+	Key         string `json:"key"`
+	Resource    string `json:"resource"`
+	Action      string `json:"action"`
+	LabelKey    string `json:"labelKey"`
+	Description string `json:"description"`
+}
+
+type roleEnvelope struct {
+	Role roleResponseBody `json:"role"`
+}
+
+type accessUserResponseBody struct {
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Email       string             `json:"email"`
+	CreatedAt   string             `json:"createdAt"`
+	AuthVersion int64              `json:"authVersion"`
+	Roles       []roleResponseBody `json:"roles"`
+}
+
+type usersResponse struct {
+	Users      []accessUserResponseBody `json:"users"`
+	NextCursor string                   `json:"nextCursor,omitempty"`
+}
+
+type invitationResponseBody struct {
+	ID        string             `json:"id"`
+	Name      string             `json:"name"`
+	Email     string             `json:"email"`
+	Locale    string             `json:"locale"`
+	Roles     []roleResponseBody `json:"roles"`
+	ExpiresAt string             `json:"expiresAt"`
+	CreatedAt string             `json:"createdAt"`
+	Revision  int64              `json:"revision"`
+}
+
+type invitationsResponse struct {
+	Invitations []invitationResponseBody `json:"invitations"`
+	NextCursor  string                   `json:"nextCursor,omitempty"`
+}
+
+func principalResponse(principal domain.Principal) principalEnvelope {
+	roles := make([]roleResponseBody, 0, len(principal.Roles))
+	for _, role := range principal.Roles {
+		roles = append(roles, roleResponse(role))
+	}
+	permissions := make([]string, 0, len(principal.Permissions))
+	for _, permission := range principal.Permissions {
+		permissions = append(permissions, string(permission))
+	}
+	return principalEnvelope{User: userResponseBody{ID: principal.User.ID, Name: principal.User.Name, Email: principal.User.Email}, Roles: roles, Permissions: permissions, SuperAdmin: principal.SuperAdmin}
+}
+
+func roleResponse(role domain.Role) roleResponseBody {
+	permissions := make([]string, 0, len(role.Permissions))
+	for _, permission := range role.Permissions {
+		permissions = append(permissions, string(permission))
+	}
+	body := roleResponseBody{ID: role.ID, Name: role.Name, Description: role.Description, System: role.SystemKey, Permissions: permissions, Revision: role.Revision, AssignmentCount: role.AssignmentCount}
+	if !role.CreatedAt.IsZero() {
+		body.CreatedAt = role.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !role.UpdatedAt.IsZero() {
+		body.UpdatedAt = role.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return body
+}
+
+func accessUserResponse(user domain.AccessUser) accessUserResponseBody {
+	roles := make([]roleResponseBody, 0, len(user.Roles))
+	for _, role := range user.Roles {
+		roles = append(roles, roleResponse(role))
+	}
+	return accessUserResponseBody{ID: user.User.ID, Name: user.User.Name, Email: user.User.Email, CreatedAt: user.User.CreatedAt.UTC().Format(time.RFC3339Nano), AuthVersion: user.AuthVersion, Roles: roles}
+}
+
+func invitationResponse(invitation domain.Invitation) invitationResponseBody {
+	roles := make([]roleResponseBody, 0, len(invitation.Roles))
+	for _, role := range invitation.Roles {
+		roles = append(roles, roleResponse(role))
+	}
+	return invitationResponseBody{ID: invitation.ID, Name: invitation.Name, Email: invitation.Email, Locale: string(invitation.Locale), Roles: roles, ExpiresAt: invitation.ExpiresAt.UTC().Format(time.RFC3339Nano), CreatedAt: invitation.CreatedAt.UTC().Format(time.RFC3339Nano), Revision: invitation.Revision}
+}
+
 func userResponse(user domain.User) userEnvelope {
 	return userEnvelope{User: userResponseBody{ID: user.ID, Name: user.Name, Email: user.Email}}
 }

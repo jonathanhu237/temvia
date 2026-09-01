@@ -32,6 +32,13 @@ var problemCatalog = map[string]struct {
 	"forbidden":                    {"Forbidden"},
 	"invalid-setup-token":          {"Invalid Setup Token"},
 	"invalid-password-reset-token": {"Invalid Password Reset Token"},
+	"invalid-invitation":           {"Invalid Invitation"},
+	"role-in-use":                  {"Role In Use"},
+	"role-immutable":               {"Role Immutable"},
+	"last-super-admin":             {"Last Super Administrator"},
+	"stale-revision":               {"Stale Revision"},
+	"role-already-exists":          {"Role Already Exists"},
+	"invitation-pending":           {"Invitation Pending"},
 	"not-found":                    {"Not Found"},
 	"method-not-allowed":           {"Method Not Allowed"},
 	"setup-complete":               {"Setup Complete"},
@@ -78,6 +85,8 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusForbidden, "invalid-setup-token")
 	case applicationError(err, application.ErrInvalidPasswordResetToken):
 		writeProblem(w, http.StatusForbidden, "invalid-password-reset-token")
+	case applicationError(err, application.ErrInvitationInvalid):
+		writeProblem(w, http.StatusForbidden, "invalid-invitation")
 	case applicationError(err, application.ErrSetupComplete):
 		writeProblem(w, http.StatusConflict, "setup-complete")
 	case applicationError(err, application.ErrEmailAlreadyRegistered):
@@ -86,6 +95,24 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblemWithCode(w, http.StatusTooManyRequests, "rate-limited", "rate_limited", "", nil)
 	case applicationError(err, application.ErrDependencyUnavailable), applicationError(err, application.ErrPasswordHashBusy):
 		writeProblem(w, http.StatusServiceUnavailable, "service-unavailable")
+	case applicationError(err, application.ErrForbidden):
+		writeProblem(w, http.StatusForbidden, "forbidden")
+	case applicationError(err, application.ErrRoleNotFound), applicationError(err, application.ErrUserNotFound), applicationError(err, application.ErrInvitationNotFound):
+		writeProblem(w, http.StatusNotFound, "not-found")
+	case applicationError(err, application.ErrRoleInUse):
+		writeProblemWithCode(w, http.StatusConflict, "role-in-use", "role_in_use", "", nil)
+	case applicationError(err, application.ErrImmutableRole):
+		writeProblemWithCode(w, http.StatusConflict, "role-immutable", "role_immutable", "", nil)
+	case applicationError(err, application.ErrLastSuperAdmin):
+		writeProblemWithCode(w, http.StatusConflict, "last-super-admin", "last_super_admin", "", nil)
+	case applicationError(err, application.ErrStaleRevision):
+		writeProblemWithCode(w, http.StatusConflict, "stale-revision", "stale_revision", "", nil)
+	case applicationError(err, application.ErrRoleAlreadyExists):
+		writeProblemWithCode(w, http.StatusConflict, "role-already-exists", "role_already_exists", "", nil)
+	case applicationError(err, application.ErrInvitationPending):
+		writeProblemWithCode(w, http.StatusConflict, "invitation-pending", "invitation_pending", "", nil)
+	case applicationError(err, application.ErrInvalidRoleSet):
+		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "validation_failed", "", []domain.FieldError{{Field: "roleIds", Code: "invalid_role_set"}})
 	default:
 		writeProblem(w, http.StatusInternalServerError, "internal-error")
 	}

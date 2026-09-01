@@ -61,6 +61,22 @@ the API retries durable jobs. See the root README for Mailpit and production
 SMTP configuration. The Caddy runtime also sends `Referrer-Policy: no-referrer`
 as defense in depth for fragment credentials.
 
+## Access management
+
+The authenticated Users and Roles routes consume the current principal's
+permissions. `users.read` shows activated users and role badges; `roles.read`
+shows the catalog and role details. The built-in `Super Admin` role is assigned
+to the first setup account and cannot be edited or deleted. Super Admins can
+create non-empty custom roles, replace a user's complete non-empty role set,
+and invite, resend, or revoke pending users. The API remains authoritative for
+all of these checks, including direct navigation to a hidden route.
+
+Invitations arrive at `/accept-invitation#token=...`. Bootstrap removes the
+fragment before React renders and keeps the one-time authority in module
+memory. The acceptance form creates the account without a session; the new
+user signs in normally after success. Invitation links use the separate
+`INVITATION_TOKEN_KEY` and default to a 72-hour expiry (maximum seven days).
+
 ## Container
 
 The multi-stage `Dockerfile` builds with Node 24 and serves only `dist` from

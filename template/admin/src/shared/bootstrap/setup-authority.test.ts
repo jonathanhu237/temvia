@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   capturePasswordResetAuthority,
+  captureInvitationAuthority,
   captureSetupAuthority,
+  clearInvitationAuthority,
   clearPasswordResetAuthority,
   clearSetupAuthority,
   getPasswordResetAuthority,
+  getInvitationAuthority,
   getSetupAuthority,
   isCanonicalPasswordResetAuthority,
+  isCanonicalInvitationAuthority,
   isCanonicalSetupAuthority,
 } from './setup-authority'
 
@@ -83,5 +87,34 @@ describe('password reset URL authority', () => {
     )).toBeUndefined()
     expect(getPasswordResetAuthority()).toBeUndefined()
     clearPasswordResetAuthority()
+  })
+})
+
+describe('invitation URL authority', () => {
+  const invitationToken = `v1.${'C'.repeat(22)}.${'D'.repeat(43)}`
+
+  it('captures and immediately clears an invitation fragment', () => {
+    let replaced = ''
+    const result = captureInvitationAuthority(
+      { pathname: '/accept-invitation', search: '', hash: `#token=${invitationToken}` },
+      { state: null, replaceState: (_state, _title, url) => { replaced = String(url) } },
+    )
+    expect(result).toBe(invitationToken)
+    expect(getInvitationAuthority()).toBe(invitationToken)
+    expect(replaced).toBe('/accept-invitation')
+    expect(isCanonicalInvitationAuthority(invitationToken)).toBe(true)
+    clearInvitationAuthority()
+  })
+
+  it('rejects invitation fragments with extra fields or the wrong path', () => {
+    expect(captureInvitationAuthority(
+      { pathname: '/accept-invitation', search: '', hash: `#token=${invitationToken}&next=/login` },
+      { state: null, replaceState: () => undefined },
+    )).toBeUndefined()
+    expect(captureInvitationAuthority(
+      { pathname: '/login', search: '', hash: `#token=${invitationToken}` },
+      { state: null, replaceState: () => undefined },
+    )).toBeUndefined()
+    expect(getInvitationAuthority()).toBeUndefined()
   })
 })

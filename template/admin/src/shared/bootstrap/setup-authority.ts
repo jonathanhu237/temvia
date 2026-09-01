@@ -1,8 +1,10 @@
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/
 const PASSWORD_RESET_TOKEN_PATTERN = /^v1\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/
+const INVITATION_TOKEN_PATTERN = PASSWORD_RESET_TOKEN_PATTERN
 
 let setupAuthority: string | undefined
 let passwordResetAuthority: string | undefined
+let invitationAuthority: string | undefined
 
 export function isCanonicalSetupAuthority(value: string): boolean {
 	return TOKEN_PATTERN.test(value)
@@ -10,6 +12,10 @@ export function isCanonicalSetupAuthority(value: string): boolean {
 
 export function isCanonicalPasswordResetAuthority(value: string): boolean {
 	return PASSWORD_RESET_TOKEN_PATTERN.test(value)
+}
+
+export function isCanonicalInvitationAuthority(value: string): boolean {
+	return INVITATION_TOKEN_PATTERN.test(value)
 }
 
 function captureAuthority(
@@ -69,4 +75,20 @@ export function getPasswordResetAuthority(): string | undefined {
 
 export function clearPasswordResetAuthority(): void {
 	passwordResetAuthority = undefined
+}
+
+export function captureInvitationAuthority(
+	location: Pick<Location, 'pathname' | 'search' | 'hash'> = window.location,
+	history: Pick<History, 'state' | 'replaceState'> = window.history,
+): string | undefined {
+	invitationAuthority = captureAuthority(location, history, '/accept-invitation', isCanonicalInvitationAuthority)
+	return invitationAuthority
+}
+
+export function getInvitationAuthority(): string | undefined {
+	return invitationAuthority
+}
+
+export function clearInvitationAuthority(): void {
+	invitationAuthority = undefined
 }

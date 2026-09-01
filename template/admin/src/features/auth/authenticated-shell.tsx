@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { House, LogOut } from 'lucide-react'
+import { House, LogOut, ShieldCheck, Users } from 'lucide-react'
 import { useState } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
@@ -28,7 +28,7 @@ import { currentUserQueryKey } from './queries'
 import type { User } from '@/shared/api/contracts'
 
 export function AuthenticatedShell({ api, user, children }: { api: ApiClient; user: User; children: React.ReactNode }) {
-  const { t, i18n } = useTranslation(['common', 'auth', 'problems'])
+  const { t, i18n } = useTranslation(['common', 'auth', 'problems', 'access'])
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
@@ -63,6 +63,26 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+                {user.superAdmin || user.permissions?.includes('users.read') ? (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={location.pathname.startsWith('/users')} tooltip={t('access:users')}>
+                      <Link to="/users" aria-current={location.pathname.startsWith('/users') ? 'page' : undefined}>
+                        <Users aria-hidden="true" data-icon="inline-start" />
+                        <span>{t('access:users')}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ) : null}
+                {user.superAdmin || user.permissions?.includes('roles.read') ? (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={location.pathname.startsWith('/roles')} tooltip={t('access:roles')}>
+                      <Link to="/roles" aria-current={location.pathname.startsWith('/roles') ? 'page' : undefined}>
+                        <ShieldCheck aria-hidden="true" data-icon="inline-start" />
+                        <span>{t('access:roles')}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ) : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -104,7 +124,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
         <header className="flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <SidebarTrigger aria-label={t('menu')} />
           <div className="h-4 w-px bg-border" aria-hidden="true" />
-          <p className="text-sm font-medium text-muted-foreground">{t('home')}</p>
+          <p className="text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/roles') ? t('access:roles') : t('home')}</p>
         </header>
         <div className="flex min-h-[calc(100dvh-3.5rem)] flex-1 flex-col gap-5 p-4 sm:p-6 lg:p-8">
           {logoutError && (

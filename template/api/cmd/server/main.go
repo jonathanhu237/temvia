@@ -16,6 +16,7 @@ import (
 	"example.com/temvia/api/internal/auth/adapter/postgres"
 	redisadapter "example.com/temvia/api/internal/auth/adapter/redis"
 	"example.com/temvia/api/internal/auth/application"
+	"example.com/temvia/api/internal/auth/domain"
 	"example.com/temvia/api/internal/config"
 )
 
@@ -36,9 +37,24 @@ func newHandler() http.Handler {
 
 func newApplicationHandler(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery ...httpapi.PasswordRecoveryService) http.Handler {
 	setupService := application.NewSetup(setup, hasher, random, cfg.SetupLinkTTL)
-	authService := application.NewAuthentication(auth, hasher, sessions, limiter, random)
+	catalog := domain.DefaultPermissionCatalog()
+	authService := application.NewAuthentication(auth, hasher, sessions, limiter, random, catalog)
 	mux := http.NewServeMux()
 	mux.Handle("GET /health", healthHandler())
+	var recoveryService httpapi.PasswordRecoveryService
+	if len(recovery) > 0 {
+		recoveryService = recovery[0]
+	}
+	if store, ok := auth.(application.AccessStore); ok {
+		if principals, principalOK := auth.(application.PrincipalStore); principalOK {
+			access := application.NewAccessManagementWithInvitations(store, principals, catalog, cfg.InvitationTokenKey, random, cfg.InvitationLinkTTL)
+			accept := application.NewInvitationAcceptance(store, hasher, cfg.InvitationTokenKey)
+			authHandler := httpapi.NewHandlerWithAccess(setupService, authService, cfg, recoveryService, access, accept)
+			mux.Handle("/api", authHandler)
+			mux.Handle("/api/", authHandler)
+			return mux
+		}
+	}
 	authHandler := httpapi.NewHandler(setupService, authService, cfg, recovery...)
 	mux.Handle("/api", authHandler)
 	mux.Handle("/api/", authHandler)
@@ -101,6 +117,7 @@ func main() {
 		cfg.MailOutboxLeaseDuration,
 		cfg.MailOutboxRetryInitial,
 		cfg.MailOutboxRetryMax,
+		cfg.InvitationTokenKey,
 	)
 	handler := newApplicationHandler(cfg, postgresStore, postgresStore, hasher, redisStore, redisStore, random, recovery)
 	server := &http.Server{

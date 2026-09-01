@@ -145,7 +145,7 @@ func dependencyError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, ErrSetupComplete) || errors.Is(err, ErrInvalidSetupToken) || errors.Is(err, ErrInvalidPasswordResetToken) || errors.Is(err, ErrEmailAlreadyRegistered) || errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrRateLimited) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrPasswordHashBusy) || errors.Is(err, ErrDependencyUnavailable) {
+	if errors.Is(err, ErrSetupComplete) || errors.Is(err, ErrInvalidSetupToken) || errors.Is(err, ErrInvalidPasswordResetToken) || errors.Is(err, ErrEmailAlreadyRegistered) || errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrRateLimited) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrPasswordHashBusy) || errors.Is(err, ErrDependencyUnavailable) || errors.Is(err, ErrForbidden) || errors.Is(err, ErrRoleNotFound) || errors.Is(err, ErrRoleAlreadyExists) || errors.Is(err, ErrUserNotFound) || errors.Is(err, ErrInvitationNotFound) || errors.Is(err, ErrRoleInUse) || errors.Is(err, ErrImmutableRole) || errors.Is(err, ErrLastSuperAdmin) || errors.Is(err, ErrStaleRevision) || errors.Is(err, ErrInvalidRoleSet) || errors.Is(err, ErrInvitationPending) || errors.Is(err, ErrInvitationInvalid) {
 		return err
 	}
 	return fmt.Errorf("%w: %v", ErrDependencyUnavailable, err)

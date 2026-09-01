@@ -15,21 +15,22 @@ import (
 )
 
 type MailDispatcher struct {
-	outbox       MailOutboxStore
-	mailer       Mailer
-	random       RandomSource
-	tokenKey     []byte
-	publicURL    string
-	pollInterval time.Duration
-	lease        time.Duration
-	retryInitial time.Duration
-	retryMax     time.Duration
-	maxAttempts  int
-	now          func() time.Time
+	outbox        MailOutboxStore
+	mailer        Mailer
+	random        RandomSource
+	tokenKey      []byte
+	invitationKey []byte
+	publicURL     string
+	pollInterval  time.Duration
+	lease         time.Duration
+	retryInitial  time.Duration
+	retryMax      time.Duration
+	maxAttempts   int
+	now           func() time.Time
 }
 
-func NewMailDispatcher(outbox MailOutboxStore, mailer Mailer, random RandomSource, tokenKey []byte, publicURL string, pollInterval, lease, retryInitial, retryMax time.Duration) *MailDispatcher {
-	return &MailDispatcher{
+func NewMailDispatcher(outbox MailOutboxStore, mailer Mailer, random RandomSource, tokenKey []byte, publicURL string, pollInterval, lease, retryInitial, retryMax time.Duration, invitationKeys ...[]byte) *MailDispatcher {
+	dispatcher := &MailDispatcher{
 		outbox:       outbox,
 		mailer:       mailer,
 		random:       random,
@@ -42,6 +43,10 @@ func NewMailDispatcher(outbox MailOutboxStore, mailer Mailer, random RandomSourc
 		maxAttempts:  10,
 		now:          time.Now,
 	}
+	if len(invitationKeys) > 0 {
+		dispatcher.invitationKey = append([]byte(nil), invitationKeys[0]...)
+	}
+	return dispatcher
 }
 
 func (d *MailDispatcher) Run(ctx context.Context) {
@@ -101,7 +106,11 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 	if err != nil {
 		ackCtx, cancel := d.deliveryContext(ctx)
 		defer cancel()
-		discarded, discardErr := d.outbox.DiscardMail(ackCtx, job.ID, job.LeaseToken, "invalid_reset")
+		errorCode := "invalid_reset"
+		if job.Kind == MailUserInvitation {
+			errorCode = "invalid_invitation"
+		}
+		discarded, discardErr := d.outbox.DiscardMail(ackCtx, job.ID, job.LeaseToken, errorCode)
 		if discardErr != nil {
 			return dependencyError(discardErr)
 		}
@@ -175,12 +184,31 @@ func (d *MailDispatcher) compose(job MailJob) (OutgoingMail, error) {
 	if job.Kind == MailPasswordChanged {
 		return changedMail(message, job.CreatedAt, job.Locale), nil
 	}
+	if job.Kind == MailUserInvitation {
+		if len(job.ResetSelector) != 16 || len(job.VerifierDigest) != 32 || len(d.invitationKey) != 32 {
+			return OutgoingMail{}, ErrInvitationInvalid
+		}
+		material, err := domain.NewInvitationMaterial(d.invitationKey, job.ResetSelector)
+		if err != nil || subtle.ConstantTimeCompare(material.VerifierDigest, job.VerifierDigest) != 1 {
+			return OutgoingMail{}, ErrInvitationInvalid
+		}
+		token, err := domain.NewInvitationToken(d.invitationKey, job.ResetSelector)
+		if err != nil {
+			return OutgoingMail{}, ErrInvitationInvalid
+		}
+		link := d.publicURL + "/accept-invitation#token=" + token
+		ttl := job.ExpiresAt.Sub(job.CreatedAt)
+		if ttl <= 0 {
+			ttl = 72 * time.Hour
+		}
+		return invitationMail(message, link, job.Locale, ttl), nil
+	}
 	return OutgoingMail{}, fmt.Errorf("unsupported mail kind")
 }
 
 func (d *MailDispatcher) handleDeliveryFailure(ctx context.Context, job MailJob, err error) error {
 	var deliveryErr *MailDeliveryError
-	if job.Kind == MailPasswordReset && !d.now().Before(job.ExpiresAt) {
+	if (job.Kind == MailPasswordReset || job.Kind == MailUserInvitation) && !d.now().Before(job.ExpiresAt) {
 		discarded, updateErr := d.outbox.DiscardMail(ctx, job.ID, job.LeaseToken, "expired")
 		if updateErr != nil {
 			return dependencyError(updateErr)
@@ -216,7 +244,7 @@ func (d *MailDispatcher) handleDeliveryFailure(ctx context.Context, job MailJob,
 	code := "permanent"
 	if deliveryErr != nil {
 		switch deliveryErr.Code {
-		case "temporary", "permanent", "expired", "superseded", "invalid_reset", "dependency":
+		case "temporary", "permanent", "expired", "superseded", "invalid_reset", "invalid_invitation", "dependency":
 			code = deliveryErr.Code
 		}
 	}
@@ -281,6 +309,37 @@ func resetMail(message OutgoingMail, link string, locale domain.Locale, ttl time
 	message.Subject = "Reset your Temvia password"
 	message.Text = "Temvia · ACCOUNT SECURITY\n\nPASSWORD RECOVERY\n\nHello " + message.Name + ",\n\nWe received a request to reset your Temvia password. Use the link below to choose a new password.\n\nLink expiry: " + expiresIn + "\n\nSet a new password:\n" + link + "\n\nIf you did not request this, you can safely ignore this email. Your password will not change unless you complete the reset."
 	message.HTML = mailFrame(locale, "PASSWORD RECOVERY", resetMailBody(locale, message.Name, link, expiresIn))
+	return message
+}
+
+func invitationMail(message OutgoingMail, link string, locale domain.Locale, ttl time.Duration) OutgoingMail {
+	expiresIn := formatMailDuration(ttl, locale)
+	safeName := html.EscapeString(message.Name)
+	safeLink := html.EscapeString(link)
+	safeExpiry := html.EscapeString(expiresIn)
+	if locale == domain.LocaleChinese {
+		message.Subject = "加入 Temvia 管理后台"
+		message.Text = "Temvia · 管理员邀请\n\n您好，" + message.Name + "：\n\n您收到了一封 Temvia 管理后台邀请。请使用下面的一次性链接设置密码并激活账户。\n\n有效期：" + expiresIn + "\n\n接受邀请：\n" + link + "\n\n如果您不认识邀请方，可以忽略这封邮件。"
+		message.HTML = mailFrame(locale, "管理员邀请", `<span style="display:inline-block;padding:6px 10px;border:1px solid #C7D2FE;border-radius:999px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">管理员邀请</span>
+<h1 style="margin:18px 0 16px;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:30px;font-weight:700;letter-spacing:-0.5px;line-height:38px;">接受你的邀请</h1>
+<p style="margin:0 0 16px;color:#344054;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">您好，`+safeName+`：</p>
+<p style="margin:0 0 28px;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">您被邀请加入 Temvia 管理后台。请设置密码以激活您的账户。</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="padding:16px 18px;border-left:4px solid #5B5CE2;background:#EEF0FF;"><p style="margin:0 0 5px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">链接有效期</p><p style="margin:0;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;line-height:28px;">`+safeExpiry+`</p><p style="margin:5px 0 0;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">链接只能使用一次。</p></td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;"><tr><td bgcolor="#5B5CE2" style="border-radius:6px;background:#5B5CE2;"><a href="`+safeLink+`" style="display:inline-block;padding:13px 22px;border:1px solid #5B5CE2;border-radius:6px;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;line-height:24px;text-decoration:none;">接受邀请</a></td></tr></table>
+<p style="margin:0 0 8px;color:#667085;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">按钮无法打开？请将下面的链接复制到浏览器：</p><p style="margin:0 0 28px;color:#4338CA;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,&quot;Liberation Mono&quot;,&quot;Courier New&quot;,monospace;font-size:12px;line-height:19px;word-break:break-all;">`+safeLink+`</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:15px 16px;border-left:4px solid #D97706;background:#FFFAEB;"><p style="margin:0;color:#7A2E0C;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;"><strong>不是您发起的请求？</strong><br>可以忽略这封邮件。</p></td></tr></table>`)
+		return message
+	}
+	message.Subject = "You are invited to Temvia"
+	message.Text = "Temvia · ADMIN INVITATION\n\nHello " + message.Name + ",\n\nYou have been invited to the Temvia administration app. Use the one-time link below to set your password and activate your account.\n\nLink expiry: " + expiresIn + "\n\nAccept invitation:\n" + link + "\n\nIf you do not recognize this invitation, you can safely ignore this email."
+	message.HTML = mailFrame(locale, "ADMIN INVITATION", `<span style="display:inline-block;padding:6px 10px;border:1px solid #C7D2FE;border-radius:999px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">ADMIN INVITATION</span>
+<h1 style="margin:18px 0 16px;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:30px;font-weight:700;letter-spacing:-0.5px;line-height:38px;">Accept your invitation</h1>
+<p style="margin:0 0 16px;color:#344054;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">Hello `+safeName+`,</p>
+<p style="margin:0 0 28px;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">You have been invited to the Temvia administration app. Set a password to activate your account.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="padding:16px 18px;border-left:4px solid #5B5CE2;background:#EEF0FF;"><p style="margin:0 0 5px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">LINK EXPIRY</p><p style="margin:0;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;line-height:28px;">`+safeExpiry+`</p><p style="margin:5px 0 0;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">This link can be used once.</p></td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;"><tr><td bgcolor="#5B5CE2" style="border-radius:6px;background:#5B5CE2;"><a href="`+safeLink+`" style="display:inline-block;padding:13px 22px;border:1px solid #5B5CE2;border-radius:6px;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;line-height:24px;text-decoration:none;">Accept invitation</a></td></tr></table>
+<p style="margin:0 0 8px;color:#667085;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">Button not working? Copy and paste this link into your browser:</p><p style="margin:0 0 28px;color:#4338CA;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,&quot;Liberation Mono&quot;,&quot;Courier New&quot;,sans-serif;font-size:12px;line-height:19px;word-break:break-all;">`+safeLink+`</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:15px 16px;border-left:4px solid #D97706;background:#FFFAEB;"><p style="margin:0;color:#7A2E0C;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;"><strong>Did not expect this?</strong><br>You can safely ignore this email.</p></td></tr></table>`)
 	return message
 }
 

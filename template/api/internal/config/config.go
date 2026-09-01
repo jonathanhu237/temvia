@@ -21,7 +21,9 @@ type Config struct {
 	SetupLinkTTL time.Duration
 
 	PasswordResetTokenKey       []byte
+	InvitationTokenKey          []byte
 	PasswordResetLinkTTL        time.Duration
+	InvitationLinkTTL           time.Duration
 	PasswordResetResponseMin    time.Duration
 	PasswordResetGlobalCapacity int
 	PasswordResetGlobalRefill   time.Duration
@@ -86,7 +88,9 @@ func Load(get Lookup) (Config, error) {
 		SetupLinkTTL: parseDuration(get, "SETUP_LINK_TTL", 30*time.Minute),
 
 		PasswordResetTokenKey:       parseTokenKey(get("PASSWORD_RESET_TOKEN_KEY")),
+		InvitationTokenKey:          parseTokenKey(get("INVITATION_TOKEN_KEY")),
 		PasswordResetLinkTTL:        parseDuration(get, "PASSWORD_RESET_LINK_TTL", 30*time.Minute),
+		InvitationLinkTTL:           parseDuration(get, "INVITATION_LINK_TTL", 72*time.Hour),
 		PasswordResetResponseMin:    parseDuration(get, "PASSWORD_RESET_MIN_RESPONSE_TIME", 500*time.Millisecond),
 		PasswordResetGlobalCapacity: parseInt(get, "PASSWORD_RESET_RATE_LIMIT_GLOBAL_CAPACITY", 10),
 		PasswordResetGlobalRefill:   parseDuration(get, "PASSWORD_RESET_RATE_LIMIT_GLOBAL_REFILL_INTERVAL", 6*time.Second),
@@ -242,8 +246,14 @@ func (c *Config) validate() error {
 	if len(c.PasswordResetTokenKey) != 32 {
 		return fmt.Errorf("PASSWORD_RESET_TOKEN_KEY must be a canonical unpadded Base64URL encoding of 32 bytes")
 	}
+	if len(c.InvitationTokenKey) != 32 {
+		return fmt.Errorf("INVITATION_TOKEN_KEY must be a canonical unpadded Base64URL encoding of 32 bytes")
+	}
 	if c.PasswordResetLinkTTL <= 0 || c.PasswordResetLinkTTL > 24*time.Hour {
 		return fmt.Errorf("PASSWORD_RESET_LINK_TTL must be between 0 and 24h")
+	}
+	if c.InvitationLinkTTL <= 0 || c.InvitationLinkTTL > 7*24*time.Hour {
+		return fmt.Errorf("INVITATION_LINK_TTL must be between 0 and 7 days")
 	}
 	if c.PasswordResetResponseMin < 0 || c.PasswordResetResponseMin > 5*time.Second {
 		return fmt.Errorf("PASSWORD_RESET_MIN_RESPONSE_TIME must be between 0 and 5s")

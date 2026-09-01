@@ -23,23 +23,28 @@ func (s *Store) ClaimMail(ctx context.Context, leaseToken string, leaseDuration 
 	var locale string
 	var selector []byte
 	var digest []byte
+	var invitationID sql.NullString
 	var attempts int
 	err = tx.QueryRowContext(ctx, `
-		SELECT o.id::text, o.kind, o.user_id::text, u.name, u.email, o.locale,
-		       o.reset_selector, r.verifier_digest, o.attempt_count + 1, o.created_at, o.expires_at
+		SELECT o.id::text, o.kind, COALESCE(o.user_id::text, ''), o.invitation_id::text,
+		       COALESCE(u.name, i.name), COALESCE(u.email, i.email), o.locale,
+		       o.reset_selector, COALESCE(r.verifier_digest, i.verifier_digest), o.attempt_count + 1, o.created_at, o.expires_at
 		FROM auth_mail_outbox AS o
-		JOIN auth_users AS u ON u.id = o.user_id
+		LEFT JOIN auth_users AS u ON u.id = o.user_id
+		LEFT JOIN auth_user_invitations AS i ON i.id = o.invitation_id
 		LEFT JOIN auth_password_resets AS r
 		  ON r.user_id = o.user_id AND r.selector = o.reset_selector
 		WHERE o.sent_at IS NULL AND o.canceled_at IS NULL AND o.dead_at IS NULL
 		  AND o.available_at <= clock_timestamp()
 		  AND (o.lease_expires_at IS NULL OR o.lease_expires_at <= clock_timestamp())
 		  AND o.expires_at > clock_timestamp()
-		  AND (o.kind = 'password_changed' OR (r.user_id IS NOT NULL AND r.expires_at > clock_timestamp()))
+		  AND (o.kind = 'password_changed'
+		       OR (o.kind = 'password_reset' AND r.user_id IS NOT NULL AND r.expires_at > clock_timestamp())
+		       OR (o.kind = 'user_invitation' AND i.id IS NOT NULL AND i.expires_at > clock_timestamp()))
 		ORDER BY o.created_at, o.id
 		FOR UPDATE OF o SKIP LOCKED
 		LIMIT 1`,
-	).Scan(&job.ID, &kind, &job.UserID, &job.Name, &job.Email, &locale, &selector, &digest, &attempts, &job.CreatedAt, &job.ExpiresAt)
+	).Scan(&job.ID, &kind, &job.UserID, &invitationID, &job.Name, &job.Email, &locale, &selector, &digest, &attempts, &job.CreatedAt, &job.ExpiresAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			if err := tx.Commit(); err != nil {
@@ -61,9 +66,14 @@ func (s *Store) ClaimMail(ctx context.Context, leaseToken string, leaseDuration 
 		return nil, err
 	}
 	job.Kind = application.MailKind(kind)
+	if invitationID.Valid {
+		job.InvitationID = invitationID.String
+	}
 	job.Locale = domain.Locale(locale)
 	job.ResetSelector = append([]byte(nil), selector...)
 	job.VerifierDigest = append([]byte(nil), digest...)
+	job.InvitationSelector = append([]byte(nil), selector...)
+	job.InvitationVerifierDigest = append([]byte(nil), digest...)
 	job.Attempts = attempts
 	job.LeaseToken = leaseToken
 	return &job, nil

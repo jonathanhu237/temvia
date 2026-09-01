@@ -10,7 +10,7 @@ func env(values map[string]string) Lookup {
 }
 
 func TestLoadDefaultsAndModes(t *testing.T) {
-	values := map[string]string{"POSTGRES_PASSWORD": "pg-secret", "REDIS_PASSWORD": "redis-secret", "PASSWORD_RESET_TOKEN_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+	values := map[string]string{"POSTGRES_PASSWORD": "pg-secret", "REDIS_PASSWORD": "redis-secret", "PASSWORD_RESET_TOKEN_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "INVITATION_TOKEN_KEY": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"}
 	c, err := Load(env(values))
 	if err != nil {
 		t.Fatal(err)
@@ -42,19 +42,22 @@ func TestLoadDefaultsAndModes(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidConfiguration(t *testing.T) {
-	base := map[string]string{"POSTGRES_PASSWORD": "pg-secret", "REDIS_PASSWORD": "redis-secret", "PASSWORD_RESET_TOKEN_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+	base := map[string]string{"POSTGRES_PASSWORD": "pg-secret", "REDIS_PASSWORD": "redis-secret", "PASSWORD_RESET_TOKEN_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "INVITATION_TOKEN_KEY": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"}
 	for name, change := range map[string]func(map[string]string){
-		"missing postgres secret": func(v map[string]string) { delete(v, "POSTGRES_PASSWORD") },
-		"missing redis secret":    func(v map[string]string) { delete(v, "REDIS_PASSWORD") },
-		"production http":         func(v map[string]string) { v["APP_ENV"] = "production" },
-		"bad duration":            func(v map[string]string) { v["SETUP_LINK_TTL"] = "nope" },
-		"idle after absolute":     func(v map[string]string) { v["SESSION_IDLE_TIMEOUT"] = "13h" },
-		"idle pool above open":    func(v map[string]string) { v["DB_MAX_IDLE_CONNS"] = "11" },
-		"bad port":                func(v map[string]string) { v["POSTGRES_PORT"] = "postgres" },
-		"bad redis address":       func(v map[string]string) { v["REDIS_ADDR"] = "redis" },
-		"container below redis":   func(v map[string]string) { v["REDIS_CONTAINER_MEMORY_LIMIT"] = "64mb" },
-		"unsafe database name":    func(v map[string]string) { v["POSTGRES_DB"] = "database/name" },
-		"unsafe database user":    func(v map[string]string) { v["POSTGRES_USER"] = "user@example" },
+		"missing postgres secret":      func(v map[string]string) { delete(v, "POSTGRES_PASSWORD") },
+		"missing redis secret":         func(v map[string]string) { delete(v, "REDIS_PASSWORD") },
+		"missing invitation secret":    func(v map[string]string) { delete(v, "INVITATION_TOKEN_KEY") },
+		"production http":              func(v map[string]string) { v["APP_ENV"] = "production" },
+		"bad duration":                 func(v map[string]string) { v["SETUP_LINK_TTL"] = "nope" },
+		"idle after absolute":          func(v map[string]string) { v["SESSION_IDLE_TIMEOUT"] = "13h" },
+		"idle pool above open":         func(v map[string]string) { v["DB_MAX_IDLE_CONNS"] = "11" },
+		"bad port":                     func(v map[string]string) { v["POSTGRES_PORT"] = "postgres" },
+		"bad redis address":            func(v map[string]string) { v["REDIS_ADDR"] = "redis" },
+		"container below redis":        func(v map[string]string) { v["REDIS_CONTAINER_MEMORY_LIMIT"] = "64mb" },
+		"unsafe database name":         func(v map[string]string) { v["POSTGRES_DB"] = "database/name" },
+		"unsafe database user":         func(v map[string]string) { v["POSTGRES_USER"] = "user@example" },
+		"invalid invitation key":       func(v map[string]string) { v["INVITATION_TOKEN_KEY"] = "not-base64" },
+		"invitation ttl above maximum": func(v map[string]string) { v["INVITATION_LINK_TTL"] = "8d" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			values := map[string]string{}
@@ -74,6 +77,7 @@ func TestLoadPasswordRecoveryAndSMTPInventory(t *testing.T) {
 		"POSTGRES_PASSWORD":                "pg-secret",
 		"REDIS_PASSWORD":                   "redis-secret",
 		"PASSWORD_RESET_TOKEN_KEY":         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"INVITATION_TOKEN_KEY":             "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
 		"PASSWORD_RESET_MIN_RESPONSE_TIME": "250ms",
 		"SMTP_TLS_MODE":                    "starttls",
 		"SMTP_DELIVERY_TIMEOUT":            "5s",
@@ -83,6 +87,9 @@ func TestLoadPasswordRecoveryAndSMTPInventory(t *testing.T) {
 	c, err := Load(env(values))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if c.InvitationLinkTTL != 72*time.Hour || len(c.InvitationTokenKey) != 32 {
+		t.Fatalf("invitation config = %#v", c)
 	}
 	if c.PasswordResetResponseMin != 250*time.Millisecond || c.SMTPTimeout != 5*time.Second || c.MailOutboxLeaseDuration != 10*time.Second || c.SMTPFromAddress != "security@example.com" {
 		t.Fatalf("loaded recovery config = %#v", c)

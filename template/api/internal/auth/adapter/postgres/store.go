@@ -14,7 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-const ExpectedMigrationVersion int64 = 2
+const ExpectedMigrationVersion int64 = 3
 
 var ErrSchemaNotReady = errors.New("database schema is not ready")
 
@@ -135,6 +135,22 @@ func (s *Store) Complete(ctx context.Context, digest []byte, name domain.Name, e
 			return domain.User{}, application.ErrEmailAlreadyRegistered
 		}
 		return domain.User{}, err
+	}
+	// Migration 3 creates the immutable system role before the setup flow can
+	// complete. Keep the first assignment in the same winner transaction so a
+	// fresh install is never left with an administrator who cannot administer
+	// access.
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO auth_user_roles (user_id, role_id)
+		SELECT $1::uuid, id FROM auth_roles WHERE system_key = 'super_admin'`, user.ID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if assigned, err := result.RowsAffected(); err != nil || assigned != 1 {
+		if err != nil {
+			return domain.User{}, err
+		}
+		return domain.User{}, application.ErrDependencyUnavailable
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE auth_setup SET token_digest = NULL, token_expires_at = NULL, completed_at = clock_timestamp() WHERE singleton = true`); err != nil {
 		return domain.User{}, err

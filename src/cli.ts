@@ -73,7 +73,7 @@ ${result.repository === 'existing' ? 'Using the existing Git working tree; no ne
 
 Container backend:
   cd ${quotePath(result.directory)}
-  cp .env.example .env  # fill POSTGRES_PASSWORD and REDIS_PASSWORD
+  cp .env.example .env  # fill database, Redis, reset-key, and invitation-key secrets
   make build
   make migrate-up
   make up

@@ -6,14 +6,15 @@ yours to change or remove.
 
 ## First run
 
-Copy the environment inventory and fill all three secret values before
+Copy the environment inventory and fill all four secret values before
 starting the containers:
 
 ```sh
 cp .env.example .env
 chmod 600 .env
-# edit .env and set POSTGRES_PASSWORD, REDIS_PASSWORD, and PASSWORD_RESET_TOKEN_KEY
+# edit .env and set POSTGRES_PASSWORD, REDIS_PASSWORD, PASSWORD_RESET_TOKEN_KEY, and INVITATION_TOKEN_KEY
 # openssl rand -base64url 32  # use the output for PASSWORD_RESET_TOKEN_KEY
+# openssl rand -base64url 32  # generate a separate value for INVITATION_TOKEN_KEY
 make build
 make migrate-up
 make up
@@ -60,9 +61,12 @@ address, and provide paired SMTP credentials when required by the provider.
 Keep `PASSWORD_RESET_TOKEN_KEY` stable across restarts. Deliberate key rotation
 invalidates pending reset-mail jobs (already delivered links remain consumable
 because PostgreSQL stores their digest); affected users can request a fresh
-link. Run migration 2 before deploying the new API. To roll back, stop the new
-API, apply one migration down, then deploy the previous API; passwords already
-changed by the feature are not reverted.
+link. Keep `INVITATION_TOKEN_KEY` stable as well; it is intentionally separate
+from the reset key. Invitation links expire after 72 hours by default and may
+be configured with `INVITATION_LINK_TTL` up to seven days. Run migration 3
+before deploying the RBAC API. To roll back, stop the new API, apply one
+migration down, then deploy the previous API; passwords already changed by the
+feature are not reverted.
 
 For an application upgrade, stop the API, back up PostgreSQL, run the new
 migration explicitly, then start the new API:
@@ -107,6 +111,20 @@ for known and unknown accounts. The reset email opens
 mounts. Completion accepts the token, a policy-compliant password, and locale,
 returns `204`, clears any presented session cookie, invalidates all old
 sessions, and requires an explicit login with the new password.
+
+After setup, the first administrator is assigned to the immutable `Super
+Admin` role. The Users and Roles pages support additive role assignment and
+the initial `users.read`/`roles.read` permission catalog. Only a current Super
+Admin may create or edit custom roles, invite users, replace assignments, or
+revoke invitations. Custom roles must retain at least one permission, users
+and invitations at least one role, and a role cannot be deleted while assigned
+to a user or pending invitation. The API refuses any change that would leave
+zero usable Super Admin accounts.
+
+Invitations are separate from activated users. A one-time link opens
+`/accept-invitation#token=...`; the admin removes the fragment before render,
+acceptance creates the account and assignments atomically, and the recipient
+must explicitly log in afterwards.
 
 ## Admin
 

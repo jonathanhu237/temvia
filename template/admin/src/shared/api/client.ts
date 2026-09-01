@@ -1,16 +1,29 @@
 import {
+	authEnvelopeSchema,
 	loginInputSchema,
+	assignmentInputSchema,
+	invitationAcceptanceInputSchema,
+	invitationInputSchema,
+	invitationsResponseSchema,
+	invitationResponseSchema,
 	passwordResetAcceptedSchema,
 	passwordResetCompleteInputSchema,
 	passwordResetRequestInputSchema,
-  problemDetailsSchema,
-  setupInputSchema,
+	problemDetailsSchema,
+	roleMutationInputSchema,
+	roleResponseSchema,
+	rolesResponseSchema,
+	setupInputSchema,
   setupResponseSchema,
   setupStatusSchema,
-  userEnvelopeSchema,
+	userRoleResponseSchema,
+	usersResponseSchema,
   type ProblemDetails,
   type SetupStatus,
   type User,
+  type Role,
+  type Permission,
+  type Invitation,
 } from './contracts'
 
 export class ApiProblemError extends Error {
@@ -45,13 +58,25 @@ export interface ApiClient {
   setup(input: { token: string; name: string; email: string; password: string }, signal?: AbortSignal): Promise<void>
   login(input: { email: string; password: string }, signal?: AbortSignal): Promise<User>
   me(signal?: AbortSignal): Promise<User>
+	getRoles?(signal?: AbortSignal): Promise<{ roles: Role[]; permissions: Permission[] }>
+	getRole?(id: string, signal?: AbortSignal): Promise<Role>
+	createRole?(input: { name: string; description: string; permissions: string[] }, signal?: AbortSignal): Promise<Role>
+	replaceRole?(id: string, input: { name: string; description: string; permissions: string[]; revision: number }, signal?: AbortSignal): Promise<Role>
+	deleteRole?(id: string, signal?: AbortSignal): Promise<void>
+	getUsers?(options?: { cursor?: string; limit?: number }, signal?: AbortSignal): Promise<{ users: Array<{ id: string; name: string; email: string; createdAt: string; authVersion: number; roles: Role[] }>; nextCursor?: string }>
+	replaceUserRoles?(id: string, input: { roleIds: string[]; authVersion: number }, signal?: AbortSignal): Promise<{ user: { id: string; name: string; email: string; createdAt: string; authVersion: number; roles: Role[] } }>
+	getInvitations?(options?: { cursor?: string; limit?: number }, signal?: AbortSignal): Promise<{ invitations: Invitation[]; nextCursor?: string }>
+	createInvitation?(input: { name: string; email: string; locale: 'en' | 'zh-CN'; roleIds: string[] }, signal?: AbortSignal): Promise<{ invitation: Invitation }>
+	resendInvitation?(id: string, signal?: AbortSignal): Promise<{ invitation: Invitation }>
+	revokeInvitation?(id: string, signal?: AbortSignal): Promise<void>
+	acceptInvitation?(input: { token: string; password: string; locale: 'en' | 'zh-CN' }, signal?: AbortSignal): Promise<void>
 	logout(signal?: AbortSignal): Promise<void>
 	requestPasswordReset(input: { email: string; locale: 'en' | 'zh-CN' }, signal?: AbortSignal): Promise<void>
 	completePasswordReset(input: { token: string; password: string; locale: 'en' | 'zh-CN' }, signal?: AbortSignal): Promise<void>
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
   body?: unknown
   signal?: AbortSignal
   expectedStatus: number
@@ -136,14 +161,32 @@ export function createApiClient(): ApiClient {
       await request('/api/setup', setupResponseSchema, { method: 'POST', body, signal, expectedStatus: 201 })
     },
     login: async (input, signal) => {
-      const body = loginInputSchema.parse(input)
-      const result = await request('/api/auth/login', userEnvelopeSchema, { method: 'POST', body, signal, expectedStatus: 200 })
-      return result.user
+		const body = loginInputSchema.parse(input)
+		const result = await request('/api/auth/login', authEnvelopeSchema, { method: 'POST', body, signal, expectedStatus: 200 })
+		return 'roles' in result ? { ...result.user, roles: result.roles, permissions: result.permissions, superAdmin: result.superAdmin } : result.user
+	},
+		me: async (signal) => {
+			const result = await request('/api/auth/me', authEnvelopeSchema, { signal, expectedStatus: 200 })
+			return 'roles' in result ? { ...result.user, roles: result.roles, permissions: result.permissions, superAdmin: result.superAdmin } : result.user
     },
-    me: async (signal) => {
-      const result = await request('/api/auth/me', userEnvelopeSchema, { signal, expectedStatus: 200 })
-      return result.user
-    },
+		getRoles: async (signal) => request('/api/roles', rolesResponseSchema, { signal, expectedStatus: 200 }),
+		getRole: async (id, signal) => (await request(`/api/roles/${encodeURIComponent(id)}`, roleResponseSchema, { signal, expectedStatus: 200 })).role,
+		createRole: async (input, signal) => (await request('/api/roles', roleResponseSchema, { method: 'POST', body: roleMutationInputSchema.parse(input), signal, expectedStatus: 201 })).role,
+		replaceRole: async (id, input, signal) => (await request(`/api/roles/${encodeURIComponent(id)}`, roleResponseSchema, { method: 'PUT', body: roleMutationInputSchema.parse(input), signal, expectedStatus: 200 })).role,
+		deleteRole: async (id, signal) => { await request(`/api/roles/${encodeURIComponent(id)}`, { parse: (value: unknown) => value as undefined }, { method: 'DELETE', signal, expectedStatus: 204 }) },
+		getUsers: async (options, signal) => {
+			const query = new URLSearchParams(); if (options?.cursor) query.set('cursor', options.cursor); if (options?.limit !== undefined) query.set('limit', String(options.limit))
+			return request(`/api/users${query.size ? `?${query.toString()}` : ''}`, usersResponseSchema, { signal, expectedStatus: 200 })
+		},
+		replaceUserRoles: async (id, input, signal) => request(`/api/users/${encodeURIComponent(id)}/roles`, userRoleResponseSchema, { method: 'PUT', body: assignmentInputSchema.parse(input), signal, expectedStatus: 200 }),
+		getInvitations: async (options, signal) => {
+			const query = new URLSearchParams(); if (options?.cursor) query.set('cursor', options.cursor); if (options?.limit !== undefined) query.set('limit', String(options.limit))
+			return request(`/api/user-invitations${query.size ? `?${query.toString()}` : ''}`, invitationsResponseSchema, { signal, expectedStatus: 200 })
+		},
+		createInvitation: async (input, signal) => request('/api/user-invitations', invitationResponseSchema, { method: 'POST', body: invitationInputSchema.parse(input), signal, expectedStatus: 201 }),
+		resendInvitation: async (id, signal) => request(`/api/user-invitations/${encodeURIComponent(id)}/resend`, invitationResponseSchema, { method: 'POST', signal, expectedStatus: 202 }),
+		revokeInvitation: async (id, signal) => { await request(`/api/user-invitations/${encodeURIComponent(id)}`, { parse: (value: unknown) => value as undefined }, { method: 'DELETE', signal, expectedStatus: 204 }) },
+		acceptInvitation: async (input, signal) => { await request('/api/auth/invitations/accept', { parse: (value: unknown) => value as undefined }, { method: 'POST', body: invitationAcceptanceInputSchema.parse(input), signal, expectedStatus: 204 }) },
     logout: async (signal) => {
       await request('/api/auth/logout', { parse: (value: unknown) => value as undefined }, { method: 'POST', signal, expectedStatus: 204 })
     },

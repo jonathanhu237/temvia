@@ -62,21 +62,25 @@ type MailKind string
 const (
 	MailPasswordReset   MailKind = "password_reset"
 	MailPasswordChanged MailKind = "password_changed"
+	MailUserInvitation  MailKind = "user_invitation"
 )
 
 type MailJob struct {
-	ID             string
-	Kind           MailKind
-	UserID         string
-	Name           string
-	Email          string
-	Locale         domain.Locale
-	ResetSelector  []byte
-	VerifierDigest []byte
-	Attempts       int
-	LeaseToken     string
-	CreatedAt      time.Time
-	ExpiresAt      time.Time
+	ID                       string
+	Kind                     MailKind
+	UserID                   string
+	InvitationID             string
+	Name                     string
+	Email                    string
+	Locale                   domain.Locale
+	ResetSelector            []byte
+	VerifierDigest           []byte
+	InvitationSelector       []byte
+	InvitationVerifierDigest []byte
+	Attempts                 int
+	LeaseToken               string
+	CreatedAt                time.Time
+	ExpiresAt                time.Time
 }
 
 type MailOutboxStore interface {

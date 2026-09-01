@@ -169,6 +169,9 @@ func TestStoreIntegrationRejectsNonExactSchemaVersions(t *testing.T) {
 }
 
 func resetAuthState(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `DELETE FROM auth_user_invitations`); err != nil {
+		return err
+	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM auth_users`); err != nil {
 		return err
 	}
@@ -405,5 +408,152 @@ func TestStoreIntegrationPasswordRecoveryOutboxAndVersionedSessions(t *testing.T
 	}
 	if len(uniqueClaims) != consumers {
 		t.Fatalf("concurrent ClaimMail claimed %d unique rows, want %d", len(uniqueClaims), consumers)
+	}
+}
+
+func TestStoreIntegrationRBACAndInvitationLifecycle(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not set")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	store := NewStore(db)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if err := resetAuthState(cleanupCtx, db); err != nil {
+			t.Errorf("reset auth state: %v", err)
+		}
+		_ = db.Close()
+	})
+	if err := resetAuthState(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CheckSchema(ctx); err != nil {
+		t.Fatalf("CheckSchema() error = %v", err)
+	}
+
+	setupDigest := sha256.Sum256([]byte("rbac setup token"))
+	if complete, err := store.ReplaceCurrentToken(ctx, setupDigest[:], time.Hour); err != nil || complete {
+		t.Fatalf("ReplaceCurrentToken() = %t, %v", complete, err)
+	}
+	name, _ := domain.NewName("RBAC Admin")
+	email, _ := domain.NewEmail("rbac-admin@example.com")
+	admin, err := store.Complete(ctx, setupDigest[:], name, email, "$argon2id$test")
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+
+	var superRoleID string
+	if err := db.QueryRowContext(ctx, `SELECT id::text FROM auth_roles WHERE system_key = 'super_admin'`).Scan(&superRoleID); err != nil {
+		t.Fatal(err)
+	}
+	principal, err := store.FindPrincipalByID(ctx, admin.ID)
+	if err != nil || !principal.SuperAdmin || len(principal.Roles) != 1 {
+		t.Fatalf("initial principal = %#v, %v", principal, err)
+	}
+	if got := principal.EffectivePermissions(domain.DefaultPermissionCatalog()); len(got) != 2 {
+		t.Fatalf("initial effective permissions = %#v", got)
+	}
+
+	role, err := store.CreateRole(ctx, "Read Only", "", []domain.PermissionKey{domain.PermissionUsersRead})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	if role.Revision != 1 || len(role.Permissions) != 1 {
+		t.Fatalf("created role = %#v", role)
+	}
+	assigned, err := store.ReplaceUserRoles(ctx, admin.ID, 1, []string{superRoleID, role.ID})
+	if err != nil || assigned.AuthVersion != 2 || len(assigned.Roles) != 2 {
+		t.Fatalf("ReplaceUserRoles(additive) = %#v, %v", assigned, err)
+	}
+	role, err = store.ReplaceRole(ctx, role.ID, role.Revision, "Read Only", "renamed only", []domain.PermissionKey{domain.PermissionUsersRead})
+	if err != nil || role.Revision != 2 {
+		t.Fatalf("ReplaceRole(metadata) = %#v, %v", role, err)
+	}
+	var unchangedVersion int64
+	if err := db.QueryRowContext(ctx, `SELECT auth_version FROM auth_users WHERE id = $1::uuid`, admin.ID).Scan(&unchangedVersion); err != nil || unchangedVersion != 2 {
+		t.Fatalf("metadata rename auth_version = %d, %v", unchangedVersion, err)
+	}
+	role, err = store.ReplaceRole(ctx, role.ID, role.Revision, "Read Only", "renamed only", []domain.PermissionKey{domain.PermissionRolesRead})
+	if err != nil || role.Revision != 3 {
+		t.Fatalf("ReplaceRole(grant) = %#v, %v", role, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT auth_version FROM auth_users WHERE id = $1::uuid`, admin.ID).Scan(&unchangedVersion); err != nil || unchangedVersion != 3 {
+		t.Fatalf("grant change auth_version = %d, %v", unchangedVersion, err)
+	}
+	if err := store.DeleteRole(ctx, role.ID); !errors.Is(err, application.ErrRoleInUse) {
+		t.Fatalf("DeleteRole(assigned) = %v, want role in use", err)
+	}
+
+	key := bytes.Repeat([]byte{0x31}, 32)
+	selector := bytes.Repeat([]byte{0x41}, 16)
+	material, err := domain.NewInvitationMaterial(key, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitation, err := store.CreateInvitation(ctx, admin.ID, "Invited Admin", "invited@example.com", domain.LocaleEnglish, []string{superRoleID, role.ID}, material.Selector, material.VerifierDigest, 2*time.Hour)
+	if err != nil {
+		t.Fatalf("CreateInvitation() error = %v", err)
+	}
+	if len(invitation.Roles) != 2 || invitation.Revision != 1 {
+		t.Fatalf("created invitation = %#v", invitation)
+	}
+	listedRoles, err := store.ListRoles(ctx)
+	if err != nil {
+		t.Fatalf("ListRoles() error = %v", err)
+	}
+	var listedRole domain.Role
+	for _, candidate := range listedRoles {
+		if candidate.ID == role.ID {
+			listedRole = candidate
+			break
+		}
+	}
+	if listedRole.ID == "" || listedRole.AssignmentCount != 2 {
+		t.Fatalf("ListRoles() role reference count = %#v, want two user/invitation references", listedRole)
+	}
+	detailedRole, err := store.FindRole(ctx, role.ID)
+	if err != nil || detailedRole.AssignmentCount != listedRole.AssignmentCount {
+		t.Fatalf("FindRole() reference count = %#v, %v; list count = %d", detailedRole, err, listedRole.AssignmentCount)
+	}
+	duplicateSelector := bytes.Repeat([]byte{0x42}, 16)
+	duplicateMaterial, _ := domain.NewInvitationMaterial(key, duplicateSelector)
+	if _, err := store.CreateInvitation(ctx, admin.ID, "Invited Admin", "INVITED@example.com", domain.LocaleEnglish, []string{role.ID}, duplicateMaterial.Selector, duplicateMaterial.VerifierDigest, time.Hour); !errors.Is(err, application.ErrInvitationPending) {
+		t.Fatalf("duplicate invitation = %v, want pending conflict", err)
+	}
+	job, err := store.ClaimMail(ctx, "00000000-0000-4000-8000-000000000031", time.Minute)
+	if err != nil || job == nil || job.Kind != application.MailUserInvitation || job.InvitationID != invitation.ID || !bytes.Equal(job.InvitationSelector, selector) {
+		t.Fatalf("ClaimMail(invitation) = %#v, %v", job, err)
+	}
+
+	if err := store.CompleteInvitation(ctx, selector, material.VerifierDigest, "$argon2id$invited"); err != nil {
+		t.Fatalf("CompleteInvitation() error = %v", err)
+	}
+	if err := store.PreflightInvitation(ctx, selector, material.VerifierDigest); !errors.Is(err, application.ErrInvitationInvalid) {
+		t.Fatalf("PreflightInvitation(replay) = %v", err)
+	}
+	var invitedID string
+	if err := db.QueryRowContext(ctx, `SELECT id::text FROM auth_users WHERE email_canonical = 'invited@example.com'`).Scan(&invitedID); err != nil {
+		t.Fatal(err)
+	}
+	invited, err := store.ReplaceUserRoles(ctx, invitedID, 1, []string{superRoleID})
+	if err != nil || invited.AuthVersion != 2 {
+		t.Fatalf("ReplaceUserRoles(invited) = %#v, %v", invited, err)
+	}
+	if _, err := store.ReplaceUserRoles(ctx, admin.ID, 3, []string{superRoleID}); err != nil {
+		t.Fatalf("ReplaceUserRoles(admin cleanup) = %v", err)
+	}
+	if err := store.DeleteRole(ctx, role.ID); err != nil {
+		t.Fatalf("DeleteRole(after reassignment) = %v", err)
 	}
 }
