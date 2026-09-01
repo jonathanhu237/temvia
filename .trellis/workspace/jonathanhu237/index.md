@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 9
+- **Total Sessions**: 10
 - **Last Active**: 2026-09-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~219 | Active |
+| `journal-1.md` | ~241 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 10 | 2026-09-01 | Redirect setup without authority | `df8f1e2` | `main` |
 | 9 | 2026-09-01 | Keep login form available before setup | `a1ececd` | `main` |
 | 8 | 2026-09-01 | Restore shadcn neutral theme | `c6be6e0` | `main` |
 | 7 | 2026-09-01 | Revise administrator password policy | `adef2d4` | `main` |

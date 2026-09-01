@@ -217,3 +217,25 @@ Removed the login route setup-status gate so uninitialized installations show th
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: Redirect setup without authority
+<!-- trellis-session: v=2 fp=c8b19c784fc51821 -->
+
+**Date**: 2026-09-01
+**Task**: Redirect setup without authority
+**Branch**: `main`
+
+### Summary
+
+Removed the setup recovery page, redirected bare, refreshed, and rejected setup authority to login before status fetch, moved credential cleanup to the router onLeave lifecycle, and added generated Chromium coverage.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `df8f1e2` | fix(admin): redirect setup without authority |
+
+### Status
+
+[OK] **Completed**
