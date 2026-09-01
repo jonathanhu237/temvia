@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
+- **Total Sessions**: 12
 - **Last Active**: 2026-09-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~264 | Active |
+| `journal-1.md` | ~287 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-09-02 | Implement RBAC roles and invitations | `ecbc548`, `d59dc6c` | `feat/rbac-roles` |
 | 11 | 2026-09-02 | Implement transactional password recovery | `7a7bf90`, `efa6f38` | `main` |
 | 10 | 2026-09-01 | Redirect setup without authority | `df8f1e2` | `main` |
 | 9 | 2026-09-01 | Keep login form available before setup | `a1ececd` | `main` |

@@ -262,3 +262,26 @@ Implemented and verified a secure email password-recovery flow with PostgreSQL t
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: Implement RBAC roles and invitations
+<!-- trellis-session: v=2 fp=a714b6907a1798a5 -->
+
+**Date**: 2026-09-02
+**Task**: Implement RBAC roles and invitations
+**Branch**: `feat/rbac-roles`
+
+### Summary
+
+Implemented flat additive RBAC, Super Admin continuity, user-role assignment, invitation activation, permission-aware admin UI, schema migration 3, scaffold synchronization, stable specifications, and full local/Centaurus verification.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ecbc548` | feat(auth): add RBAC roles and user invitations |
+| `d59dc6c` | docs(auth): document RBAC contracts |
+
+### Status
+
+[OK] **Completed**
