@@ -1,8 +1,8 @@
-# Setup, Authentication, and Recovery Contract
+# Setup, Authentication, Recovery, and Access Contract
 
 ## 1. Scope / Trigger
 
-Use this contract when changing the generated Go API's initial-administrator setup, email/password login, current-session lookup, logout, password recovery, PostgreSQL schema, Redis session/limiter state, or their deployment configuration. The React admin is a separate consumer and is not part of this backend contract.
+Use this contract when changing the generated Go API's initial-administrator setup, email/password login, current-session lookup, logout, password recovery, roles, user-role assignments, invitations, PostgreSQL schema, Redis session/limiter state, or their deployment configuration. The React admin is a separate consumer and is not part of this backend contract.
 
 The implementation is a feature-oriented modular monolith. Business rules live in `internal/auth/domain` and `internal/auth/application`; HTTP, PostgreSQL, Redis, and Argon2id are adapters. Runtime calls flow inward and back out through application ports, while source dependencies point inward.
 
@@ -52,10 +52,12 @@ Adapters may implement multiple narrow application ports. Do not introduce gener
 
 - Migration version `000001_auth` creates `auth_setup` and `auth_users`.
 - Migration version `000002_password_recovery` adds positive `auth_users.auth_version`, one current row per user in `auth_password_resets`, and the durable `auth_mail_outbox`.
+- Migration version `000003_rbac` adds roles, role permissions, user-role assignments, pending invitations, invitation-role assignments, and the invitation outbox reference.
 - `auth_setup` contains exactly one `singleton=true` row.
 - `auth_users.id` is PostgreSQL 18 `uuidv7()` and is serialized as canonical UUID text.
 - `email_canonical` is unique and lowercase; `email` preserves the validated display value.
 - `auth_version` increments in the same transaction as a successful password reset. Redis sessions carry the version and fail closed when it differs or is absent.
+- The migration creates immutable `system_key='super_admin'`, assigns it to every existing user, and fresh setup assigns it to the first user in the setup transaction.
 - Reset rows store a 16-byte selector and SHA-256 verifier digest only. Outbox reset jobs revalidate the current selector/digest before sending; SMTP is outside database transactions.
 
 ## 3. Contracts
@@ -102,6 +104,7 @@ The login limiter atomically evaluates one global bucket and one SHA-256 canonic
 - auth resources: `SESSION_*`, `PASSWORD_HASH_MAX_CONCURRENCY`, `LOGIN_RATE_LIMIT_*`, `PASSWORD_RESET_*`.
 - mail delivery: `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS_MODE`, optional SMTP authentication (`SMTP_USERNAME` and `SMTP_PASSWORD` must be supplied together), `MAIL_FROM_NAME`, `MAIL_FROM_ADDRESS`, `SMTP_DELIVERY_TIMEOUT`.
 - outbox: `MAIL_DISPATCH_INTERVAL`, `MAIL_OUTBOX_LEASE_TTL`, `MAIL_RETRY_INITIAL_INTERVAL`, `MAIL_RETRY_MAX_INTERVAL`, `MAIL_NOTIFICATION_TTL`.
+- invitations: required 32-byte Base64URL `INVITATION_TOKEN_KEY` and bounded `INVITATION_LINK_TTL` (default `72h`, maximum 7 days).
 
 Production requires an HTTPS public URL and `starttls`/`tls` SMTP; SMTP authentication is optional, but when configured both `SMTP_USERNAME` and `SMTP_PASSWORD` are required (the reserved `.test` sender is development-only). Development HTTP keeps Origin enforcement and authentication; non-loopback HTTP emits an operator warning. Redis is intentionally ephemeral: no AOF, RDB, or Redis data volume. PostgreSQL uses a named persistent volume. Mailpit is a development-only Compose profile with loopback UI mapping; the API does not wait for SMTP readiness.
 
@@ -182,3 +185,111 @@ Correct: return endpoint-specific success JSON and Problem Details with stable c
 Wrong: store raw setup/session credentials or canonical email in Redis keys.
 
 Correct: store only setup-token SHA-256 in PostgreSQL and use SHA-256-derived Redis keys with finite TTL.
+
+## Scenario: Flat RBAC, invitations, and session revocation
+
+### 1. Scope / Trigger
+
+Apply this scenario whenever permissions, protected routes, roles, user access,
+invitation activation, or principal/session projections change. Temvia uses
+flat additive RBAC: users receive authority only through roles, absent
+permissions deny access, and direct user grants, inheritance, deny rules,
+conditions, scopes, and delegated role administration are not supported.
+
+### 2. Signatures
+
+The live catalog initially contains only `users.read` and `roles.read`.
+`Super Admin` is a system role whose effective permissions are the complete
+live catalog, not persisted wildcard rows. The stable HTTP surface is:
+
+| Method and path | Authority | Success |
+| --- | --- | --- |
+| `GET /api/users?cursor=&limit=` | `users.read` | `200` activated users with complete roles and `authVersion` |
+| `PUT /api/users/{id}/roles` | Super Admin | `200` replaced non-empty assignment |
+| `GET /api/roles` / `GET /api/roles/{id}` | `roles.read` | `200` roles/catalog or role detail |
+| `POST /api/roles` | Super Admin | `201` custom role |
+| `PUT /api/roles/{id}` | Super Admin | `200` complete replacement using `revision` |
+| `DELETE /api/roles/{id}` | Super Admin | `204` only when custom and unused |
+| `GET /api/user-invitations` | Super Admin | `200` pending invitations |
+| `POST /api/user-invitations` | Super Admin | `201` pending invitation and queued mail |
+| `POST /api/user-invitations/{id}/resend` | Super Admin | `202` replaced authority and expiry |
+| `DELETE /api/user-invitations/{id}` | Super Admin | `204` revoked invitation |
+| `POST /api/auth/invitations/accept` | Public invitation authority | `204`, no session |
+
+The application boundary uses `AccessManagement` for authenticated role/user/
+invitation use cases and `InvitationAcceptance.Complete(ctx, token, password)`
+for public activation. PostgreSQL migration `000003_rbac` owns
+`auth_roles`, `auth_role_permissions`, `auth_user_roles`,
+`auth_user_invitations`, and `auth_invitation_roles`.
+
+### 3. Contracts
+
+- Custom-role input is `{name, description, permissions}`; replacement also
+  requires the current positive `revision`. Permissions are a non-empty unique
+  subset of the live catalog.
+- Assignment input is `{roleIds, authVersion}` and replaces the complete role
+  set. Activated users always have at least one role.
+- Invitation input is `{name, email, locale, roleIds}`. Acceptance is
+  `{token, password, locale}`. Authority is
+  `v1.<16-byte-selector>.<32-byte-verifier>` under a distinct HMAC domain;
+  PostgreSQL stores only selector and verifier digest.
+- `/api/auth/login` and `/api/auth/me` return `{user, roles, permissions,
+  superAdmin}`. Effective permissions are the sorted, deduplicated union of
+  persisted role grants; response fields and role names are never authority.
+- Role-grant changes increment `auth_version` for every assigned user in the
+  same transaction. Assignment changes increment the target user version.
+  Metadata-only role renames do not revoke sessions.
+- Removing Super Admin locks the system role before counting activated
+  holders. Pending invitations do not count, and a mutation that would leave
+  zero holders is rejected.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| Missing required read permission or non-super mutation | `403 /problems/forbidden` |
+| Empty/duplicate/unknown role grant or assignment | `422 /problems/validation-failed` |
+| Stale role `revision` or user `authVersion` | `409 /problems/stale-revision` |
+| Rename/edit/delete system role | `409 /problems/role-immutable` |
+| Delete an assigned role | `409 /problems/role-in-use` |
+| Remove the last activated Super Admin | `409 /problems/last-super-admin` |
+| Email is activated | `422` validation problem with `email_already_registered` |
+| Email is already pending | `409 /problems/invitation-pending` |
+| Malformed/expired/replayed/revoked/superseded invite | `403 /problems/invalid-invitation` |
+| Session version differs from PostgreSQL | `401 /problems/unauthenticated` |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a super administrator creates a read-only role, invites a user into it,
+  the user activates and signs in explicitly, and only the granted read routes
+  succeed.
+- Base: grant membership changes. Existing sessions fail on their next request
+  and the user signs in again to receive the new principal.
+- Bad: trust a permission array already in a response/session object, role
+  display name, frontend navigation, or pending invitation as authorization.
+  Resolve current persisted roles and derive authority from them.
+
+### 6. Tests Required
+
+- Domain/application tests cover catalog validation, additive grants,
+  Super Admin expansion, invitation derivation/preflight/replay, and dependency
+  failure mapping.
+- PostgreSQL 18 integration tests cover migration upgrade/fresh setup, lock
+  order, role revisions, user versions, delete restrict, one-winner activation,
+  mail cancellation, last-super rejection and successful transfer.
+- HTTP matrix tests cover every read/mutation with unauthenticated,
+  insufficient-permission and Super Admin principals, strict JSON/Origin,
+  pagination and the exact conflict problems.
+- Generated-project real-stack verification must exercise invitation delivery
+  through Mailpit, activation, permission denial, grant-driven session
+  invalidation, role-in-use deletion, last-super rejection, and a successful
+  Super Admin transfer.
+
+### 7. Wrong vs Correct
+
+Wrong: copy `superAdmin`, permissions, or a role name from an earlier principal
+projection and use it as authority.
+
+Correct: resolve the session version against PostgreSQL, load current role
+assignments, expand only the immutable system key, and authorize one explicit
+catalog permission or Super Admin requirement at the application boundary.

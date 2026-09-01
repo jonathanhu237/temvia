@@ -1,0 +1,12 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace permission, principal, role, invitation, revision, and error contracts from PostgreSQL through Go HTTP and typed React consumers."}
+{"file":".trellis/spec/backend/authentication-contract.md","reason":"Preserve setup, session auth_version, password creation, Origin, cookie, recovery, outbox, and public Problem Details contracts while adding RBAC and invitations."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Keep identity/access changes inside the existing clean/hexagonal auth capability with narrow application ports and explicit composition."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Implement migration 3, direct SQL, locking, optimistic revisions, last-super continuity, role references, invitations, and outbox changes transactionally."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Add stable forbidden, invitation, role-in-use, last-super, and stale-revision mappings without exposing internal or credential data."}
+{"file":".trellis/spec/backend/scaffolding-contract.md","reason":"Keep migration versions, template required-file inventories, packed output, generated modules, and deployment contracts synchronized."}
+{"file":".trellis/spec/frontend/directory-structure.md","reason":"Place access feature logic, routes, shared API contracts, and invitation bootstrap at the established boundaries."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Build accessible shadcn-composed role, user, permission, invitation, error, and confirmation surfaces."}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"Use feature-owned TanStack Query contracts and preserve authentication error, redirect, and retry semantics."}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Keep server state in Query, form state local, and invitation authority in cleared fragment/module memory only."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Runtime-validate all enriched principal, catalog, role, user, invitation, pagination, and Problem Details responses with Zod."}
+{"file":".trellis/tasks/09-02-rbac-roles-and-user-assignments/research/rbac-industry-patterns.md","reason":"Apply the reviewed flat RBAC, additive grants, least privilege, super-administrator restriction, and anti-escalation findings."}

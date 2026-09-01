@@ -21,8 +21,9 @@ Router, TanStack Query, React Hook Form, Zod, i18next and the Fetch API.
   create a root frontend workspace.
 - Browser requests use relative `/api` paths through the shared Fetch adapter;
   UI components never call `fetch` directly.
-- Authentication state is memory-only. Setup authority is captured from the
-  `/setup#token=...` fragment before React renders, then cleared after use.
+- Authentication state is memory-only. Setup, recovery, and invitation
+  authority is captured from URL fragments before React renders, then cleared
+  after use.
 - All user visible copy comes from the typed English and Simplified Chinese
   i18next resources.
 - Run the admin checks from `template/admin`: `pnpm lint`, `pnpm check`,

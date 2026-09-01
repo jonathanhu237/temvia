@@ -50,9 +50,15 @@ from the same root environment inventory.
   removed from history, held in module memory and cleared after setup,
   invalid authority or navigation away. Password-reset authority follows the
   same shared parser for `/reset-password#token=v1.<selector>.<verifier>` and
-  is never persisted beyond module memory.
+  is never persisted beyond module memory. Invitation acceptance uses the same
+  rule for `/accept-invitation#token=v1.<selector>.<verifier>`.
 - Authentication state remains in the process memory QueryClient. A failed
   logout keeps the current user and shows a retryable Alert.
+- Users/Roles navigation and read UI follow current-principal permissions;
+  mutation controls require `superAdmin`. This is presentation only: API
+  authorization must still reject direct requests.
+- Role and user editors submit complete replacement payloads with `revision`
+  or `authVersion`; conflict handling reloads server state before retry.
 - Keep all UI text in the English and Simplified Chinese resource trees.
 - Recovery request success is generic and localized; reset success, invalid/
   expired-link, loading, validation, and dependency-failure states remain
@@ -79,8 +85,10 @@ asset response and falls back only navigation paths to `index.html`.
 
 Run Playwright Chromium against the forwarded Caddy origin with a fresh setup
 link. Cover setup, login, reload session restoration, locale selection,
-password recovery via Mailpit, reset-fragment clearing, old-session
-invalidation, responsive Sidebar navigation, logout and an axe smoke. Save screenshots and
+password recovery via Mailpit, reset-fragment clearing, invitation activation,
+read/mutation permission denial, grant-driven session invalidation,
+role-in-use and last-super conflicts, responsive Sidebar navigation, logout
+and an axe smoke. Save screenshots and
 traces only when a test fails or a targeted review needs them.
 
 Set `PLAYWRIGHT_BASE_URL` to the exact forwarded Caddy origin whenever a flow

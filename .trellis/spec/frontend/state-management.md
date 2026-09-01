@@ -2,8 +2,9 @@
 
 ## State categories
 
-- **Server state:** TanStack Query owns setup status and the current user. The
-  API is the authority after a reload.
+- **Server state:** TanStack Query owns setup status, the current principal,
+  roles, activated users, and pending invitations. The API is the authority
+  after a reload.
 - **Form state:** React Hook Form owns setup and login values, validation and
   field focus. Confirmation password is never sent to the API.
 - **Ephemeral UI state:** component `useState` owns password visibility, open
@@ -34,8 +35,21 @@ Query cache; invalid/expired authority clears the value and offers a new-link
 path. Tokens never enter Query state, Context, localStorage, sessionStorage, or
 cookies managed by browser code.
 
+Role and user replacement forms must be keyed by the server `revision` or
+`authVersion`. On `409`, invalidate and reload the affected query before the
+user retries; never resubmit stale local checkbox state. Successful grant or
+assignment changes invalidate both access data and the current-principal query
+because the current browser may have changed authority.
+
+Invitation authority uses the same fragment-only module-memory lifecycle as
+password reset. Acceptance clears it on success or invalid authority, creates
+no authenticated cache entry, and navigates to explicit login.
+
 ## Forbidden patterns
 
 Do not add Zustand, Redux, a second query client, auth data in Context, or
 credentials in localStorage/cookies managed by browser code. Do not infer
 logout from a network failure or convert a dependency outage into a `401`.
+Do not derive authority from visible navigation or a role display name; use the
+current principal's `permissions` and `superAdmin` only for presentation, while
+the API remains authoritative.

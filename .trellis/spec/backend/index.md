@@ -15,7 +15,7 @@ This directory contains the executable contracts and conventions for Temvia's ge
 | Guide | Description | Status |
 |-------|-------------|--------|
 | [Scaffolding Contract](./scaffolding-contract.md) | CLI generation, nested seed files, Git safety, npm packing, and generated application contract | Active |
-| [Setup and Authentication](./authentication-contract.md) | Cross-layer setup/login, HTTP, PostgreSQL, Redis, cookie, and environment contract | Active |
+| [Identity and Access](./authentication-contract.md) | Cross-layer setup/login/recovery/RBAC/invitations, HTTP, PostgreSQL, Redis, cookie, and environment contract | Active |
 | [Directory Structure](./directory-structure.md) | Feature-oriented modular-monolith boundaries and layout | Active |
 | [Database Guidelines](./database-guidelines.md) | `database/sql`, direct SQL, transactions, and external migrations | Active |
 | [Error Handling](./error-handling.md) | Domain/application errors and Problem Details/i18n mapping | Active |

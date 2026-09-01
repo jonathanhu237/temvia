@@ -33,6 +33,7 @@ return tx.Commit()
 - API startup reads `schema_migrations` and requires the exact clean version compiled as `ExpectedMigrationVersion`.
 - Keep the constant synchronized with bundled migration filenames and test that relationship.
 - Migration 2 owns `auth_users.auth_version`, `auth_password_resets`, and `auth_mail_outbox`; rollback drops outbox before reset state, then the auth-version column/constraint. Never rewrite migration 1 after it ships.
+- Migration 3 owns RBAC/invitation tables and the invitation outbox extension. It inserts the `super_admin` system role and assigns every pre-migration user so upgrades preserve access. Rollback removes invitation/outbox references before assignments and roles. Never rewrite migrations 1 or 2 after they ship.
 - Before release, an unshipped migration may be corrected. After release, preserve history and add a forward migration.
 - Routine `docker compose down` and Make targets must preserve the PostgreSQL volume. Destructive `down` or `-v` is an explicit operator action, never upgrade recovery automation.
 
@@ -42,6 +43,9 @@ return tx.Commit()
 - Prefer explicit constraints for singleton state, paired nullable fields, canonical values, and business bounds.
 - User IDs use PostgreSQL 18 `uuidv7()` and cross the Go/JSON boundary as opaque canonical strings.
 - Store display email and unique lowercase `email_canonical` separately.
+- Custom roles persist an explicit non-empty permission set. The system role persists no wildcard grants; the live permission catalog expands `system_key='super_admin'` at runtime.
+- Role deletion is `RESTRICT`; never cascade an assigned role away. User-role replacement and activation create a complete non-empty assignment set transactionally.
+- Any transaction that may remove the system role locks the system role before user/assignment rows, then proves another activated holder remains. Use the same lock order for concurrent assignment updates.
 
 ## Validation Matrix
 
@@ -59,7 +63,8 @@ return tx.Commit()
 - Wrong: keep a transaction open while hashing a password. Correct: preflight, hash outside the transaction, then lock and revalidate.
 - Wrong: construct SQL or migration URLs by interpolating secrets. Correct: parameterize SQL and pass migration credentials through `PG*` environment variables.
 - Wrong: hold a transaction open while delivering SMTP or claim work without ownership. Correct: commit the lease first, send outside the transaction, and condition terminal updates on the lease token.
+- Wrong: check the Super Admin count without a shared lock order or count pending invitations. Correct: lock the system role first and count activated `auth_user_roles` holders inside the mutation transaction.
 
 ## Tests Required
 
-Run unit tests for schema-version/file synchronization and error mapping. Run PostgreSQL 18 integration tests after migration for exact schema readiness, setup lifecycle, concurrent one-winner completion, UUIDv7, reset replacement/expiry/replay, auth-version invalidation, transactional outbox, lease expiry/retry/cleanup, and persistence. Exercise both migration up and down on a disposable database.
+Run unit tests for schema-version/file synchronization and error mapping. Run PostgreSQL 18 integration tests after migration for exact schema readiness, setup lifecycle, concurrent one-winner completion, UUIDv7, reset replacement/expiry/replay, RBAC upgrade assignment, role revisions, delete restriction, last-super continuity, invitation activation, auth-version invalidation, transactional outbox, lease expiry/retry/cleanup, and persistence. Exercise both migration up and down on a disposable database.

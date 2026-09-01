@@ -9,6 +9,7 @@ template/admin/src/
 ├── app/                 # Router context, QueryClient and providers
 ├── components/ui/       # Open-code shadcn components
 ├── features/auth/       # Setup, login, session shell and auth schemas
+├── features/access/     # Roles, users, assignments and invitations
 ├── hooks/               # Small reusable browser hooks
 ├── lib/                 # UI utilities such as cn()
 ├── routes/              # TanStack file routes and boundaries
@@ -35,6 +36,8 @@ query option factories end in `Options`, and stable query keys end in
 Place route files in `routes/`, feature behavior in `features/<name>/`, and
 cross-feature protocol or browser behavior in `shared/`. Password recovery
 forms stay under `features/auth/`; reset fragments are captured by the shared
-bootstrap authority module before React mounts. Keep shadcn source under
+bootstrap authority module before React mounts. Invitation acceptance follows
+the same boundary at `/accept-invitation#token=...`; management pages and their
+query/mutation behavior stay under `features/access/`. Keep shadcn source under
 `components/ui/`; compose it in feature components instead of modifying
 generated primitives for one screen.
