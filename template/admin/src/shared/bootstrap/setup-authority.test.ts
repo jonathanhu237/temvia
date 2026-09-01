@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  capturePasswordResetAuthority,
   captureSetupAuthority,
+  clearPasswordResetAuthority,
   clearSetupAuthority,
+  getPasswordResetAuthority,
   getSetupAuthority,
+  isCanonicalPasswordResetAuthority,
   isCanonicalSetupAuthority,
 } from './setup-authority'
 
@@ -50,5 +54,34 @@ describe('setup URL authority', () => {
     })
     expect(getSetupAuthority()).toBeUndefined()
     clearSetupAuthority()
+  })
+})
+
+describe('password reset URL authority', () => {
+  const resetToken = `v1.${'A'.repeat(22)}.${'B'.repeat(43)}`
+
+  it('captures and immediately clears a canonical reset fragment', () => {
+    let replaced = ''
+    const result = capturePasswordResetAuthority(
+      { pathname: '/reset-password', search: '', hash: `#token=${resetToken}` },
+      { state: null, replaceState: (_state, _title, url) => { replaced = String(url) } },
+    )
+    expect(result).toBe(resetToken)
+    expect(getPasswordResetAuthority()).toBe(resetToken)
+    expect(replaced).toBe('/reset-password')
+    expect(isCanonicalPasswordResetAuthority(resetToken)).toBe(true)
+  })
+
+  it('rejects reset credentials outside the reset route or with extra fragment fields', () => {
+    expect(capturePasswordResetAuthority(
+      { pathname: '/login', search: '', hash: `#token=${resetToken}` },
+      { state: null, replaceState: () => undefined },
+    )).toBeUndefined()
+    expect(capturePasswordResetAuthority(
+      { pathname: '/reset-password', search: '', hash: `#token=${resetToken}&next=/login` },
+      { state: null, replaceState: () => undefined },
+    )).toBeUndefined()
+    expect(getPasswordResetAuthority()).toBeUndefined()
+    clearPasswordResetAuthority()
   })
 })

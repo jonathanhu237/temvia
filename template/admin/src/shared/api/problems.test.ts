@@ -3,12 +3,14 @@ import { ApiProblemError } from './client'
 import {
   fieldProblemFor,
   fieldMessageKey,
+  isInvalidPasswordResetToken,
   isInvalidSetupToken,
   isSetupComplete,
   isUnauthenticated,
   problemMessageKey,
   translateFieldProblem,
   translateClientFieldError,
+  translatePasswordResetProblem,
   translateProblem,
 } from './problems'
 import { i18n, initializeI18n } from '@/shared/i18n'
@@ -57,6 +59,20 @@ describe('localized problem mapping', () => {
     expect(translateClientFieldError(undefined, translate)).toBeUndefined()
   })
 
+  it.each([
+    ['en', 'Too many password reset requests. Wait a moment and try again.'],
+    ['zh-CN', '密码重置请求次数过多，请稍后重试。'],
+  ] as const)('uses recovery-specific rate-limit copy in %s', async (locale, message) => {
+    await i18n.changeLanguage(locale)
+    const error = new ApiProblemError({
+      type: '/problems/rate-limited',
+      title: 'Too many requests',
+      status: 429,
+      code: 'rate_limited',
+    })
+    expect(translatePasswordResetProblem(error, i18n.t.bind(i18n))).toBe(message)
+  })
+
   it('selects Chinese resources and synchronizes document metadata', async () => {
     await i18n.changeLanguage('zh-CN')
     document.documentElement.lang = i18n.language
@@ -77,5 +93,7 @@ describe('localized problem mapping', () => {
     expect(isInvalidSetupToken(problem('/problems/invalid-setup-token', 409, 'invalid_setup_token'))).toBe(false)
     expect(isSetupComplete(problem('/problems/setup-complete', 409, 'setup_complete'))).toBe(true)
     expect(isSetupComplete(problem('/problems/setup-complete', 503, 'setup_complete'))).toBe(false)
+    expect(isInvalidPasswordResetToken(problem('/problems/invalid-password-reset-token', 403, 'invalid_password_reset_token'))).toBe(true)
+    expect(isInvalidPasswordResetToken(problem('/problems/invalid-password-reset-token', 500, 'invalid_password_reset_token'))).toBe(false)
   })
 })

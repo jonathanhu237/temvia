@@ -1,9 +1,54 @@
 package domain
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
+
+func TestPasswordResetTokenRoundTripOnlyExposesDigest(t *testing.T) {
+	key := bytes.Repeat([]byte{0x42}, PasswordResetVerifierBytes)
+	selector := bytes.Repeat([]byte{0x13}, PasswordResetSelectorBytes)
+	material, err := NewPasswordResetMaterial(key, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := NewPasswordResetToken(key, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(token, "v1.") || len(strings.Split(token, ".")) != 3 {
+		t.Fatalf("token = %q", token)
+	}
+	gotSelector, gotDigest, ok := ParsePasswordResetToken(token)
+	if !ok || !bytes.Equal(gotSelector, material.Selector) || !bytes.Equal(gotDigest, material.VerifierDigest) {
+		t.Fatalf("ParsePasswordResetToken() = %x, %x, %t", gotSelector, gotDigest, ok)
+	}
+	if _, _, ok := ParsePasswordResetToken(token + "="); ok {
+		t.Fatal("padded verifier accepted")
+	}
+}
+
+func TestPasswordResetTokenRejectsMalformedAndNonCanonicalValues(t *testing.T) {
+	key := bytes.Repeat([]byte{0x42}, PasswordResetVerifierBytes)
+	selector := bytes.Repeat([]byte{0x13}, PasswordResetSelectorBytes)
+	token, err := NewPasswordResetToken(key, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(token, ".")
+	for _, token := range []string{
+		"",
+		"v2." + parts[1] + "." + parts[2],
+		"v1." + parts[1] + "." + parts[2] + ".extra",
+		"v1." + parts[1][:21] + "." + parts[2],
+		"v1." + parts[1] + "." + parts[2][:42] + "=",
+	} {
+		if _, _, ok := ParsePasswordResetToken(token); ok {
+			t.Errorf("ParsePasswordResetToken(%q) accepted malformed token", token)
+		}
+	}
+}
 
 func TestName(t *testing.T) {
 	got, err := NewName(" \u0065\u0301  Ada  ")

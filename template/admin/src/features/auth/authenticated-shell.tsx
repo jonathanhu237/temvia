@@ -35,6 +35,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
   const [logoutError, setLogoutError] = useState<string>()
   const locale: Locale = i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
   const logout = useMutation({
+    retry: false,
     mutationFn: () => api.logout(),
     onSuccess: () => {
       setLogoutError(undefined)

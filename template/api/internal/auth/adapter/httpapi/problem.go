@@ -26,20 +26,21 @@ type fieldProblem struct {
 var problemCatalog = map[string]struct {
 	title string
 }{
-	"invalid-request":        {"Invalid Request"},
-	"invalid-credentials":    {"Invalid Credentials"},
-	"unauthenticated":        {"Unauthenticated"},
-	"forbidden":              {"Forbidden"},
-	"invalid-setup-token":    {"Invalid Setup Token"},
-	"not-found":              {"Not Found"},
-	"method-not-allowed":     {"Method Not Allowed"},
-	"setup-complete":         {"Setup Complete"},
-	"content-too-large":      {"Content Too Large"},
-	"unsupported-media-type": {"Unsupported Media Type"},
-	"validation-failed":      {"Validation Failed"},
-	"rate-limited":           {"Too Many Requests"},
-	"internal-error":         {"Internal Server Error"},
-	"service-unavailable":    {"Service Unavailable"},
+	"invalid-request":              {"Invalid Request"},
+	"invalid-credentials":          {"Invalid Credentials"},
+	"unauthenticated":              {"Unauthenticated"},
+	"forbidden":                    {"Forbidden"},
+	"invalid-setup-token":          {"Invalid Setup Token"},
+	"invalid-password-reset-token": {"Invalid Password Reset Token"},
+	"not-found":                    {"Not Found"},
+	"method-not-allowed":           {"Method Not Allowed"},
+	"setup-complete":               {"Setup Complete"},
+	"content-too-large":            {"Content Too Large"},
+	"unsupported-media-type":       {"Unsupported Media Type"},
+	"validation-failed":            {"Validation Failed"},
+	"rate-limited":                 {"Too Many Requests"},
+	"internal-error":               {"Internal Server Error"},
+	"service-unavailable":          {"Service Unavailable"},
 }
 
 func writeProblem(w http.ResponseWriter, status int, name string) {
@@ -75,6 +76,8 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusUnauthorized, "unauthenticated")
 	case applicationError(err, application.ErrInvalidSetupToken):
 		writeProblem(w, http.StatusForbidden, "invalid-setup-token")
+	case applicationError(err, application.ErrInvalidPasswordResetToken):
+		writeProblem(w, http.StatusForbidden, "invalid-password-reset-token")
 	case applicationError(err, application.ErrSetupComplete):
 		writeProblem(w, http.StatusConflict, "setup-complete")
 	case applicationError(err, application.ErrEmailAlreadyRegistered):

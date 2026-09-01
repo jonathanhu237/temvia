@@ -3,6 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LoginForm } from './login-form'
+import { PasswordResetForm } from './password-reset-form'
+import { PasswordResetRequestForm } from './password-reset-request-form'
 import { SetupForm } from './setup-form'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import { captureSetupAuthority, getSetupAuthority } from '@/shared/bootstrap/setup-authority'
@@ -22,6 +24,8 @@ function mockApi(overrides: Partial<ApiClient> = {}): ApiClient {
     login: vi.fn(),
     me: vi.fn(),
     logout: vi.fn(),
+    requestPasswordReset: vi.fn(),
+    completePasswordReset: vi.fn(),
     ...overrides,
   }
 }
@@ -219,5 +223,28 @@ describe('authentication forms', () => {
     await user.type(screen.getByLabelText('Password', { exact: true }), 'correct horse battery')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(message)
+  })
+
+  it('submits normalized recovery request and reports the generic accepted state', async () => {
+    const user = userEvent.setup()
+    const api = mockApi({ requestPasswordReset: vi.fn().mockResolvedValue(undefined) })
+    const onAccepted = vi.fn()
+    renderWithQueryClient(<PasswordResetRequestForm api={api} onAccepted={onAccepted} />)
+    await user.type(screen.getByLabelText('Email'), ' admin@example.com ')
+    await user.click(screen.getByRole('button', { name: 'Send reset link' }))
+    await waitFor(() => expect(api.requestPasswordReset).toHaveBeenCalledWith({ email: 'admin@example.com', locale: 'en' }))
+    expect(onAccepted).toHaveBeenCalledOnce()
+  })
+
+  it('submits the reset token and password after matching NFC confirmation', async () => {
+    const user = userEvent.setup()
+    const api = mockApi({ completePasswordReset: vi.fn().mockResolvedValue(undefined) })
+    const onSuccess = vi.fn()
+    renderWithQueryClient(<PasswordResetForm api={api} token="v1.token" onSuccess={onSuccess} onInvalidAuthority={vi.fn()} />)
+    await user.type(screen.getByLabelText('Password', { exact: true }), 'Aa1!e\u0301xxx')
+    await user.type(screen.getByLabelText('Confirm password'), 'Aa1!éxxx')
+    await user.click(screen.getByRole('button', { name: 'Set new password' }))
+    await waitFor(() => expect(api.completePasswordReset).toHaveBeenCalledWith({ token: 'v1.token', password: 'Aa1!éxxx', locale: 'en' }))
+    expect(onSuccess).toHaveBeenCalledOnce()
   })
 })

@@ -1,37 +1,50 @@
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/
+const PASSWORD_RESET_TOKEN_PATTERN = /^v1\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/
 
 let setupAuthority: string | undefined
+let passwordResetAuthority: string | undefined
 
 export function isCanonicalSetupAuthority(value: string): boolean {
-  return TOKEN_PATTERN.test(value)
+	return TOKEN_PATTERN.test(value)
+}
+
+export function isCanonicalPasswordResetAuthority(value: string): boolean {
+	return PASSWORD_RESET_TOKEN_PATTERN.test(value)
+}
+
+function captureAuthority(
+	location: Pick<Location, 'pathname' | 'search' | 'hash'>,
+	history: Pick<History, 'state' | 'replaceState'>,
+	pathname: string,
+	validate: (value: string) => boolean,
+): string | undefined {
+	if (location.pathname !== pathname) return undefined
+
+	const hasFragment = location.hash.length > 0
+	let candidate: string | undefined
+	if (hasFragment) {
+		try {
+			const fragment = location.hash.slice(1)
+			const params = new URLSearchParams(fragment)
+			const tokens = params.getAll('token')
+			const entries = [...params.keys()]
+			if (tokens.length === 1 && entries.length === 1 && validate(tokens[0])) {
+				candidate = tokens[0]
+			}
+		} catch {
+			candidate = undefined
+		}
+		history.replaceState(history.state, '', `${location.pathname}${location.search}`)
+	}
+	return candidate
 }
 
 export function captureSetupAuthority(
   location: Pick<Location, 'pathname' | 'search' | 'hash'> = window.location,
   history: Pick<History, 'state' | 'replaceState'> = window.history,
 ): string | undefined {
-  setupAuthority = undefined
-  if (location.pathname !== '/setup') return undefined
-
-  const hasFragment = location.hash.length > 0
-  let candidate: string | undefined
-  if (hasFragment) {
-    try {
-      const fragment = location.hash.slice(1)
-      const params = new URLSearchParams(fragment)
-      const tokens = params.getAll('token')
-      const entries = [...params.keys()]
-      if (tokens.length === 1 && entries.length === 1 && isCanonicalSetupAuthority(tokens[0])) {
-        candidate = tokens[0]
-      }
-    } catch {
-      candidate = undefined
-    }
-    history.replaceState(history.state, '', `${location.pathname}${location.search}`)
-  }
-
-  setupAuthority = candidate
-  return candidate
+	setupAuthority = captureAuthority(location, history, '/setup', isCanonicalSetupAuthority)
+	return setupAuthority
 }
 
 export function getSetupAuthority(): string | undefined {
@@ -39,6 +52,21 @@ export function getSetupAuthority(): string | undefined {
 }
 
 export function clearSetupAuthority(): void {
-  setupAuthority = undefined
+	setupAuthority = undefined
 }
 
+export function capturePasswordResetAuthority(
+	location: Pick<Location, 'pathname' | 'search' | 'hash'> = window.location,
+	history: Pick<History, 'state' | 'replaceState'> = window.history,
+): string | undefined {
+	passwordResetAuthority = captureAuthority(location, history, '/reset-password', isCanonicalPasswordResetAuthority)
+	return passwordResetAuthority
+}
+
+export function getPasswordResetAuthority(): string | undefined {
+	return passwordResetAuthority
+}
+
+export function clearPasswordResetAuthority(): void {
+	passwordResetAuthority = undefined
+}

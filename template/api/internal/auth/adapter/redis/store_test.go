@@ -27,3 +27,14 @@ func TestBucketTTLLeavesFiniteStateLifetime(t *testing.T) {
 		t.Fatalf("bucketTTL() = %s, want %s", got, want)
 	}
 }
+
+func TestAsInt64ParsesRedisBulkStrings(t *testing.T) {
+	for _, value := range []interface{}{"7", []byte("8")} {
+		if got := asInt64(value); got <= 0 {
+			t.Fatalf("asInt64(%T) = %d, want positive version", value, got)
+		}
+	}
+	if got := asInt64("not-a-number"); got != 0 {
+		t.Fatalf("asInt64(malformed) = %d, want 0", got)
+	}
+}

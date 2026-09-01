@@ -1,5 +1,8 @@
 import {
-  loginInputSchema,
+	loginInputSchema,
+	passwordResetAcceptedSchema,
+	passwordResetCompleteInputSchema,
+	passwordResetRequestInputSchema,
   problemDetailsSchema,
   setupInputSchema,
   setupResponseSchema,
@@ -42,7 +45,9 @@ export interface ApiClient {
   setup(input: { token: string; name: string; email: string; password: string }, signal?: AbortSignal): Promise<void>
   login(input: { email: string; password: string }, signal?: AbortSignal): Promise<User>
   me(signal?: AbortSignal): Promise<User>
-  logout(signal?: AbortSignal): Promise<void>
+	logout(signal?: AbortSignal): Promise<void>
+	requestPasswordReset(input: { email: string; locale: 'en' | 'zh-CN' }, signal?: AbortSignal): Promise<void>
+	completePasswordReset(input: { token: string; password: string; locale: 'en' | 'zh-CN' }, signal?: AbortSignal): Promise<void>
 }
 
 interface RequestOptions {
@@ -141,6 +146,14 @@ export function createApiClient(): ApiClient {
     },
     logout: async (signal) => {
       await request('/api/auth/logout', { parse: (value: unknown) => value as undefined }, { method: 'POST', signal, expectedStatus: 204 })
+    },
+    requestPasswordReset: async (input, signal) => {
+      const body = passwordResetRequestInputSchema.parse(input)
+      await request('/api/auth/password-reset/request', passwordResetAcceptedSchema, { method: 'POST', body, signal, expectedStatus: 202 })
+    },
+    completePasswordReset: async (input, signal) => {
+      const body = passwordResetCompleteInputSchema.parse(input)
+      await request('/api/auth/password-reset/complete', { parse: (value: unknown) => value as undefined }, { method: 'POST', body, signal, expectedStatus: 204 })
     },
   }
 }

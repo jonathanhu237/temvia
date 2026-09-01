@@ -40,6 +40,23 @@ func (f *authFake) Login(context.Context, application.LoginInput) (domain.User, 
 func (f *authFake) Current(context.Context, string) (domain.User, error) { return f.user, f.err }
 func (f *authFake) Logout(context.Context, string) error                 { return f.err }
 
+type recoveryFake struct {
+	requestCalls  int
+	completeCalls int
+	requestErr    error
+	completeErr   error
+}
+
+func (f *recoveryFake) Request(context.Context, application.PasswordResetRequestInput) error {
+	f.requestCalls++
+	return f.requestErr
+}
+
+func (f *recoveryFake) Complete(context.Context, application.PasswordResetCompleteInput) error {
+	f.completeCalls++
+	return f.completeErr
+}
+
 func testConfig() config.Config {
 	return config.Config{Origin: "http://localhost:5173", CookieName: "temvia_session"}
 }
@@ -172,5 +189,53 @@ func TestProblemMappings(t *testing.T) {
 	}
 	if errors.Is(errInvalidJSON, errBodyTooLarge) {
 		t.Fatal("sentinel errors overlap")
+	}
+}
+
+func TestPasswordRecoveryHTTPContracts(t *testing.T) {
+	recovery := &recoveryFake{}
+	handler := NewHandler(&setupFake{status: application.SetupRequired}, &authFake{}, testConfig(), recovery)
+	requestResponse := request(handler, http.MethodPost, "/api/auth/password-reset/request", `{"email":"ada@example.com","locale":"en"}`, true)
+	if requestResponse.Code != http.StatusAccepted || requestResponse.Header().Get("Cache-Control") != "no-store" || requestResponse.Header().Get("Content-Type") != "application/json; charset=utf-8" || requestResponse.Body.String() != "{\"status\":\"accepted\"}\n" {
+		t.Fatalf("request response = %d, headers %#v, body %q", requestResponse.Code, requestResponse.Header(), requestResponse.Body.String())
+	}
+	if recovery.requestCalls != 1 {
+		t.Fatalf("request calls = %d", recovery.requestCalls)
+	}
+	complete := request(handler, http.MethodPost, "/api/auth/password-reset/complete", `{"token":123,"password":"Aa1!xxxx","locale":"en"}`, true)
+	if complete.Code != http.StatusForbidden || recovery.completeCalls != 0 {
+		t.Fatalf("malformed token response = %d, calls=%d", complete.Code, recovery.completeCalls)
+	}
+	complete = request(handler, http.MethodPost, "/api/auth/password-reset/complete", `{"token":"v1.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"Aa1!xxxx","locale":"en"}`, true)
+	if complete.Code != http.StatusNoContent {
+		t.Fatalf("complete response = %d, body=%q", complete.Code, complete.Body.String())
+	}
+	cookies := complete.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "temvia_session" || cookies[0].MaxAge >= 0 || cookies[0].Value != "" {
+		t.Fatalf("completion cookie = %#v", cookies)
+	}
+	if recovery.completeCalls != 1 {
+		t.Fatalf("completion calls = %d", recovery.completeCalls)
+	}
+	missingOrigin := request(handler, http.MethodPost, "/api/auth/password-reset/request", `{"email":"ada@example.com","locale":"en"}`, false)
+	if missingOrigin.Code != http.StatusForbidden || recovery.requestCalls != 1 {
+		t.Fatalf("missing Origin response = %d, calls=%d", missingOrigin.Code, recovery.requestCalls)
+	}
+	method := request(handler, http.MethodGet, "/api/auth/password-reset/request", "", false)
+	if method.Code != http.StatusMethodNotAllowed || method.Header().Get("Allow") != http.MethodPost {
+		t.Fatalf("recovery method response = %d, headers=%#v", method.Code, method.Header())
+	}
+}
+
+func TestPasswordRecoveryHTTPErrorMapping(t *testing.T) {
+	recovery := &recoveryFake{requestErr: application.ErrRateLimited, completeErr: application.ErrInvalidPasswordResetToken}
+	handler := NewHandler(&setupFake{status: application.SetupRequired}, &authFake{}, testConfig(), recovery)
+	limited := request(handler, http.MethodPost, "/api/auth/password-reset/request", `{"email":"ada@example.com","locale":"en"}`, true)
+	if limited.Code != http.StatusTooManyRequests || !strings.Contains(limited.Body.String(), `"type":"/problems/rate-limited"`) {
+		t.Fatalf("rate-limit response = %d, body=%s", limited.Code, limited.Body.String())
+	}
+	invalid := request(handler, http.MethodPost, "/api/auth/password-reset/complete", `{"token":"v1.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"Aa1!xxxx","locale":"en"}`, true)
+	if invalid.Code != http.StatusForbidden || !strings.Contains(invalid.Body.String(), `"type":"/problems/invalid-password-reset-token"`) {
+		t.Fatalf("invalid-token response = %d, body=%s", invalid.Code, invalid.Body.String())
 	}
 }

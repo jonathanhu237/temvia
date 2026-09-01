@@ -37,6 +37,18 @@ export const loginInputSchema = z
   .object({ email: z.string(), password: z.string() })
   .strict()
 
+export const passwordResetRequestInputSchema = z
+  .object({ email: z.string(), locale: z.enum(['en', 'zh-CN']) })
+  .strict()
+
+export const passwordResetCompleteInputSchema = z
+  .object({ token: z.string(), password: z.string(), locale: z.enum(['en', 'zh-CN']) })
+  .strict()
+
+export const passwordResetAcceptedSchema = z
+  .object({ status: z.literal('accepted') })
+  .strict()
+
 export const fieldProblemSchema = z
   .object({
     pointer: z.string(),
@@ -59,4 +71,3 @@ export const problemDetailsSchema = z
 
 export type ProblemDetails = z.infer<typeof problemDetailsSchema>
 export type FieldProblem = z.infer<typeof fieldProblemSchema>
-

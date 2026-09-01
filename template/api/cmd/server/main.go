@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"example.com/temvia/api/internal/auth/adapter/httpapi"
+	mailadapter "example.com/temvia/api/internal/auth/adapter/mail"
 	"example.com/temvia/api/internal/auth/adapter/password"
 	"example.com/temvia/api/internal/auth/adapter/postgres"
 	redisadapter "example.com/temvia/api/internal/auth/adapter/redis"
@@ -33,12 +34,12 @@ func newHandler() http.Handler {
 	return mux
 }
 
-func newApplicationHandler(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource) http.Handler {
+func newApplicationHandler(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery ...httpapi.PasswordRecoveryService) http.Handler {
 	setupService := application.NewSetup(setup, hasher, random, cfg.SetupLinkTTL)
 	authService := application.NewAuthentication(auth, hasher, sessions, limiter, random)
 	mux := http.NewServeMux()
 	mux.Handle("GET /health", healthHandler())
-	authHandler := httpapi.NewHandler(setupService, authService, cfg)
+	authHandler := httpapi.NewHandler(setupService, authService, cfg, recovery...)
 	mux.Handle("/api", authHandler)
 	mux.Handle("/api/", authHandler)
 	return mux
@@ -76,7 +77,32 @@ func main() {
 	} else if required {
 		log.Printf("initial setup link (expires in %s): %s/setup#token=%s", cfg.SetupLinkTTL, cfg.PublicURL, token)
 	}
-	handler := newApplicationHandler(cfg, postgresStore, postgresStore, hasher, redisStore, redisStore, random)
+	smtpMailer, err := mailadapter.NewSMTPMailer(cfg)
+	if err != nil {
+		log.Fatalf("SMTP configuration failed: %v", err)
+	}
+	recovery := application.NewPasswordRecovery(
+		postgresStore,
+		redisStore,
+		hasher,
+		random,
+		cfg.PasswordResetTokenKey,
+		cfg.PasswordResetLinkTTL,
+		cfg.MailOutboxNotificationTTL,
+		cfg.PasswordResetResponseMin,
+	)
+	dispatcher := application.NewMailDispatcher(
+		postgresStore,
+		smtpMailer,
+		random,
+		cfg.PasswordResetTokenKey,
+		cfg.PublicURL,
+		cfg.MailOutboxPollInterval,
+		cfg.MailOutboxLeaseDuration,
+		cfg.MailOutboxRetryInitial,
+		cfg.MailOutboxRetryMax,
+	)
+	handler := newApplicationHandler(cfg, postgresStore, postgresStore, hasher, redisStore, redisStore, random, recovery)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,
@@ -87,6 +113,11 @@ func main() {
 	}
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	dispatcherDone := make(chan struct{})
+	go func() {
+		defer close(dispatcherDone)
+		dispatcher.Run(shutdownContext)
+	}()
 	go func() {
 		<-shutdownContext.Done()
 		gracefulContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -96,5 +127,10 @@ func main() {
 	log.Printf("API listening on %s", cfg.HTTPAddr)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("API server failed: %v", err)
+	}
+	if shutdownContext.Err() != nil {
+		// Run stops claiming as soon as shutdownContext is canceled, while a
+		// claimed SMTP operation drains under the dispatcher's finite lease.
+		<-dispatcherDone
 	}
 }

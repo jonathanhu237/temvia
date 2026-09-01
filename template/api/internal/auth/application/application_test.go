@@ -138,6 +138,26 @@ func (s *fakeSessions) Create(_ context.Context, id, _ string) error            
 func (s *fakeSessions) ResolveAndTouch(context.Context, string) (string, error) { return "user-1", nil }
 func (s *fakeSessions) Delete(_ context.Context, id string) error               { s.deleted = id; return nil }
 
+type versionedFakeSessions struct {
+	fakeSessions
+	version int64
+}
+
+func (s *versionedFakeSessions) CreateVersioned(_ context.Context, id, _ string, _ int64) error {
+	s.created = id
+	return nil
+}
+
+func (s *versionedFakeSessions) ResolveAndTouchVersioned(context.Context, string) (string, int64, error) {
+	return "user-1", s.version, nil
+}
+
+type versionedFakeAccounts struct{ fakeAccounts }
+
+func (a versionedFakeAccounts) FindPublicAccountByID(context.Context, string) (domain.Account, error) {
+	return a.account, nil
+}
+
 func TestAuthenticationFlowAndUnknownEmail(t *testing.T) {
 	account := domain.Account{User: domain.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}, PasswordHash: "hash"}
 	hasher := &fakeHasher{valid: true}
@@ -157,5 +177,49 @@ func TestAuthenticationFlowAndUnknownEmail(t *testing.T) {
 	hasher.verifyCalls = 0
 	if _, _, err := auth.Login(context.Background(), LoginInput{Email: "unknown@example.com", Password: "a sufficiently long password"}); !errors.Is(err, ErrInvalidCredentials) || hasher.verifyCalls != 0 {
 		t.Fatalf("unknown login = %v, verify calls=%d", err, hasher.verifyCalls)
+	}
+}
+
+func TestCurrentRequiresAuthoritativeAccountVersion(t *testing.T) {
+	account := domain.Account{User: domain.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}, AuthVersion: 1}
+	sessions := &versionedFakeSessions{version: 1}
+	auth := NewAuthentication(fakeAccounts{account}, &fakeHasher{}, sessions, &fakeLimiter{allow: true}, fakeRandom{value: 8})
+	session := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, sessionIDBytes))
+
+	if _, err := auth.Current(context.Background(), session); !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("Current() error = %v, want dependency unavailable when account version store is missing", err)
+	}
+}
+
+func TestCurrentRejectsStaleVersionedSession(t *testing.T) {
+	account := domain.Account{User: domain.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}, AuthVersion: 2}
+	sessions := &versionedFakeSessions{version: 1}
+	auth := NewAuthentication(versionedFakeAccounts{fakeAccounts{account}}, &fakeHasher{}, sessions, &fakeLimiter{allow: true}, fakeRandom{value: 8})
+	session := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, sessionIDBytes))
+
+	if _, err := auth.Current(context.Background(), session); !errors.Is(err, ErrUnauthenticated) || sessions.deleted != session {
+		t.Fatalf("Current(stale) = %v, deleted=%q", err, sessions.deleted)
+	}
+}
+
+func TestCurrentAllowsMatchingVersionedSession(t *testing.T) {
+	account := domain.Account{User: domain.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}, AuthVersion: 2}
+	sessions := &versionedFakeSessions{version: 2}
+	auth := NewAuthentication(versionedFakeAccounts{fakeAccounts{account}}, &fakeHasher{}, sessions, &fakeLimiter{allow: true}, fakeRandom{value: 8})
+	session := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, sessionIDBytes))
+
+	user, err := auth.Current(context.Background(), session)
+	if err != nil || user.ID != account.User.ID {
+		t.Fatalf("Current(matching) = %#v, %v", user, err)
+	}
+}
+
+func TestLoginRejectsMissingAuthVersionForVersionedSessions(t *testing.T) {
+	account := domain.Account{User: domain.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}, PasswordHash: "hash"}
+	sessions := &versionedFakeSessions{version: 1}
+	auth := NewAuthentication(fakeAccounts{account}, &fakeHasher{valid: true}, sessions, &fakeLimiter{allow: true}, fakeRandom{value: 8})
+
+	if _, _, err := auth.Login(context.Background(), LoginInput{Email: "ada@example.com", Password: "a sufficiently long password"}); !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("Login() error = %v, want dependency unavailable for missing auth version", err)
 	}
 }

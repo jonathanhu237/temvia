@@ -7,6 +7,7 @@ const typeKeys: Record<string, string> = {
   '/problems/unauthenticated': 'problems:unauthenticated',
   '/problems/forbidden': 'problems:forbidden',
   '/problems/invalid-setup-token': 'problems:invalidSetupToken',
+  '/problems/invalid-password-reset-token': 'problems:invalidPasswordResetToken',
   '/problems/not-found': 'problems:notFound',
   '/problems/method-not-allowed': 'problems:methodNotAllowed',
   '/problems/setup-complete': 'problems:setupComplete',
@@ -24,6 +25,7 @@ const codeKeys: Record<string, string> = {
   unauthenticated: 'problems:unauthenticated',
   forbidden: 'problems:forbidden',
   invalid_setup_token: 'problems:invalidSetupToken',
+  invalid_password_reset_token: 'problems:invalidPasswordResetToken',
   setup_complete: 'problems:setupComplete',
   validation_failed: 'problems:validationFailed',
   rate_limited: 'problems:rateLimited',
@@ -39,6 +41,7 @@ const fieldKeys: Record<string, string> = {
   invalid_value: 'problems:fields.invalidValue',
   email_already_registered: 'problems:fields.emailAlreadyRegistered',
   password_mismatch: 'problems:fields.passwordMismatch',
+  invalid_locale: 'problems:fields.invalidValue',
 }
 
 export function fieldMessageKey(code: string | undefined): string {
@@ -63,6 +66,12 @@ export function isSetupComplete(error: unknown): boolean {
   )
 }
 
+export function isInvalidPasswordResetToken(error: unknown): boolean {
+  return error instanceof ApiProblemError && error.problem.status === 403 && (
+    error.problem.type === '/problems/invalid-password-reset-token' || error.problem.code === 'invalid_password_reset_token'
+  )
+}
+
 export function problemMessageKey(error: unknown): string {
   if (error instanceof ApiProblemError) {
     return typeKeys[error.problem.type] ?? codeKeys[error.problem.code ?? ''] ?? 'problems:generic'
@@ -78,6 +87,15 @@ export function problemMessageKey(error: unknown): string {
 
 export function translateProblem(error: unknown, t: unknown): string {
   return (t as (key: string) => string)(problemMessageKey(error))
+}
+
+export function translatePasswordResetProblem(error: unknown, t: unknown): string {
+  if (error instanceof ApiProblemError && error.problem.status === 429 && (
+    error.problem.type === '/problems/rate-limited' || error.problem.code === 'rate_limited'
+  )) {
+    return (t as (key: string) => string)('problems:passwordResetRateLimited')
+  }
+  return translateProblem(error, t)
 }
 
 export function problemFieldKey(field: FieldProblem): string {

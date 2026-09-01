@@ -1,7 +1,7 @@
-.PHONY: up down logs logs-admin migrate-up migrate-down-one build test admin-install admin-dev admin-test
+.PHONY: up down logs logs-admin logs-mailpit migrate-up migrate-down-one build test admin-install admin-dev admin-test
 
 up:
-	docker compose up -d api admin
+	docker compose --profile development up -d api admin mailpit
 
 down:
 	docker compose down
@@ -11,6 +11,9 @@ logs:
 
 logs-admin:
 	docker compose logs -f admin
+
+logs-mailpit:
+	docker compose logs -f mailpit
 
 migrate-up:
 	docker compose up -d postgres

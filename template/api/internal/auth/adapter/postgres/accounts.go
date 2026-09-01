@@ -10,7 +10,19 @@ import (
 
 func (s *Store) FindByCanonicalEmail(ctx context.Context, canonical string) (domain.Account, error) {
 	var account domain.Account
-	err := s.db.QueryRowContext(ctx, `SELECT id::text, name, email, password_hash, created_at FROM auth_users WHERE email_canonical = $1`, canonical).Scan(&account.User.ID, &account.User.Name, &account.User.Email, &account.PasswordHash, &account.User.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id::text, name, email, password_hash, auth_version, created_at FROM auth_users WHERE email_canonical = $1`, canonical).Scan(&account.User.ID, &account.User.Name, &account.User.Email, &account.PasswordHash, &account.AuthVersion, &account.User.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return domain.Account{}, application.ErrAccountNotFound
+		}
+		return domain.Account{}, err
+	}
+	return account, nil
+}
+
+func (s *Store) FindPublicAccountByID(ctx context.Context, id string) (domain.Account, error) {
+	var account domain.Account
+	err := s.db.QueryRowContext(ctx, `SELECT id::text, name, email, password_hash, auth_version, created_at FROM auth_users WHERE id = $1::uuid`, id).Scan(&account.User.ID, &account.User.Name, &account.User.Email, &account.PasswordHash, &account.AuthVersion, &account.User.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return domain.Account{}, application.ErrAccountNotFound

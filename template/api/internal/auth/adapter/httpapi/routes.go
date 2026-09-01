@@ -22,20 +22,34 @@ type AuthenticationService interface {
 	Logout(context.Context, string) error
 }
 
-type Handler struct {
-	setup SetupService
-	auth  AuthenticationService
-	cfg   config.Config
-	mux   *http.ServeMux
+type PasswordRecoveryService interface {
+	Request(context.Context, application.PasswordResetRequestInput) error
+	Complete(context.Context, application.PasswordResetCompleteInput) error
 }
 
-func NewHandler(setup SetupService, auth AuthenticationService, cfg config.Config) http.Handler {
-	h := &Handler{setup: setup, auth: auth, cfg: cfg, mux: http.NewServeMux()}
+type Handler struct {
+	setup    SetupService
+	auth     AuthenticationService
+	recovery PasswordRecoveryService
+	cfg      config.Config
+	mux      *http.ServeMux
+}
+
+func NewHandler(setup SetupService, auth AuthenticationService, cfg config.Config, recovery ...PasswordRecoveryService) http.Handler {
+	var passwordRecovery PasswordRecoveryService
+	if len(recovery) > 0 {
+		passwordRecovery = recovery[0]
+	}
+	h := &Handler{setup: setup, auth: auth, recovery: passwordRecovery, cfg: cfg, mux: http.NewServeMux()}
 	h.mux.HandleFunc("GET /api/setup/status", h.setupStatus)
 	h.mux.HandleFunc("POST /api/setup", h.setupComplete)
 	h.mux.HandleFunc("POST /api/auth/login", h.login)
 	h.mux.HandleFunc("GET /api/auth/me", h.me)
 	h.mux.HandleFunc("POST /api/auth/logout", h.logout)
+	if h.recovery != nil {
+		h.mux.HandleFunc("POST /api/auth/password-reset/request", h.passwordResetRequest)
+		h.mux.HandleFunc("POST /api/auth/password-reset/complete", h.passwordResetComplete)
+	}
 	h.mux.HandleFunc("/api/", h.notFound)
 	return h
 }
@@ -62,11 +76,13 @@ func methodMatches(expected, actual string) bool {
 }
 
 var knownMethods = map[string]string{
-	"/api/setup/status": "GET",
-	"/api/setup":        "POST",
-	"/api/auth/login":   "POST",
-	"/api/auth/me":      "GET",
-	"/api/auth/logout":  "POST",
+	"/api/setup/status":                 "GET",
+	"/api/setup":                        "POST",
+	"/api/auth/login":                   "POST",
+	"/api/auth/me":                      "GET",
+	"/api/auth/logout":                  "POST",
+	"/api/auth/password-reset/request":  "POST",
+	"/api/auth/password-reset/complete": "POST",
 }
 
 func (h *Handler) setupStatus(w http.ResponseWriter, r *http.Request) {
@@ -145,6 +161,46 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 			writeApplicationError(w, err)
 			return
 		}
+	}
+	h.clearSessionCookie(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) passwordResetRequest(w http.ResponseWriter, r *http.Request) {
+	if !h.validOrigin(r) {
+		writeProblem(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	var input application.PasswordResetRequestInput
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"email": {}, "locale": {}}); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if err := h.recovery.Request(r.Context(), input); err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+func (h *Handler) passwordResetComplete(w http.ResponseWriter, r *http.Request) {
+	if !h.validOrigin(r) {
+		writeProblem(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	var input application.PasswordResetCompleteInput
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"token": {}, "password": {}, "locale": {}}); err != nil {
+		var fieldErr fieldValueError
+		if errors.As(err, &fieldErr) && fieldErr.field == "token" {
+			writeProblem(w, http.StatusForbidden, "invalid-password-reset-token")
+			return
+		}
+		writeDecodeError(w, err)
+		return
+	}
+	if err := h.recovery.Complete(r.Context(), input); err != nil {
+		writeApplicationError(w, err)
+		return
 	}
 	h.clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)

@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
 func env(values map[string]string) Lookup {
@@ -9,7 +10,7 @@ func env(values map[string]string) Lookup {
 }
 
 func TestLoadDefaultsAndModes(t *testing.T) {
-	values := map[string]string{"POSTGRES_PASSWORD": "pg-secret", "REDIS_PASSWORD": "redis-secret"}
+	values := map[string]string{"POSTGRES_PASSWORD": "pg-secret", "REDIS_PASSWORD": "redis-secret", "PASSWORD_RESET_TOKEN_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
 	c, err := Load(env(values))
 	if err != nil {
 		t.Fatal(err)
@@ -29,6 +30,8 @@ func TestLoadDefaultsAndModes(t *testing.T) {
 	}
 	values["APP_ENV"] = "production"
 	values["APP_PUBLIC_URL"] = "https://example.com"
+	values["SMTP_TLS_MODE"] = "starttls"
+	values["MAIL_FROM_ADDRESS"] = "no-reply@example.com"
 	c, err = Load(env(values))
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +42,7 @@ func TestLoadDefaultsAndModes(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidConfiguration(t *testing.T) {
-	base := map[string]string{"POSTGRES_PASSWORD": "pg-secret", "REDIS_PASSWORD": "redis-secret"}
+	base := map[string]string{"POSTGRES_PASSWORD": "pg-secret", "REDIS_PASSWORD": "redis-secret", "PASSWORD_RESET_TOKEN_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
 	for name, change := range map[string]func(map[string]string){
 		"missing postgres secret": func(v map[string]string) { delete(v, "POSTGRES_PASSWORD") },
 		"missing redis secret":    func(v map[string]string) { delete(v, "REDIS_PASSWORD") },
@@ -63,6 +66,59 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 				t.Fatal("Load accepted invalid configuration")
 			}
 		})
+	}
+}
+
+func TestLoadPasswordRecoveryAndSMTPInventory(t *testing.T) {
+	values := map[string]string{
+		"POSTGRES_PASSWORD":                "pg-secret",
+		"REDIS_PASSWORD":                   "redis-secret",
+		"PASSWORD_RESET_TOKEN_KEY":         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"PASSWORD_RESET_MIN_RESPONSE_TIME": "250ms",
+		"SMTP_TLS_MODE":                    "starttls",
+		"SMTP_DELIVERY_TIMEOUT":            "5s",
+		"MAIL_OUTBOX_LEASE_TTL":            "10s",
+		"MAIL_FROM_ADDRESS":                "security@example.com",
+	}
+	c, err := Load(env(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.PasswordResetResponseMin != 250*time.Millisecond || c.SMTPTimeout != 5*time.Second || c.MailOutboxLeaseDuration != 10*time.Second || c.SMTPFromAddress != "security@example.com" {
+		t.Fatalf("loaded recovery config = %#v", c)
+	}
+	for key, value := range map[string]string{
+		"PASSWORD_RESET_TOKEN_KEY": "not-base64",
+		"SMTP_TLS_MODE":            "none",
+		"MAIL_FROM_ADDRESS":        "bad\r\n@example.com",
+	} {
+		copyValues := map[string]string{}
+		for name, original := range values {
+			copyValues[name] = original
+		}
+		copyValues[key] = value
+		if key == "SMTP_TLS_MODE" {
+			copyValues["APP_ENV"] = "production"
+		}
+		if _, err := Load(env(copyValues)); err == nil {
+			t.Errorf("Load accepted invalid %s=%q", key, value)
+		}
+	}
+	values["APP_ENV"] = "production"
+	values["APP_PUBLIC_URL"] = "https://example.com"
+	values["SMTP_TLS_MODE"] = "starttls"
+	values["MAIL_FROM_ADDRESS"] = "no-reply@example.com"
+	if _, err := Load(env(values)); err != nil {
+		t.Fatalf("production SMTP config rejected: %v", err)
+	}
+	values["MAIL_FROM_ADDRESS"] = "no-reply@temvia.test"
+	if _, err := Load(env(values)); err == nil {
+		t.Fatal("production reserved .test sender accepted")
+	}
+	values["MAIL_FROM_ADDRESS"] = "no-reply@example.com"
+	values["MAIL_OUTBOX_LEASE_TTL"] = "5s"
+	if _, err := Load(env(values)); err == nil {
+		t.Fatal("outbox lease shorter than delivery timeout accepted")
 	}
 }
 

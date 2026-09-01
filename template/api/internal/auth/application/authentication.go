@@ -69,7 +69,23 @@ func (a *Authentication) Login(ctx context.Context, input LoginInput) (domain.Us
 		return domain.User{}, "", dependencyError(err)
 	}
 	sessionID := base64.RawURLEncoding.EncodeToString(raw)
-	if err := a.sessions.Create(ctx, sessionID, account.User.ID); err != nil {
+	authVersion := account.AuthVersion
+	if authVersion <= 0 {
+		// A versioned session store is only safe when the PostgreSQL-backed
+		// account version is authoritative. Do not silently turn a malformed
+		// or missing version into the initial version in that mode.
+		if _, ok := a.sessions.(VersionedSessionStore); ok {
+			return domain.User{}, "", ErrDependencyUnavailable
+		}
+		authVersion = 1
+	}
+	var createErr error
+	if versioned, ok := a.sessions.(VersionedSessionStore); ok {
+		createErr = versioned.CreateVersioned(ctx, sessionID, account.User.ID, authVersion)
+	} else {
+		createErr = a.sessions.Create(ctx, sessionID, account.User.ID)
+	}
+	if err := createErr; err != nil {
 		return domain.User{}, "", dependencyError(err)
 	}
 	return account.User, sessionID, nil
@@ -79,12 +95,42 @@ func (a *Authentication) Current(ctx context.Context, sessionID string) (domain.
 	if !isUnpaddedBase64URL(sessionID, sessionIDBytes) {
 		return domain.User{}, ErrUnauthenticated
 	}
-	userID, err := a.sessions.ResolveAndTouch(ctx, sessionID)
+	versioned, hasVersionedSession := a.sessions.(VersionedSessionStore)
+	var userID string
+	var sessionVersion int64
+	var err error
+	if hasVersionedSession {
+		userID, sessionVersion, err = versioned.ResolveAndTouchVersioned(ctx, sessionID)
+	} else {
+		userID, err = a.sessions.ResolveAndTouch(ctx, sessionID)
+	}
 	if err != nil {
 		return domain.User{}, dependencyError(err)
 	}
 	if userID == "" {
 		return domain.User{}, ErrUnauthenticated
+	}
+	if hasVersionedSession {
+		versionedAccounts, ok := a.accounts.(VersionedAccountStore)
+		if !ok {
+			// Falling back to FindPublicByID would authorize a versioned Redis
+			// session without checking the PostgreSQL revocation authority.
+			return domain.User{}, ErrDependencyUnavailable
+		}
+		account, err := versionedAccounts.FindPublicAccountByID(ctx, userID)
+		if err != nil {
+			if errors.Is(err, ErrAccountNotFound) {
+				return domain.User{}, ErrUnauthenticated
+			}
+			return domain.User{}, dependencyError(err)
+		}
+		if account.AuthVersion <= 0 || sessionVersion != account.AuthVersion {
+			// PostgreSQL auth_version is the revocation authority. Redis
+			// deletion is only cleanup and cannot turn this into a 503.
+			_ = a.sessions.Delete(ctx, sessionID)
+			return domain.User{}, ErrUnauthenticated
+		}
+		return account.User, nil
 	}
 	user, err := a.accounts.FindPublicByID(ctx, userID)
 	if err != nil {

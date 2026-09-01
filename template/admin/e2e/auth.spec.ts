@@ -1,10 +1,118 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
 const setupURL = process.env.E2E_SETUP_URL
+const mailpitAPIURL = process.env.E2E_MAILPIT_API_URL
 const email = process.env.E2E_ADMIN_EMAIL ?? 'admin@example.com'
 const password = process.env.E2E_ADMIN_PASSWORD ?? 'Admin1!x'
 const name = process.env.E2E_ADMIN_NAME ?? 'Admin User'
+const resetPassword = process.env.E2E_RESET_PASSWORD ?? 'NewAdmin1!x'
+const mailpitPollTimeout = 30_000
+
+type MailpitMessage = Record<string, unknown>
+
+function mailpitURL(path: string): string {
+  if (!mailpitAPIURL) throw new Error('E2E_MAILPIT_API_URL is not configured')
+  const base = new URL(mailpitAPIURL)
+  const [pathname, search = ''] = path.split('?', 2)
+  let prefix = base.pathname.replace(/\/+$/, '')
+  if (!prefix.endsWith('/api/v1')) prefix += '/api/v1'
+  base.pathname = `${prefix}/${pathname.replace(/^\/+/, '')}`
+  base.search = search ? `?${search}` : ''
+  return base.toString()
+}
+
+function mailpitMessageID(message: MailpitMessage): string | undefined {
+  const id = message.ID ?? message.id
+  return typeof id === 'string' ? id : undefined
+}
+
+async function listMailpitMessages(request: APIRequestContext): Promise<MailpitMessage[]> {
+  const response = await request.get(mailpitURL('messages?limit=200'), { timeout: 5_000 })
+  if (!response.ok()) throw new Error(`Mailpit message list failed (${response.status()})`)
+  const payload = (await response.json()) as unknown
+  if (Array.isArray(payload)) return payload.filter(isMailpitMessage)
+  if (typeof payload !== 'object' || payload === null) return []
+  const messages = (payload as { messages?: unknown }).messages
+  return Array.isArray(messages) ? messages.filter(isMailpitMessage) : []
+}
+
+async function getMailpitMessage(request: APIRequestContext, id: string): Promise<MailpitMessage | undefined> {
+  const response = await request.get(mailpitURL(`message/${encodeURIComponent(id)}`), { timeout: 5_000 })
+  if (!response.ok()) return undefined
+  const payload = (await response.json()) as unknown
+  return isMailpitMessage(payload) ? payload : undefined
+}
+
+function isMailpitMessage(value: unknown): value is MailpitMessage {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+async function waitForNewMail(
+  request: APIRequestContext,
+  previousIDs: Set<string>,
+  predicate: (message: MailpitMessage) => boolean,
+): Promise<MailpitMessage> {
+  const deadline = Date.now() + mailpitPollTimeout
+  let lastError = 'no matching message'
+  while (Date.now() < deadline) {
+    try {
+      const summaries = await listMailpitMessages(request)
+      for (const summary of summaries) {
+        const id = mailpitMessageID(summary)
+        if (!id || previousIDs.has(id)) continue
+        const message = await getMailpitMessage(request, id)
+        if (message && predicate(message)) return message
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : 'Mailpit request failed'
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  throw new Error(`Timed out waiting for Mailpit message: ${lastError}`)
+}
+
+function mailpitBody(message: MailpitMessage): string {
+  const text = typeof message.Text === 'string' ? message.Text : ''
+  const html = typeof message.HTML === 'string' ? message.HTML : ''
+  return `${text}\n${html}`
+}
+
+function mailpitContainsRecipient(message: MailpitMessage, recipient: string): boolean {
+  return JSON.stringify(message.To ?? '').toLowerCase().includes(recipient.toLowerCase())
+}
+
+function extractResetLink(message: MailpitMessage): { link: string; token: string } {
+  const tokenPattern = 'v1\\.[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{43}'
+  const match = mailpitBody(message).match(new RegExp(`https?://[^\\s<>"']+/reset-password#token=(${tokenPattern})`))
+  if (!match) throw new Error('Mailpit reset message did not contain a canonical fragment link')
+  return { link: match[0], token: match[1] }
+}
+
+async function signIn(page: Page, userEmail: string, userPassword: string, origin?: string): Promise<void> {
+  await page.goto(origin ? `${origin}/login` : '/login')
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible()
+  await page.getByLabel('Email').fill(userEmail)
+  await page.getByLabel('Password', { exact: true }).fill(userPassword)
+  await page.getByRole('button', { name: /sign in/i }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
+}
+
+async function expectResetAuthorityNotPersisted(page: Page, token: string): Promise<void> {
+  await expect.poll(() => new URL(page.url()).hash).toBe('')
+  const browserState = await page.evaluate(() => ({
+    hash: window.location.hash,
+    localStorage: JSON.stringify(localStorage),
+    sessionStorage: JSON.stringify(sessionStorage),
+    cookie: document.cookie,
+    historyState: JSON.stringify(window.history.state),
+  }))
+  const contextCookies = await page.context().cookies()
+  const serializedState = `${JSON.stringify(browserState)}${JSON.stringify(contextCookies)}`
+  expect(browserState.hash).toBe('')
+  expect(serializedState).not.toContain(token)
+}
 
 function collectBrowserErrors(page: Page): string[] {
   const errors: string[] = []
@@ -157,6 +265,84 @@ test.describe('administrator authentication', () => {
     await page.getByRole('menuitem', { name: /退出登录|log out/i }).click()
     await expect(page).toHaveURL(/\/login$/)
     expect(browserErrors).toEqual([])
+  })
+
+  test('recovers the administrator password through the transactional mail flow', async ({ browser, page, request }) => {
+    test.setTimeout(120_000)
+    test.skip(!setupURL || !mailpitAPIURL, 'Set E2E_SETUP_URL and E2E_MAILPIT_API_URL against the generated stack.')
+    const browserErrors = collectBrowserErrors(page)
+    const appOrigin = new URL(setupURL!).origin
+    const staleContext = await browser.newContext({ baseURL: appOrigin })
+    const stalePage = await staleContext.newPage()
+    const staleBrowserErrors = collectBrowserErrors(stalePage)
+
+    try {
+      // Keep two independent sessions alive across the reset. The reset page
+      // also carries a session cookie so the API's cookie-clearing contract is
+      // exercised by the browser flow.
+      await signIn(page, email, password, appOrigin)
+      await signIn(stalePage, email, password, appOrigin)
+      const existingMessageIDs = new Set((await listMailpitMessages(request)).map(mailpitMessageID).filter((id): id is string => Boolean(id)))
+
+      await page.goto(`${appOrigin}/forgot-password`)
+      await expect(page.getByRole('heading', { name: 'Reset your password', exact: true })).toBeVisible()
+      await page.getByLabel('Email').fill(email)
+      await page.getByRole('button', { name: 'Send reset link', exact: true }).click()
+      await expect(page.getByRole('heading', { name: 'Check your email', exact: true })).toBeVisible()
+      await expectNoA11yViolations(page)
+
+      const resetMessage = await waitForNewMail(
+        request,
+        existingMessageIDs,
+        (message) => mailpitContainsRecipient(message, email) && /reset|重置/i.test(String(message.Subject ?? '')),
+      )
+      const { link: resetLink, token } = extractResetLink(resetMessage)
+      const requestURLs: string[] = []
+      page.on('request', (browserRequest) => requestURLs.push(browserRequest.url()))
+      await page.goto(resetLink)
+      await expect(page.getByRole('heading', { name: 'Choose a new password', exact: true })).toBeVisible()
+      await expectResetAuthorityNotPersisted(page, token)
+      expect(requestURLs.some((value) => value.includes(token))).toBe(false)
+      await expectNoA11yViolations(page)
+
+      const cookiesBeforeReset = await page.context().cookies()
+      expect(cookiesBeforeReset.some((cookie) => cookie.name.includes('temvia_session'))).toBe(true)
+      const messagesBeforeCompletion = new Set((await listMailpitMessages(request)).map(mailpitMessageID).filter((id): id is string => Boolean(id)))
+
+      await page.getByLabel('Password', { exact: true }).fill(resetPassword)
+      await page.getByLabel('Confirm password').fill(resetPassword)
+      await page.getByRole('button', { name: 'Set new password', exact: true }).click()
+      await expect(page.getByRole('heading', { name: 'Password updated', exact: true })).toBeVisible()
+      const cookiesAfterReset = await page.context().cookies()
+      expect(cookiesAfterReset.some((cookie) => cookie.name.includes('temvia_session'))).toBe(false)
+      await expectNoA11yViolations(page)
+
+      await stalePage.reload()
+      await expect(stalePage).toHaveURL(/\/login$/)
+
+      await page.goto(`${appOrigin}/login`)
+      await page.getByLabel('Email').fill(email)
+      await page.getByLabel('Password', { exact: true }).fill(password)
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await expect(page.getByRole('alert')).toHaveText('The email or password is incorrect.')
+      await signIn(page, email, resetPassword, appOrigin)
+
+      const changedMessage = await waitForNewMail(
+        request,
+        messagesBeforeCompletion,
+        (message) => mailpitContainsRecipient(message, email) && /changed|修改/i.test(String(message.Subject ?? '')),
+      )
+      const changedBody = mailpitBody(changedMessage)
+      expect(changedBody).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC/)
+      expect(changedBody).not.toContain(password)
+      expect(changedBody).not.toContain(resetPassword)
+      expect(changedBody).not.toMatch(/v1\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}/)
+      expect(changedBody).not.toContain('#token=')
+      expect(browserErrors).toEqual([])
+      expect(staleBrowserErrors).toEqual([])
+    } finally {
+      await staleContext.close()
+    }
   })
 
   test('redirects unauthenticated visitors to login', async ({ page }) => {

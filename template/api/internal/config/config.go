@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net"
+	stdmail "net/mail"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -17,6 +19,29 @@ type Config struct {
 	HTTPAddr    string
 
 	SetupLinkTTL time.Duration
+
+	PasswordResetTokenKey       []byte
+	PasswordResetLinkTTL        time.Duration
+	PasswordResetResponseMin    time.Duration
+	PasswordResetGlobalCapacity int
+	PasswordResetGlobalRefill   time.Duration
+	PasswordResetEmailCapacity  int
+	PasswordResetEmailRefill    time.Duration
+
+	MailOutboxPollInterval    time.Duration
+	MailOutboxLeaseDuration   time.Duration
+	MailOutboxRetryInitial    time.Duration
+	MailOutboxRetryMax        time.Duration
+	MailOutboxNotificationTTL time.Duration
+
+	SMTPHost        string
+	SMTPPort        string
+	SMTPSecurity    string
+	SMTPUsername    string
+	SMTPPassword    string
+	SMTPFromAddress string
+	SMTPFromName    string
+	SMTPTimeout     time.Duration
 
 	PostgresHost     string
 	PostgresPort     string
@@ -59,6 +84,29 @@ func Load(get Lookup) (Config, error) {
 		PublicURL:    getDefault(get, "APP_PUBLIC_URL", "http://localhost:5173"),
 		HTTPAddr:     getDefault(get, "HTTP_ADDR", "127.0.0.1:8080"),
 		SetupLinkTTL: parseDuration(get, "SETUP_LINK_TTL", 30*time.Minute),
+
+		PasswordResetTokenKey:       parseTokenKey(get("PASSWORD_RESET_TOKEN_KEY")),
+		PasswordResetLinkTTL:        parseDuration(get, "PASSWORD_RESET_LINK_TTL", 30*time.Minute),
+		PasswordResetResponseMin:    parseDuration(get, "PASSWORD_RESET_MIN_RESPONSE_TIME", 500*time.Millisecond),
+		PasswordResetGlobalCapacity: parseInt(get, "PASSWORD_RESET_RATE_LIMIT_GLOBAL_CAPACITY", 10),
+		PasswordResetGlobalRefill:   parseDuration(get, "PASSWORD_RESET_RATE_LIMIT_GLOBAL_REFILL_INTERVAL", 6*time.Second),
+		PasswordResetEmailCapacity:  parseInt(get, "PASSWORD_RESET_RATE_LIMIT_EMAIL_CAPACITY", 3),
+		PasswordResetEmailRefill:    parseDuration(get, "PASSWORD_RESET_RATE_LIMIT_EMAIL_REFILL_INTERVAL", 20*time.Minute),
+
+		MailOutboxPollInterval:    parseDuration(get, "MAIL_DISPATCH_INTERVAL", time.Second),
+		MailOutboxLeaseDuration:   parseDuration(get, "MAIL_OUTBOX_LEASE_TTL", 30*time.Second),
+		MailOutboxRetryInitial:    parseDuration(get, "MAIL_RETRY_INITIAL_INTERVAL", 5*time.Second),
+		MailOutboxRetryMax:        parseDuration(get, "MAIL_RETRY_MAX_INTERVAL", 10*time.Minute),
+		MailOutboxNotificationTTL: parseDuration(get, "MAIL_NOTIFICATION_TTL", 24*time.Hour),
+
+		SMTPHost:        getDefault(get, "SMTP_HOST", "mailpit"),
+		SMTPPort:        getDefault(get, "SMTP_PORT", "1025"),
+		SMTPSecurity:    getDefault(get, "SMTP_TLS_MODE", "none"),
+		SMTPUsername:    get("SMTP_USERNAME"),
+		SMTPPassword:    get("SMTP_PASSWORD"),
+		SMTPFromAddress: getDefault(get, "MAIL_FROM_ADDRESS", "no-reply@temvia.test"),
+		SMTPFromName:    getDefault(get, "MAIL_FROM_NAME", "Temvia"),
+		SMTPTimeout:     parseDuration(get, "SMTP_DELIVERY_TIMEOUT", 10*time.Second),
 
 		PostgresHost:     getDefault(get, "POSTGRES_HOST", "localhost"),
 		PostgresPort:     getDefault(get, "POSTGRES_PORT", "5432"),
@@ -153,6 +201,17 @@ func parseBytes(get Lookup, key string, fallback int64) int64 {
 	return -1
 }
 
+func parseTokenKey(value string) []byte {
+	if value == "" {
+		return nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(decoded) != 32 || base64.RawURLEncoding.EncodeToString(decoded) != value {
+		return []byte{1}
+	}
+	return decoded
+}
+
 func (c *Config) validate() error {
 	if c.Environment != "development" && c.Environment != "production" {
 		return fmt.Errorf("APP_ENV must be development or production")
@@ -179,6 +238,51 @@ func (c *Config) validate() error {
 	}
 	if c.SetupLinkTTL <= 0 || c.SetupLinkTTL > 24*time.Hour {
 		return fmt.Errorf("SETUP_LINK_TTL must be between 0 and 24h")
+	}
+	if len(c.PasswordResetTokenKey) != 32 {
+		return fmt.Errorf("PASSWORD_RESET_TOKEN_KEY must be a canonical unpadded Base64URL encoding of 32 bytes")
+	}
+	if c.PasswordResetLinkTTL <= 0 || c.PasswordResetLinkTTL > 24*time.Hour {
+		return fmt.Errorf("PASSWORD_RESET_LINK_TTL must be between 0 and 24h")
+	}
+	if c.PasswordResetResponseMin < 0 || c.PasswordResetResponseMin > 5*time.Second {
+		return fmt.Errorf("PASSWORD_RESET_MIN_RESPONSE_TIME must be between 0 and 5s")
+	}
+	if c.PasswordResetGlobalCapacity <= 0 || c.PasswordResetGlobalRefill < time.Millisecond || c.PasswordResetEmailCapacity <= 0 || c.PasswordResetEmailRefill < time.Millisecond {
+		return fmt.Errorf("password-reset rate-limit settings must be positive and intervals at least 1ms")
+	}
+	if c.MailOutboxPollInterval < time.Millisecond || c.MailOutboxLeaseDuration < time.Second || c.MailOutboxLeaseDuration <= c.SMTPTimeout || c.MailOutboxRetryInitial < time.Millisecond || c.MailOutboxRetryMax < c.MailOutboxRetryInitial || c.MailOutboxNotificationTTL < time.Minute {
+		return fmt.Errorf("mail outbox settings are invalid")
+	}
+	if c.SMTPHost == "" {
+		return fmt.Errorf("SMTP_HOST must not be empty")
+	}
+	smtpPort, smtpPortErr := strconv.Atoi(c.SMTPPort)
+	if smtpPortErr != nil || smtpPort < 1 || smtpPort > 65535 {
+		return fmt.Errorf("SMTP_PORT must be a valid port")
+	}
+	if c.SMTPSecurity != "none" && c.SMTPSecurity != "starttls" && c.SMTPSecurity != "tls" {
+		return fmt.Errorf("SMTP_TLS_MODE must be none, starttls, or tls")
+	}
+	if c.Environment == "production" && c.SMTPSecurity == "none" {
+		return fmt.Errorf("SMTP_TLS_MODE none is only allowed in development")
+	}
+	if (c.SMTPUsername == "") != (c.SMTPPassword == "") {
+		return fmt.Errorf("SMTP_USERNAME and SMTP_PASSWORD must be provided together")
+	}
+	parsedSender, senderErr := stdmail.ParseAddress(c.SMTPFromAddress)
+	if c.SMTPFromAddress == "" || strings.ContainsAny(c.SMTPFromAddress, "\r\n") || !strings.Contains(c.SMTPFromAddress, "@") || senderErr != nil || parsedSender.Address != c.SMTPFromAddress || c.SMTPFromName == "" || strings.ContainsAny(c.SMTPFromName, "\r\n") {
+		return fmt.Errorf("SMTP sender settings are invalid")
+	}
+	if c.Environment == "production" {
+		at := strings.LastIndexByte(c.SMTPFromAddress, '@')
+		host := strings.ToLower(strings.TrimSuffix(c.SMTPFromAddress[at+1:], "."))
+		if host == "test" || strings.HasSuffix(host, ".test") {
+			return fmt.Errorf("MAIL_FROM_ADDRESS must not use the reserved .test domain in production")
+		}
+	}
+	if c.SMTPTimeout < time.Millisecond || c.SMTPTimeout > 5*time.Minute {
+		return fmt.Errorf("SMTP_DELIVERY_TIMEOUT must be between 1ms and 5m")
 	}
 	if c.HTTPAddr == "" {
 		return fmt.Errorf("HTTP_ADDR must not be empty")

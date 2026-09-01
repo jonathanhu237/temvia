@@ -145,7 +145,7 @@ func dependencyError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, ErrSetupComplete) || errors.Is(err, ErrInvalidSetupToken) || errors.Is(err, ErrEmailAlreadyRegistered) || errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrRateLimited) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrPasswordHashBusy) || errors.Is(err, ErrDependencyUnavailable) {
+	if errors.Is(err, ErrSetupComplete) || errors.Is(err, ErrInvalidSetupToken) || errors.Is(err, ErrInvalidPasswordResetToken) || errors.Is(err, ErrEmailAlreadyRegistered) || errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrRateLimited) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrPasswordHashBusy) || errors.Is(err, ErrDependencyUnavailable) {
 		return err
 	}
 	return fmt.Errorf("%w: %v", ErrDependencyUnavailable, err)

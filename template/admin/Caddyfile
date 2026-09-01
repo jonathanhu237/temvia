@@ -1,4 +1,6 @@
 :8080 {
+	header Referrer-Policy "no-referrer"
+
 	@api path /api /api/*
 	handle @api {
 		reverse_proxy api:8080

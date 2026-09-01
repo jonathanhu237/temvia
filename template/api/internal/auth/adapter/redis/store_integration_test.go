@@ -20,15 +20,19 @@ func TestStoreIntegrationSessionsAndLimiter(t *testing.T) {
 		t.Skip("TEST_REDIS_ADDR and TEST_REDIS_PASSWORD are not set")
 	}
 	store := NewStore(config.Config{
-		RedisAddr:                 addr,
-		RedisPassword:             password,
-		RedisOperationTimeout:     time.Second,
-		SessionIdleTimeout:        150 * time.Millisecond,
-		SessionAbsoluteTimeout:    2 * time.Second,
-		LoginGlobalCapacity:       1,
-		LoginGlobalRefillInterval: time.Hour,
-		LoginEmailCapacity:        1,
-		LoginEmailRefillInterval:  time.Hour,
+		RedisAddr:                   addr,
+		RedisPassword:               password,
+		RedisOperationTimeout:       time.Second,
+		SessionIdleTimeout:          150 * time.Millisecond,
+		SessionAbsoluteTimeout:      2 * time.Second,
+		LoginGlobalCapacity:         1,
+		LoginGlobalRefillInterval:   time.Hour,
+		LoginEmailCapacity:          1,
+		LoginEmailRefillInterval:    time.Hour,
+		PasswordResetGlobalCapacity: 1,
+		PasswordResetGlobalRefill:   time.Hour,
+		PasswordResetEmailCapacity:  1,
+		PasswordResetEmailRefill:    time.Hour,
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -51,6 +55,20 @@ func TestStoreIntegrationSessionsAndLimiter(t *testing.T) {
 	if userID, err := store.ResolveAndTouch(ctx, credential); err != nil || userID != "user-1" {
 		t.Fatalf("ResolveAndTouch() = %q, %v", userID, err)
 	}
+	versionedCredential := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("v", 32)))
+	if err := store.CreateVersioned(ctx, versionedCredential, "user-versioned", 7); err != nil {
+		t.Fatalf("CreateVersioned() error = %v", err)
+	}
+	if userID, version, err := store.ResolveAndTouchVersioned(ctx, versionedCredential); err != nil || userID != "user-versioned" || version != 7 {
+		t.Fatalf("ResolveAndTouchVersioned() = %q, %d, %v", userID, version, err)
+	}
+	versionedKey := sessionKey(versionedCredential)
+	if err := store.client.HDel(ctx, versionedKey, sessionAuthVersion).Err(); err != nil {
+		t.Fatalf("remove auth version = %v", err)
+	}
+	if userID, version, err := store.ResolveAndTouchVersioned(ctx, versionedCredential); err != nil || userID != "" || version != 0 {
+		t.Fatalf("ResolveAndTouchVersioned(missing version) = %q, %d, %v", userID, version, err)
+	}
 	time.Sleep(200 * time.Millisecond)
 	if userID, err := store.ResolveAndTouch(ctx, credential); err != nil || userID != "" {
 		t.Fatalf("ResolveAndTouch(expired) = %q, %v", userID, err)
@@ -62,6 +80,12 @@ func TestStoreIntegrationSessionsAndLimiter(t *testing.T) {
 	}
 	if allowed, err := store.Allow(ctx, email); err != nil || allowed {
 		t.Fatalf("Allow(second) = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowPasswordReset(ctx, email); err != nil || !allowed {
+		t.Fatalf("AllowPasswordReset(first) = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowPasswordReset(ctx, email); err != nil || allowed {
+		t.Fatalf("AllowPasswordReset(second) = %t, %v", allowed, err)
 	}
 	keys, err := store.client.Keys(ctx, "temvia:v1:*").Result()
 	if err != nil {

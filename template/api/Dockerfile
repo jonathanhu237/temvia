@@ -10,6 +10,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/temvia-api ./cmd/server
 
 FROM alpine:3.22
+RUN apk add --no-cache ca-certificates
 RUN addgroup -S temvia && adduser -S -G temvia temvia
 COPY --from=build /out/temvia-api /usr/local/bin/temvia-api
 USER temvia

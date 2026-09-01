@@ -15,6 +15,8 @@ function mockApi(overrides: Partial<ApiClient> = {}): ApiClient {
     login: vi.fn(),
     me: vi.fn(),
     logout: vi.fn(),
+    requestPasswordReset: vi.fn(),
+    completePasswordReset: vi.fn(),
     ...overrides,
   }
 }

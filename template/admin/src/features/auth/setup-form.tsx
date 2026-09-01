@@ -23,6 +23,7 @@ export function SetupForm({ api, token, onSuccess, onInvalidAuthority, onSetupCo
     defaultValues: { name: '', email: '', password: '', passwordConfirmation: '' },
   })
   const mutation = useMutation({
+    retry: false,
     mutationFn: (values: SetupFormValues) => api.setup({ token, ...normalizeSetupValues(values) }),
     onSuccess: () => {
       clearSetupAuthority()

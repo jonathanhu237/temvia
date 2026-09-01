@@ -105,6 +105,23 @@ export const loginFormSchema = z
 
 export type LoginFormValues = z.infer<typeof loginFormSchema>
 
+export const passwordResetRequestFormSchema = z
+  .object({ email: z.string() })
+  .superRefine((value, ctx) => validateEmail(value.email, ctx))
+
+export type PasswordResetRequestFormValues = z.infer<typeof passwordResetRequestFormSchema>
+
+export const passwordResetFormSchema = z
+  .object({ password: z.string(), passwordConfirmation: z.string() })
+  .superRefine((value, ctx) => {
+    validatePassword(value.password, ctx)
+    if (normalizePassword(value.password) !== normalizePassword(value.passwordConfirmation)) {
+      addIssue(ctx, ['passwordConfirmation'], 'password_mismatch')
+    }
+  })
+
+export type PasswordResetFormValues = z.infer<typeof passwordResetFormSchema>
+
 export function normalizeSetupValues(values: SetupFormValues): { name: string; email: string; password: string } {
   return {
     name: normalizeName(values.name),
@@ -118,4 +135,12 @@ export function normalizeLoginValues(values: LoginFormValues): LoginFormValues {
     email: normalizeEmail(values.email),
     password: normalizePassword(values.password),
   }
+}
+
+export function normalizePasswordResetRequestValues(values: PasswordResetRequestFormValues): { email: string } {
+  return { email: normalizeEmail(values.email) }
+}
+
+export function normalizePasswordResetValues(values: PasswordResetFormValues): { password: string } {
+  return { password: normalizePassword(values.password) }
 }

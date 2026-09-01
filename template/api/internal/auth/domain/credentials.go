@@ -1,6 +1,9 @@
 package domain
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"unicode"
@@ -8,6 +11,95 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 )
+
+const (
+	PasswordResetTokenVersion  = "v1"
+	PasswordResetSelectorBytes = 16
+	PasswordResetVerifierBytes = 32
+	passwordResetContext       = "temvia-password-reset-v1"
+)
+
+// PasswordResetMaterial contains the non-printable pieces needed by the
+// request transaction. Verifier is intentionally a byte slice rather than a
+// string so it cannot accidentally be included in logs or formatted structs.
+type PasswordResetMaterial struct {
+	Selector       []byte
+	VerifierDigest []byte
+}
+
+// NewPasswordResetMaterial derives the verifier from the process secret and a
+// freshly generated selector. The selector is public lookup data; the
+// verifier is the actual recovery authority.
+func NewPasswordResetMaterial(key, selector []byte) (PasswordResetMaterial, error) {
+	verifier, err := derivePasswordResetVerifier(key, selector)
+	if err != nil {
+		return PasswordResetMaterial{}, err
+	}
+	digest := sha256.Sum256(verifier)
+	return PasswordResetMaterial{
+		Selector:       append([]byte(nil), selector...),
+		VerifierDigest: append([]byte(nil), digest[:]...),
+	}, nil
+}
+
+// NewPasswordResetToken derives and encodes the one-time credential for an
+// email template. The raw verifier exists only in this function's stack frame;
+// the returned material and all persisted projections contain only its digest.
+func NewPasswordResetToken(key, selector []byte) (string, error) {
+	verifier, err := derivePasswordResetVerifier(key, selector)
+	if err != nil {
+		return "", err
+	}
+	return PasswordResetTokenVersion + "." + base64.RawURLEncoding.EncodeToString(selector) + "." + base64.RawURLEncoding.EncodeToString(verifier), nil
+}
+
+func derivePasswordResetVerifier(key, selector []byte) ([]byte, error) {
+	if len(key) != PasswordResetVerifierBytes || len(selector) != PasswordResetSelectorBytes {
+		return nil, fmt.Errorf("invalid password reset key or selector length")
+	}
+	message := make([]byte, 0, len(passwordResetContext)+len(selector))
+	message = append(message, passwordResetContext...)
+	message = append(message, selector...)
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write(message)
+	return mac.Sum(nil), nil
+}
+
+// ParsePasswordResetToken performs only syntactic parsing and returns the
+// selector plus a digest of the presented verifier. It never returns or stores
+// the raw verifier, and the database compares the digest in constant time.
+func ParsePasswordResetToken(value string) (selector, verifierDigest []byte, ok bool) {
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 || parts[0] != PasswordResetTokenVersion {
+		return nil, nil, false
+	}
+	selector, ok = decodeCanonicalBase64URL(parts[1], PasswordResetSelectorBytes)
+	if !ok {
+		return nil, nil, false
+	}
+	verifier, ok := decodeCanonicalBase64URL(parts[2], PasswordResetVerifierBytes)
+	if !ok {
+		return nil, nil, false
+	}
+	digest := sha256.Sum256(verifier)
+	return selector, append([]byte(nil), digest[:]...), true
+}
+
+func decodeCanonicalBase64URL(value string, decodedBytes int) ([]byte, bool) {
+	if len(value) != (decodedBytes*8+5)/6 {
+		return nil, false
+	}
+	for _, r := range value {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return nil, false
+		}
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(decoded) != decodedBytes || base64.RawURLEncoding.EncodeToString(decoded) != value {
+		return nil, false
+	}
+	return decoded, true
+}
 
 // FieldError is a stable, transport-independent validation error.
 type FieldError struct {

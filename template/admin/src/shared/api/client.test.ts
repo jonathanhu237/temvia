@@ -47,8 +47,26 @@ describe('Fetch API boundary', () => {
     await expect(api.logout()).resolves.toBeUndefined()
   })
 
-  it('rejects a valid body returned with the wrong success status', async () => {
+	it('rejects a valid body returned with the wrong success status', async () => {
     server.use(http.get('/api/setup/status', () => HttpResponse.json({ status: 'required' }, { status: 201 })))
-    await expect(api.getSetupStatus()).rejects.toBeInstanceOf(ApiProtocolError)
-  })
+		await expect(api.getSetupStatus()).rejects.toBeInstanceOf(ApiProtocolError)
+	})
+
+	it('uses accepted and no-content contracts for password recovery', async () => {
+		let requestBody: unknown
+		server.use(
+			http.post('/api/auth/password-reset/request', async ({ request: incoming }) => {
+				requestBody = await incoming.json()
+				return HttpResponse.json({ status: 'accepted' }, { status: 202 })
+			}),
+			http.post('/api/auth/password-reset/complete', ({ request: incoming }) => {
+				expect(incoming.headers.get('content-type')).toBe('application/json')
+				return new HttpResponse(null, { status: 204 })
+			}),
+		)
+
+		await expect(api.requestPasswordReset({ email: 'ada@example.com', locale: 'en' })).resolves.toBeUndefined()
+		expect(requestBody).toEqual({ email: 'ada@example.com', locale: 'en' })
+		await expect(api.completePasswordReset({ token: `v1.${'A'.repeat(22)}.${'B'.repeat(43)}`, password: 'Aa1!xxxx', locale: 'zh-CN' })).resolves.toBeUndefined()
+	})
 })

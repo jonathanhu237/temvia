@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
-  loginFormSchema,
-  normalizeLoginValues,
-  normalizeSetupValues,
-  setupFormSchema,
+	loginFormSchema,
+	normalizeLoginValues,
+	normalizePasswordResetRequestValues,
+	normalizePasswordResetValues,
+	passwordResetFormSchema,
+	passwordResetRequestFormSchema,
+	normalizeSetupValues,
+	setupFormSchema,
 } from './schemas'
 
 const password = 'Admin1!x'
@@ -70,7 +74,7 @@ describe('auth form schemas', () => {
     expect(loginFormSchema.safeParse({ email: 'admin@example.com', password: '😀'.repeat(129) }).success).toBe(false)
   })
 
-  it('compares passwords after the same NFC normalization sent to the API', () => {
+	it('compares passwords after the same NFC normalization sent to the API', () => {
     const result = setupFormSchema.safeParse({
       name: 'Admin',
       email: 'admin@example.com',
@@ -78,5 +82,14 @@ describe('auth form schemas', () => {
       passwordConfirmation: 'Aa1!éxxx',
     })
     expect(result.success).toBe(true)
-  })
+	})
+
+	it('validates recovery email, password confirmation, and normalization', () => {
+		expect(passwordResetRequestFormSchema.safeParse({ email: '  admin@example.com  ' }).success).toBe(true)
+		expect(normalizePasswordResetRequestValues({ email: '  admin@example.com  ' })).toEqual({ email: 'admin@example.com' })
+		expect(passwordResetRequestFormSchema.safeParse({ email: 'bad' }).success).toBe(false)
+		expect(passwordResetFormSchema.safeParse({ password: 'Aa1!xxxx', passwordConfirmation: 'Aa1!xxx' }).success).toBe(false)
+		expect(passwordResetFormSchema.safeParse({ password: 'Aa1!e\u0301xxx', passwordConfirmation: 'Aa1!éxxx' }).success).toBe(true)
+		expect(normalizePasswordResetValues({ password: 'Aa1!e\u0301xxx', passwordConfirmation: 'Aa1!éxxx' })).toEqual({ password: 'Aa1!éxxx' })
+	})
 })

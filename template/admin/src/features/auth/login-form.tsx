@@ -23,6 +23,7 @@ export function LoginForm({ api, onSuccess }: { api: ApiClient; onSuccess: () =>
     defaultValues: { email: '', password: '' },
   })
   const mutation = useMutation({
+    retry: false,
     mutationFn: (values: LoginFormValues) => api.login(normalizeLoginValues(values)),
     onSuccess: (user) => {
       queryClient.setQueryData(currentUserQueryKey, user)
@@ -60,6 +61,9 @@ export function LoginForm({ api, onSuccess }: { api: ApiClient; onSuccess: () =>
       <Button type="submit" className="w-full" disabled={mutation.isPending}>
         {mutation.isPending ? t('loggingIn') : t('login')}
       </Button>
+      <a href="/forgot-password" className="text-center text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground">
+        {t('forgotPassword')}
+      </a>
     </form>
   )
 }

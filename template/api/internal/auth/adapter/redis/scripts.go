@@ -3,10 +3,11 @@ package redis
 import "github.com/redis/go-redis/v9"
 
 const (
-	sessionUserID     = "user_id"
-	sessionCreatedAt  = "created_at_ms"
-	sessionLastSeenAt = "last_seen_at_ms"
-	sessionAbsoluteAt = "absolute_expires_at_ms"
+	sessionUserID      = "user_id"
+	sessionCreatedAt   = "created_at_ms"
+	sessionLastSeenAt  = "last_seen_at_ms"
+	sessionAbsoluteAt  = "absolute_expires_at_ms"
+	sessionAuthVersion = "auth_version"
 )
 
 var createSessionScript = redis.NewScript(`
@@ -23,7 +24,8 @@ redis.call('HSET', key,
   'user_id', ARGV[1],
   'created_at_ms', now,
   'last_seen_at_ms', now,
-  'absolute_expires_at_ms', absolute)
+  'absolute_expires_at_ms', absolute,
+  'auth_version', ARGV[4])
 redis.call('PEXPIREAT', key, expires)
 return 1
 `)
@@ -33,7 +35,7 @@ local key = KEYS[1]
 if redis.call('EXISTS', key) == 0 then
   return {0}
 end
-local values = redis.call('HMGET', key, 'user_id', 'absolute_expires_at_ms')
+local values = redis.call('HMGET', key, 'user_id', 'absolute_expires_at_ms', 'auth_version')
 if not values[1] or not values[2] then
   redis.call('DEL', key)
   return {0}
@@ -41,6 +43,11 @@ end
 local nowParts = redis.call('TIME')
 local now = (tonumber(nowParts[1]) * 1000) + math.floor(tonumber(nowParts[2]) / 1000)
 local absolute = tonumber(values[2])
+local authVersion = tonumber(values[3])
+if not absolute or not authVersion or authVersion <= 0 then
+  redis.call('DEL', key)
+  return {0}
+end
 if now >= absolute then
   redis.call('DEL', key)
   return {0}
@@ -49,7 +56,7 @@ local idleExpires = now + tonumber(ARGV[1])
 local expires = math.min(idleExpires, absolute)
 redis.call('HSET', key, 'last_seen_at_ms', now)
 redis.call('PEXPIREAT', key, expires)
-return {1, values[1]}
+return {1, values[1], values[3]}
 `)
 
 var allowLoginScript = redis.NewScript(`
