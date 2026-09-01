@@ -195,3 +195,25 @@ Replaced the unintended warm admin palette with official shadcn Vega + Neutral l
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: Keep login form available before setup
+<!-- trellis-session: v=2 fp=8296b271f4649988 -->
+
+**Date**: 2026-09-01
+**Task**: Keep login form available before setup
+**Branch**: `main`
+
+### Summary
+
+Removed the login route setup-status gate so uninitialized installations show the normal login form, preserved authenticated redirects and the protected setup flow, and added generated Chromium coverage.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a1ececd` | fix(admin): keep login form available before setup |
+
+### Status
+
+[OK] **Completed**
