@@ -138,6 +138,7 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
     'admin/src/features/auth/login-form.tsx', 'admin/src/features/auth/queries.test.ts', 'admin/src/features/auth/queries.ts', 'admin/src/features/auth/schemas.test.ts',
     'admin/src/features/auth/schemas.ts', 'admin/src/features/auth/session-error.tsx', 'admin/src/features/auth/setup-form.tsx',
     'admin/src/hooks/use-mobile.tsx', 'admin/src/lib/utils.ts',
+    'admin/src/routes/-setup.test.ts',
     'admin/src/routes/__root.tsx', 'admin/src/routes/_authenticated.tsx', 'admin/src/routes/_authenticated/index.tsx',
     'admin/src/routes/login.tsx', 'admin/src/routes/setup.tsx',
     'admin/src/shared/api/client.test.ts', 'admin/src/shared/api/client.ts', 'admin/src/shared/api/contracts.ts',

@@ -23,14 +23,14 @@ describe('authentication page shell', () => {
     expect(screen.queryByText('Temvia')).not.toBeInTheDocument()
   })
 
-  it('renders recovery context only when the page supplies a description', () => {
+  it('renders additional context only when the page supplies a description', () => {
     render(
-      <AuthPage title="Open a fresh setup link" description="The latest setup link is required.">
-        <p>Recovery content</p>
+      <AuthPage title="Example page" description="Additional context.">
+        <p>Page content</p>
       </AuthPage>,
     )
 
-    expect(screen.getByText('The latest setup link is required.')).toBeVisible()
-    expect(screen.getByText('Recovery content')).toBeVisible()
+    expect(screen.getByText('Additional context.')).toBeVisible()
+    expect(screen.getByText('Page content')).toBeVisible()
   })
 })

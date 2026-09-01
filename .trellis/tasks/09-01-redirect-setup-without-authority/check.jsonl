@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Router loader, query and redirect conventions for authentication routes"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Authentication component cleanup and accessibility rules"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Generated template and browser flow verification requirements"}
+{"file": ".trellis/tasks/09-01-redirect-setup-without-authority/research/setup-authority-routing.md", "reason": "Repository evidence for setup authority lifecycle and route behavior"}

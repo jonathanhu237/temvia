@@ -65,16 +65,3 @@ export function AuthAlert({ title, description }: { title: string; description: 
     </Alert>
   )
 }
-
-export function RecoveryState({ title, description, instruction }: { title: string; description: string; instruction?: string }) {
-  const { t } = useTranslation('common')
-  return (
-    <div className="flex flex-col gap-5">
-      <AuthAlert title={title} description={description} />
-      {instruction && <p className="text-sm leading-relaxed text-muted-foreground">{instruction}</p>}
-      <Button asChild variant="outline" className="w-full">
-        <a href="/login">{t('backToLogin')}</a>
-      </Button>
-    </div>
-  )
-}

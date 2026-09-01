@@ -34,7 +34,9 @@ store.
 Keep redirects in route loaders or a narrowly scoped effect tied to a known
 query result. Include all values in effect dependency arrays. Setup authority
 capture runs before React in `main.tsx`; it must not be moved into a component
-effect where a credential could render first.
+effect where a credential could render first. Clear setup authority from the
+TanStack Router setup route's `onLeave` lifecycle; a component effect cleanup
+can run during React Strict Mode while the route is still active.
 
 ## Common mistakes
 

@@ -21,6 +21,7 @@ export const adminTemplateFiles = [
   'src/features/auth/login-form.tsx', 'src/features/auth/queries.test.ts', 'src/features/auth/queries.ts', 'src/features/auth/schemas.test.ts',
   'src/features/auth/schemas.ts', 'src/features/auth/session-error.tsx', 'src/features/auth/setup-form.tsx',
   'src/hooks/use-mobile.tsx', 'src/index.css', 'src/lib/utils.ts', 'src/main.tsx', 'src/routeTree.gen.ts',
+  'src/routes/-setup.test.ts',
   'src/routes/__root.tsx', 'src/routes/_authenticated.tsx', 'src/routes/_authenticated/index.tsx',
   'src/routes/login.tsx', 'src/routes/setup.tsx',
   'src/shared/api/client.test.ts', 'src/shared/api/client.ts', 'src/shared/api/contracts.ts',

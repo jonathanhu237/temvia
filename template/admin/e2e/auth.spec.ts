@@ -15,8 +15,11 @@ function collectBrowserErrors(page: Page): string[] {
     const isExpectedAuth401 = message.text().includes('401')
       && sourceURL.length > 0
       && ['/api/auth/me', '/api/auth/login'].includes(new URL(sourceURL).pathname)
+    const isExpectedSetup403 = message.text().includes('403')
+      && sourceURL.length > 0
+      && new URL(sourceURL).pathname === '/api/setup'
 
-    if (!isExpectedAuth401) errors.push(message.text())
+    if (!isExpectedAuth401 && !isExpectedSetup403) errors.push(message.text())
   })
   page.on('pageerror', (error) => errors.push(error.message))
   return errors
@@ -38,6 +41,11 @@ test.describe('administrator authentication', () => {
       if (new URL(request.url()).pathname === '/api/setup/status') setupStatusRequests.push(request.url())
     })
 
+    await page.goto(new URL('/setup', setupURL!).toString())
+    await expect(page).toHaveURL(/\/login$/)
+    await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible()
+    expect(setupStatusRequests).toEqual([])
+
     await page.goto(new URL('/login', setupURL!).toString())
     await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible()
     await expect(page.getByLabel('Email')).toBeVisible()
@@ -54,9 +62,32 @@ test.describe('administrator authentication', () => {
     expect(browserErrors).toEqual([])
   })
 
+  test('returns to login when the setup authority is rejected', async ({ page }) => {
+    test.skip(!setupURL, 'Set E2E_SETUP_URL to a fresh setup URL from the API log.')
+    const browserErrors = collectBrowserErrors(page)
+    const invalidToken = 'A'.repeat(43)
+
+    await page.goto(`${new URL(setupURL!).origin}/setup#token=${invalidToken}`)
+    await expect(page.getByRole('heading', { name: /create your administrator account/i })).toBeVisible()
+    await page.getByLabel('Name').fill('Admin User')
+    await page.getByLabel('Email').fill('invalid@example.com')
+    await page.getByLabel('Password', { exact: true }).fill('Admin1!x')
+    await page.getByLabel('Confirm password').fill('Admin1!x')
+    await page.getByRole('button', { name: /create administrator/i }).click()
+
+    await expect(page).toHaveURL(/\/login$/)
+    await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible()
+    await expect(page.getByText(/finish initialization|open the latest setup link/i)).toHaveCount(0)
+    expect(browserErrors).toEqual([])
+  })
+
   test('initializes, signs in, restores the session, changes locale and logs out', async ({ page }) => {
     test.skip(!setupURL, 'Set E2E_SETUP_URL to a fresh setup URL from the API log.')
     const browserErrors = collectBrowserErrors(page)
+    const setupStatusRequests: string[] = []
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/setup/status') setupStatusRequests.push(request.url())
+    })
     const setupToken = new URL(setupURL!).hash.slice('#token='.length)
 
     await page.goto(setupURL!)
@@ -68,6 +99,17 @@ test.describe('administrator authentication', () => {
     await expect(page.locator('[data-slot="field-description"]')).toHaveCount(0)
     await expect(page.locator('main > div').getByRole('button', { name: 'Language' })).toBeVisible()
     await expectNoA11yViolations(page)
+
+    const setupStatusRequestsBeforeReload = setupStatusRequests.length
+    await page.reload()
+    await expect(page).toHaveURL(/\/login$/)
+    await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible()
+    await expect(page.getByLabel('Email')).toBeVisible()
+    expect(setupStatusRequests).toHaveLength(setupStatusRequestsBeforeReload)
+
+    await page.goto(setupURL!)
+    await expect.poll(() => new URL(page.url()).hash).toBe('')
+    await expect(page.getByRole('heading', { name: /create your administrator account/i })).toBeVisible()
     await page.getByLabel('Name').fill(name)
     await page.getByLabel('Email').fill(email)
     await page.getByLabel('Password', { exact: true }).fill(password)

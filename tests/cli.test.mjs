@@ -127,6 +127,7 @@ test('template preflight rejects missing API, frontend, deployment, lint and pro
   for (const [index, missing] of [
     'api/go.mod', 'admin/src/shared/api/client.ts', 'admin/Caddyfile',
     'admin/components.json', 'admin/.oxlintrc.json', 'admin/_gitignore', 'admin/UPSTREAM.md',
+    'admin/src/routes/-setup.test.ts',
   ].entries()) {
     const template = join(cwd, `template-${index}`);
     await fs.cp(join(root, 'template'), template, { recursive: true });
