@@ -13,7 +13,7 @@ template/admin/src/
 ├── lib/                 # UI utilities such as cn()
 ├── routes/              # TanStack file routes and boundaries
 ├── shared/api/          # Fetch adapter, Zod contracts and problem mapping
-├── shared/bootstrap/    # Pre-render setup authority handling
+├── shared/bootstrap/    # Pre-render setup/reset authority handling
 ├── shared/i18n/         # i18next instance and bundled resources
 └── test/                # Vitest setup and MSW server
 ```
@@ -33,6 +33,8 @@ query option factories end in `Options`, and stable query keys end in
 ## New feature checklist
 
 Place route files in `routes/`, feature behavior in `features/<name>/`, and
-cross-feature protocol or browser behavior in `shared/`. Keep shadcn source
-under `components/ui/`; compose it in feature components instead of modifying
+cross-feature protocol or browser behavior in `shared/`. Password recovery
+forms stay under `features/auth/`; reset fragments are captured by the shared
+bootstrap authority module before React mounts. Keep shadcn source under
+`components/ui/`; compose it in feature components instead of modifying
 generated primitives for one screen.

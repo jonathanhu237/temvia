@@ -1,8 +1,8 @@
-# Setup and Authentication Contract
+# Setup, Authentication, and Recovery Contract
 
 ## 1. Scope / Trigger
 
-Use this contract when changing the generated Go API's initial-administrator setup, email/password login, current-session lookup, logout, PostgreSQL schema, Redis session/limiter state, or their deployment configuration. The React admin is a separate consumer and is not part of this backend contract.
+Use this contract when changing the generated Go API's initial-administrator setup, email/password login, current-session lookup, logout, password recovery, PostgreSQL schema, Redis session/limiter state, or their deployment configuration. The React admin is a separate consumer and is not part of this backend contract.
 
 The implementation is a feature-oriented modular monolith. Business rules live in `internal/auth/domain` and `internal/auth/application`; HTTP, PostgreSQL, Redis, and Argon2id are adapters. Runtime calls flow inward and back out through application ports, while source dependencies point inward.
 
@@ -18,6 +18,8 @@ The implementation is a feature-oriented modular monolith. Business rules live i
 | `POST /api/auth/login` | `200 {"user":{"id","name","email"}}` | Create an independent opaque session |
 | `GET /api/auth/me` | `200 {"user":{"id","name","email"}}` | Resolve and touch the current session |
 | `POST /api/auth/logout` | `204` | Revoke the presented session and expire its cookie |
+| `POST /api/auth/password-reset/request` | `202 {"status":"accepted"}` | Queue a generic reset email request |
+| `POST /api/auth/password-reset/complete` | `204` | Consume a reset credential and replace the password |
 
 All `/api/setup` and `/api/auth` responses use `Cache-Control: no-store`. Unsafe routes require an exact canonical `Origin` match before request decoding or state access.
 
@@ -36,6 +38,12 @@ type SessionStore interface {
     ResolveAndTouch(context.Context, string) (string, error)
     Delete(context.Context, string) error
 }
+
+type PasswordResetStore interface {
+    RequestPasswordReset(context.Context, string, []byte, []byte, time.Duration, domain.Locale) error
+    PreflightPasswordReset(context.Context, []byte, []byte) error
+    CompletePasswordReset(context.Context, []byte, []byte, string, domain.Locale, time.Duration) (time.Time, error)
+}
 ```
 
 Adapters may implement multiple narrow application ports. Do not introduce generic `Repository` or `Service` buckets solely to share a name.
@@ -43,9 +51,12 @@ Adapters may implement multiple narrow application ports. Do not introduce gener
 ### Database
 
 - Migration version `000001_auth` creates `auth_setup` and `auth_users`.
+- Migration version `000002_password_recovery` adds positive `auth_users.auth_version`, one current row per user in `auth_password_resets`, and the durable `auth_mail_outbox`.
 - `auth_setup` contains exactly one `singleton=true` row.
 - `auth_users.id` is PostgreSQL 18 `uuidv7()` and is serialized as canonical UUID text.
 - `email_canonical` is unique and lowercase; `email` preserves the validated display value.
+- `auth_version` increments in the same transaction as a successful password reset. Redis sessions carry the version and fail closed when it differs or is absent.
+- Reset rows store a 16-byte selector and SHA-256 verifier digest only. Outbox reset jobs revalidate the current selector/digest before sending; SMTP is outside database transactions.
 
 ## 3. Contracts
 
@@ -68,6 +79,8 @@ Setup links are logged as `${APP_PUBLIC_URL}/setup#token=<credential>`. Only the
 
 Passwords use Argon2id PHC strings with `m=65536 KiB`, `t=3`, `p=4`, a 16-byte random salt, and a 32-byte tag. The project parser accepts only that exact bounded profile before invoking Argon2. One shared immediate-acquisition semaphore bounds hash and verify work.
 
+Recovery credentials use `v1.<selector>.<verifier>` with 16 selector bytes and 32 verifier bytes encoded as canonical unpadded Base64URL. The verifier is `HMAC-SHA256(PASSWORD_RESET_TOKEN_KEY, "temvia-password-reset-v1" || selector)`; PostgreSQL stores only its SHA-256 digest. New requests replace older reset authority. Completion preflights before Argon2, revalidates under lock, increments `auth_version`, consumes the reset row, queues a password-changed notice, and never creates a session.
+
 Sessions are server-side Redis hashes keyed by SHA-256 of the decoded credential. They have a 30-minute idle deadline and 12-hour absolute deadline by default. Resolve/touch is atomic and cannot recreate a deleted key. Every explicit login creates a separate session.
 
 The login limiter atomically evaluates one global bucket and one SHA-256 canonical-email bucket using Redis server time. Defaults are global capacity 10/refill 6 seconds and email capacity 5/refill 1 minute. Every limiter/session key has a finite TTL.
@@ -86,9 +99,11 @@ The login limiter atomically evaluates one global bucket and one SHA-256 canonic
 - build networking: `GOPROXY`;
 - PostgreSQL connection/pool: `POSTGRES_*`, `DB_*`;
 - Redis endpoint/memory/deadline: `REDIS_*`;
-- auth resources: `SESSION_*`, `PASSWORD_HASH_MAX_CONCURRENCY`, `LOGIN_RATE_LIMIT_*`.
+- auth resources: `SESSION_*`, `PASSWORD_HASH_MAX_CONCURRENCY`, `LOGIN_RATE_LIMIT_*`, `PASSWORD_RESET_*`.
+- mail delivery: `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS_MODE`, optional SMTP authentication (`SMTP_USERNAME` and `SMTP_PASSWORD` must be supplied together), `MAIL_FROM_NAME`, `MAIL_FROM_ADDRESS`, `SMTP_DELIVERY_TIMEOUT`.
+- outbox: `MAIL_DISPATCH_INTERVAL`, `MAIL_OUTBOX_LEASE_TTL`, `MAIL_RETRY_INITIAL_INTERVAL`, `MAIL_RETRY_MAX_INTERVAL`, `MAIL_NOTIFICATION_TTL`.
 
-Production requires an HTTPS public URL. Development HTTP keeps Origin enforcement and authentication; non-loopback HTTP emits an operator warning. Redis is intentionally ephemeral: no AOF, RDB, or Redis data volume. PostgreSQL uses a named persistent volume.
+Production requires an HTTPS public URL and `starttls`/`tls` SMTP; SMTP authentication is optional, but when configured both `SMTP_USERNAME` and `SMTP_PASSWORD` are required (the reserved `.test` sender is development-only). Development HTTP keeps Origin enforcement and authentication; non-loopback HTTP emits an operator warning. Redis is intentionally ephemeral: no AOF, RDB, or Redis data volume. PostgreSQL uses a named persistent volume. Mailpit is a development-only Compose profile with loopback UI mapping; the API does not wait for SMTP readiness.
 
 ## 4. Validation & Error Matrix
 
@@ -106,6 +121,8 @@ Errors use `application/problem+json` and RFC 9457 fields. `type`, `title`, and 
 | Body exceeds 64 KiB | `413 /problems/content-too-large` |
 | Invalid, duplicate-key, unknown-key, non-object, or trailing JSON | `400 /problems/invalid-request` |
 | Login buckets deny | `429 /problems/rate-limited`, no reset disclosure |
+| Password-reset buckets deny | `429 /problems/rate-limited`, no account disclosure |
+| Malformed, expired, replayed, or superseded reset credential | `403 /problems/invalid-password-reset-token` |
 | PostgreSQL, Redis, random source, or Argon capacity uncertainty | `503 /problems/service-unavailable` |
 | Unknown API path / wrong known-path method | `404` / `405` Problem Details; `Allow` on `405` |
 
@@ -113,6 +130,21 @@ Password creation failures use `errors[].code = "invalid_password"`; login input
 boundary failures use `errors[].code = "invalid_login_password"`. These codes
 are stable identifiers for frontend localization and are never rendered as
 user-facing text.
+
+Password-reset request success is byte-equivalent for known and unknown emails,
+returns `202`, performs no SMTP work on the request path, and waits for the
+configured minimum response duration after validation/limiting. Completion
+returns `204`, clears a presented session cookie, and does not create a new
+session. Reset mail and password-changed notices are at-least-once outbox work;
+only bounded safe error classes are retained, never SMTP protocol text.
+
+Recovery and password-change HTML mail is a complete, email-safe 600px
+presentation-table document with inline styles, system fonts, no active or
+external resources, and a synchronized plain-text alternative. Reset mail
+renders the authority only as one CTA `href` plus one visible fallback link;
+password-change mail contains neither a reset link nor any credential. Both
+locales keep the action/status, expiry or UTC change time, and unexpected-action
+guidance visually explicit.
 
 No `401` response advertises Basic or Bearer authentication. A valid-looking logout credential is cleared only after Redis acknowledges deletion; uncertain deletion returns `503` and preserves the cookie for retry.
 
@@ -126,12 +158,16 @@ No `401` response advertises Basic or Bearer authentication. A valid-looking log
 ## 6. Tests Required
 
 - Domain unit tests cover Unicode trimming/NFC, bounds, invalid email labels, and password length without logging values.
-- Application tests cover startup-token replacement/completion, replay, explicit login, unknown-email behavior, session decoding, limiter denial, and dependency error mapping.
+- Application tests cover startup-token replacement/completion, replay, explicit login, unknown-email behavior, session decoding/version revocation, limiter denial, reset token derivation, preflight-before-hash, outbox dispatch/retry, and dependency error mapping.
 - Password tests cover independent salts, correct/wrong values, malformed/oversized PHC strings, exact parameters, cancellation, and immediate semaphore saturation.
-- PostgreSQL integration tests run on PostgreSQL 18 after migrations and assert schema version, setup lifecycle, one-winner concurrent completion, UUID version 7, and persistence.
-- Redis 8 integration tests assert finite TTL, hashed keys, idle/absolute expiry, non-resurrection, limiter denial/refill, restart-wide logout, and recovery.
+- PostgreSQL integration tests run on PostgreSQL 18 after migrations and assert schema version, setup lifecycle, one-winner concurrent completion, UUID version 7, reset replacement/expiry/replay, auth-version increments, transactional outbox, lease ownership, retry/cleanup, and persistence.
+- Redis 8 integration tests assert finite TTL, hashed keys, idle/absolute expiry, non-resurrection, limiter denial/refill, reset namespace separation, versioned sessions, restart-wide logout, and recovery.
 - HTTP tests assert status, Problem Details fields, content type, no-store, Origin precedence, strict JSON/body limits, cookie attributes, 404/405, and identical wrong/unknown login bodies.
-- Generated-project verification must install an actual npm tarball, use a non-seed Go module path, run `go test`, `go vet`, `go test -race`, build the API image, and exercise the real HTTP flow with PostgreSQL and Redis.
+- SMTP adapter tests assert structured addresses, TLS modes, deterministic Message-ID, multipart localized content, safe error classification, and no credential/protocol leakage. Generated-project verification must install an actual npm tarball, use a non-seed Go module path, run `go test`, `go vet`, `go test -race`, build the API image, and exercise the real recovery flow with PostgreSQL, Redis, and Mailpit.
+- Mail-template tests cover both locales, complete table-document structure,
+  inline-only styling, escaped dynamic values, exactly one reset CTA `href`,
+  the visible fallback link, security guidance, plain-text parity, and the
+  absence of links or secrets from password-change notices.
 
 ## 7. Wrong vs Correct
 

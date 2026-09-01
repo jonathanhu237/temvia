@@ -46,7 +46,20 @@ session cookie.
 
 Translations are bundled in Simplified Chinese and English. The language menu
 stores only the manually selected locale in localStorage; authentication data
-is never persisted by the admin.
+is never persisted by the admin. The login page links to `/forgot-password`.
+That form intentionally shows the same accepted state for an existing or
+unknown email. Reset links use a `#token=` fragment; bootstrap captures and
+clears it with `history.replaceState` before React renders, keeping the token
+in module memory only. `/reset-password` asks for the new password twice,
+shows one invalid/expired-link state, and sends the user back to `/login` after
+success without automatically authenticating them. Both routes pass the active
+locale (`en` or `zh-CN`) to the API.
+
+The API's PostgreSQL outbox sends the reset link and a separate password-changed
+notification asynchronously over SMTP. SMTP outages do not block the form;
+the API retries durable jobs. See the root README for Mailpit and production
+SMTP configuration. The Caddy runtime also sends `Referrer-Policy: no-referrer`
+as defense in depth for fragment credentials.
 
 ## Container
 

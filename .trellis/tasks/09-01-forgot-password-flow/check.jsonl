@@ -1,0 +1,13 @@
+{"file":".trellis/spec/backend/authentication-contract.md","reason":"Verify the complete recovery and existing authentication contract, including enumeration resistance, replay, session invalidation, and failure semantics."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Check migration history, exact schema version, transaction boundaries, outbox leasing, expiry, cleanup, and rollback behavior."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check strict request precedence, stable Problem Details, dependency uncertainty, and absence of account disclosure."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Audit every log/error path for password, verifier, selector, email, SMTP secret, and message-body leakage."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run and review the required Go, race, integration, generated-output, container, and security quality gates."}
+{"file":".trellis/spec/backend/scaffolding-contract.md","reason":"Verify both required-file inventories and byte identity across source, packed package, and generated projects."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Review localized recovery states, field/error association, focus, password behavior, and accessibility."}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Prove reset authority never enters browser persistence, Query cache, Context, cookies, or retained history."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Verify all new success and Problem Details payloads are validated once at the shared API boundary."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Run admin, Caddy, Playwright, axe, packaging, and Centaurus verification with exact forwarded origins."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review end-to-end locale/token/job/session formats and error ownership at every layer boundary."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Search for divergent token, limiter, form, route, configuration, and template-inventory implementations."}
+{"file":".trellis/tasks/09-01-forgot-password-flow/research/password-recovery-architecture.md","reason":"Verify the implementation against the reviewed security guidance, dependency versions, rejected MQ alternative, and failure model."}

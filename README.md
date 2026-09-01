@@ -5,8 +5,9 @@ English | [简体中文](README.zh-CN.md)
 Temvia is a CLI for scaffolding Go backends and React admin frontends.
 
 The generated project contains an independent Go API, a React admin and a
-Compose deployment with PostgreSQL, Redis, an explicit migration container and
-a Caddy same-origin gateway.
+Compose deployment with PostgreSQL, Redis, a development-only Mailpit profile,
+an explicit migration container and a Caddy same-origin gateway. Its auth
+module includes an asynchronous, transactional-outbox password recovery flow.
 
 ```sh
 pnpm install

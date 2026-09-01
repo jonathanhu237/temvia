@@ -7,14 +7,17 @@ untrusted data at runtime.
 ## Runtime contracts
 
 Zod schemas in `shared/api/contracts.ts` validate every successful API body
-and RFC 9457 Problem Details response. `ApiClient` returns inferred `User` and
-`SetupStatus` values and converts malformed responses into
+and RFC 9457 Problem Details response. `ApiClient` returns inferred `User`,
+`SetupStatus`, and accepted-reset values and converts malformed responses into
 `ApiProtocolError`. Do not cast an API response before parsing it.
 
 Browser form schemas in `features/auth/schemas.ts` normalize Unicode name and
 email input, count password code points, and emit stable error codes. The
 server remains authoritative for final validation. `passwordConfirmation` is
-browser-only and is excluded by `normalizeSetupValues`.
+browser-only and is excluded by setup/reset normalizers. Reset completion
+accepts only the in-memory fragment authority plus normalized password and
+locale; the token is not placed in Query state, browser storage, cookies, or
+error text.
 
 ```ts
 export type User = z.infer<typeof userSchema>

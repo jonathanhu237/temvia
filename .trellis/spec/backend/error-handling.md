@@ -13,7 +13,7 @@ Do not return database, Redis, PHC parser, filesystem, or configuration details 
 
 ## Error Types and Propagation
 
-Application sentinels include setup complete/invalid token, account not found, invalid credentials, unauthenticated, rate limited, dependency unavailable, password hash busy, and duplicate email. Unexpected adapter errors are wrapped as dependency-unavailable while retaining a safe diagnostic string for operator handling.
+Application sentinels include setup complete/invalid token, invalid password-reset token, account not found, invalid credentials, unauthenticated, rate limited, dependency unavailable, password hash busy, and duplicate email. Unexpected adapter errors are wrapped as dependency-unavailable while retaining a safe diagnostic string for operator handling.
 
 Expected branching uses `errors.Is`/`errors.As`; do not compare error strings. Domain validation may contain multiple `FieldError` values:
 
@@ -55,6 +55,7 @@ still need to reach password-hash verification after an upgrade.
 - Unsupported JSON media type is `415`.
 - Invalid JSON shape/syntax is `400`; well-shaped invalid domain fields are `422`.
 - While setup is open, malformed token authority is `403`; after durable completion, setup is `409` without validating old authority.
+- Malformed, expired, replayed, or superseded reset credentials are one stable `403 /problems/invalid-password-reset-token`. Password-reset request success is a generic `202` regardless of account existence; SMTP failures happen after the response in the durable outbox dispatcher.
 - Wrong known-path methods are `405` with `Allow`; unknown paths are `404`.
 
 ## Common Mistakes
@@ -62,7 +63,8 @@ still need to reach password-hash verification after an upgrade.
 - Wrong: a universal `{success,data,message}` envelope. Correct: endpoint-specific success payloads plus centralized Problem Details errors.
 - Wrong: translate English server messages in the frontend. Correct: localize stable problem and field codes.
 - Wrong: turn every adapter error into `500`. Correct: distinguish invalid authority, domain validation, dependency uncertainty, and true internal defects at the HTTP boundary.
+- Wrong: retain raw SMTP text or token/password values in outbox error state. Correct: classify delivery failures into bounded safe classes and expose only the stable service-unavailable or invalid-reset problem at HTTP.
 
 ## Tests Required
 
-HTTP table tests assert exact status, content type, public fields, headers, and absence of internal text for every mapping. Tests must cover Origin/body/media precedence, invalid setup token types, unknown versus wrong credentials, limiter denial, dependency outages, and idempotent logout behavior.
+HTTP table tests assert exact status, content type, public fields, headers, and absence of internal text for every mapping. Tests must cover Origin/body/media precedence, invalid setup/reset token types, known/unknown recovery equivalence, limiter denial, dependency outages, no-cookie reset completion, and idempotent logout behavior.

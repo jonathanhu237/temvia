@@ -5,15 +5,15 @@
 - Format Go with `gofmt`; use standard-library APIs (`net/http`, `database/sql`) at the accepted boundaries.
 - Keep configuration typed, validated before network clients/listeners, and sourced only from process environment.
 - Keep all request bodies bounded and strict; reject duplicate and unknown JSON keys.
-- Keep credentials out of database/Redis keys and HTTP/log output except the deliberately issued setup fragment in trusted startup logs.
+- Keep credentials out of database/Redis keys and HTTP/log output except the deliberately issued setup fragment in trusted startup logs; reset credentials are held in memory only until completion or typed SMTP delivery.
 - Make Redis authorization state finite and fail closed on uncertain results.
-- Preserve `GET /health` and leave `template/admin` byte-for-byte unchanged during backend-only tasks.
+- Preserve `GET /health` and keep frontend/API/deployment template inventories synchronized for cross-layer auth changes.
 - Keep required-template inventories synchronized across generator preflight and independent tests.
 
 ## Forbidden Patterns
 
 - Automatic migrations during API startup.
-- JWT, ORM/sqlc, MySQL compatibility, Redis persistence, password recovery, MFA, frontend auth, or new hardening added without a reviewed task.
+- JWT, ORM/sqlc, MySQL compatibility, Redis persistence, MFA, or new hardening added without a reviewed task. Password recovery is permitted only through the reviewed transactional-outbox contract.
 - Arbitrary Argon2 parameters parsed from stored PHC values.
 - Unbounded Argon2 queues or waiting work.
 - Raw setup/session credentials or canonical emails in Redis keys.
@@ -44,6 +44,7 @@ Integration evidence must cover migration up/down, exact schema readiness, concu
 - [ ] No secret, `.env`, database data, dependency, or build artifact enters the npm tarball/generated project.
 - [ ] Docker image versions, Go dependencies, `.env.example`, README, Compose, and tests agree.
 - [ ] API never migrates and Redis is not a startup gate.
+- [ ] Recovery requests are enumeration-resistant, completion invalidates `auth_version`, and outbox SMTP delivery is leased/retried outside request transactions.
 - [ ] Unexpected dependency behavior fails closed and public errors remain stable.
 - [ ] `git diff --check`, `go mod tidy` cleanliness, admin diff, and generated module substitution are verified.
 

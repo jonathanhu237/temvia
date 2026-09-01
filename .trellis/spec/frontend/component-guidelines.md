@@ -8,6 +8,11 @@ behavior. The setup and login screens use `Card`, `Field`, `Input`, `Alert`
 and `Button`; the authenticated layout composes the official `Sidebar`
 primitive with `DropdownMenu` and `Separator`.
 
+Recovery screens reuse `AuthPage`, labeled `TextField`/`PasswordField`,
+`Alert`, and submit buttons. Request success, invalid-link, and reset-success
+states are explicit localized card states with a clear next action; forms show
+pending feedback and keep field errors adjacent to their inputs.
+
 Public authentication screens use the local Card's default border and light
 shadow. A normal setup or login Card has one `CardTitle`, its form in
 `CardContent`, and no decorative eyebrow, divider, or persistent explanatory

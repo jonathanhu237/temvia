@@ -23,12 +23,12 @@ The npm bin is dist/cli.js. Build TypeScript with NodeNext; resolve template ass
 - Git discovery uses the target's nearest existing ancestor, supports linked worktrees, and clears location-overriding Git environment variables. It never stages, commits, adds remotes, or pushes.
 - Module paths use the documented conservative subset: lowercase domain-like host and ordinary ASCII path segments. Windows reserved-name checks apply to the host as well as later segments. gopkg.in's special syntax is unsupported.
 - Generation does not install dependencies, create `.env`, migrate a database, issue setup authority, or start services. Missing Git fails preflight; a later git init failure retains output with a nonzero exit and recovery instructions.
-- The installed package determines the complete template. Generation never fetches upstream or executes create-vite. Keep the explicit required-file preflight synchronized with all 105 current template files, including all 66 final admin files and every required Go/config/migration/container file.
+- The installed package determines the complete template. Generation never fetches upstream or executes create-vite. Keep the explicit required-file preflight synchronized with all 122 shipped template assets, including all 73 final admin files and every required Go/config/migration/container file. The independent admin inventory in `tests/react-ts-baseline.mjs` must be updated with every new route/form/test.
 - Transform only the exact _gitignore basename at any directory depth into .gitignore. The bundled admin/.oxlintrc.json is already materialized and is copied unchanged. Preserve file bytes, including binary assets, across packing and generation.
 - The exact root `.env.example` is allowed through copy/pack filters; `.env` and every other `.env.*` file remain excluded. Generated secrets are never invented.
 - The seed module `example.com/temvia/api` is replaced in `api/go.mod` and every generated `.go` file. No seed import may remain for a non-seed module path.
-- GET /health returns 200, application/json, and status=ok. POST /health returns 405; unknown routes return 404. Setup/auth routes follow [Setup and Authentication](./authentication-contract.md).
-- HTTP_ADDR overrides the direct-process default 127.0.0.1:8080; Compose injects its container listener. The API has pinned PostgreSQL, Redis, Argon2id, and Unicode-normalization dependencies.
+- GET /health returns 200, application/json, and status=ok. POST /health returns 405; unknown routes return 404. Setup/auth/recovery routes follow [Setup and Authentication](./authentication-contract.md).
+- HTTP_ADDR overrides the direct-process default 127.0.0.1:8080; Compose injects its container listener. The API has pinned PostgreSQL, Redis, Argon2id, Unicode-normalization, and go-mail dependencies. Compose pins the development-only Mailpit image and keeps its UI loopback-bound.
 
 ## 4. Validation & Error Matrix
 

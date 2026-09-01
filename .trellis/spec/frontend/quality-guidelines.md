@@ -48,10 +48,15 @@ from the same root environment inventory.
   diagnostics.
 - Setup authority is captured from `/setup#token=...` before React mounts,
   removed from history, held in module memory and cleared after setup,
-  invalid authority or navigation away.
+  invalid authority or navigation away. Password-reset authority follows the
+  same shared parser for `/reset-password#token=v1.<selector>.<verifier>` and
+  is never persisted beyond module memory.
 - Authentication state remains in the process memory QueryClient. A failed
   logout keeps the current user and shows a retryable Alert.
 - Keep all UI text in the English and Simplified Chinese resource trees.
+- Recovery request success is generic and localized; reset success, invalid/
+  expired-link, loading, validation, and dependency-failure states remain
+  visible without rendering API `title`, `detail`, token, or password text.
 
 ## Generator and provenance
 
@@ -74,7 +79,8 @@ asset response and falls back only navigation paths to `index.html`.
 
 Run Playwright Chromium against the forwarded Caddy origin with a fresh setup
 link. Cover setup, login, reload session restoration, locale selection,
-responsive Sidebar navigation, logout and an axe smoke. Save screenshots and
+password recovery via Mailpit, reset-fragment clearing, old-session
+invalidation, responsive Sidebar navigation, logout and an axe smoke. Save screenshots and
 traces only when a test fails or a targeted review needs them.
 
 Set `PLAYWRIGHT_BASE_URL` to the exact forwarded Caddy origin whenever a flow

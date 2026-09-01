@@ -6,13 +6,14 @@ yours to change or remove.
 
 ## First run
 
-Copy the environment inventory and fill both secret values before starting the
-containers:
+Copy the environment inventory and fill all three secret values before
+starting the containers:
 
 ```sh
 cp .env.example .env
 chmod 600 .env
-# edit .env and set POSTGRES_PASSWORD and REDIS_PASSWORD
+# edit .env and set POSTGRES_PASSWORD, REDIS_PASSWORD, and PASSWORD_RESET_TOKEN_KEY
+# openssl rand -base64url 32  # use the output for PASSWORD_RESET_TOKEN_KEY
 make build
 make migrate-up
 make up
@@ -36,6 +37,32 @@ origin in the address bar exactly.
 Redis is intentionally ephemeral: restarting it logs out all users, while the
 PostgreSQL volume keeps the account and completed setup state. `make down`
 does not remove that PostgreSQL volume.
+
+Password recovery is handled by the API's PostgreSQL transactional outbox.
+The request endpoint only commits reset state and returns; the in-process mail
+dispatcher claims jobs with a short lease and sends them over SMTP afterwards.
+There is no message broker or separate worker. Delivery is at-least-once: a
+process interruption after SMTP accepts a message can produce a duplicate, and
+the stable Message-ID plus idempotent reset authority make that safe. Temporary
+failures retry with bounded exponential full-jitter backoff; expired jobs and
+old sent/canceled/dead rows are cleaned automatically.
+
+`make up` enables the development-only Mailpit profile. Inspect reset and
+security-notification messages at [http://127.0.0.1:8025](http://127.0.0.1:8025)
+(or the `MAILPIT_UI_PORT` you configure). Mailpit SMTP is private to the
+Compose network on `mailpit:1025`; it is never published to the host. A normal
+`docker compose up` without `--profile development` does not start Mailpit.
+The API does not wait for SMTP readiness, so a provider outage leaves durable
+outbox work to retry.
+
+In production, set `SMTP_TLS_MODE` to `starttls` or `tls`, use a real sender
+address, and provide paired SMTP credentials when required by the provider.
+Keep `PASSWORD_RESET_TOKEN_KEY` stable across restarts. Deliberate key rotation
+invalidates pending reset-mail jobs (already delivered links remain consumable
+because PostgreSQL stores their digest); affected users can request a fresh
+link. Run migration 2 before deploying the new API. To roll back, stop the new
+API, apply one migration down, then deploy the previous API; passwords already
+changed by the feature are not reverted.
 
 For an application upgrade, stop the API, back up PostgreSQL, run the new
 migration explicitly, then start the new API:
@@ -72,6 +99,14 @@ go build -o bin/server ./cmd/server
 # Benchmark the fixed Argon2id profile on the deployment target before release.
 go test -bench='Benchmark(Hasher|Verifier)$' -benchtime=1x ./internal/auth/adapter/password
 ```
+
+The recovery API accepts `POST /api/auth/password-reset/request` with an email
+and `locale` (`en` or `zh-CN`) and returns the same `202 {"status":"accepted"}`
+for known and unknown accounts. The reset email opens
+`/reset-password#token=...`; the browser removes the fragment before React
+mounts. Completion accepts the token, a policy-compliant password, and locale,
+returns `204`, clears any presented session cookie, invalidates all old
+sessions, and requires an explicit login with the new password.
 
 ## Admin
 

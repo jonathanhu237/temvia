@@ -13,6 +13,12 @@ The login route resolves `currentUserOptions` directly and always renders the
 normal login form when no user is returned. It must not query setup status;
 initialization status and setup authority belong to the `/setup` route.
 
+Recovery request and completion use feature-owned `useMutation` instances with
+`retry: false`; they call only the typed `ApiClient`. A successful reset does
+not seed or invalidate the current-user Query cache because the user is not
+automatically authenticated. Invalid reset authority clears the module-memory
+token and renders one generic replacement-link state.
+
 ```tsx
 const currentUser = useQuery(currentUserOptions(api))
 ```
