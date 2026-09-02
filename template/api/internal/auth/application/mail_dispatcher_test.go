@@ -114,7 +114,7 @@ func TestMailDispatcherReconstructsResetLinkAndUsesStableMessageID(t *testing.T)
 	if mailer.message.MessageID != "temvia-outbox-00000000-0000-4000-8000-000000000001@temvia" {
 		t.Fatalf("Message-ID = %q", mailer.message.MessageID)
 	}
-	if !strings.Contains(mailer.message.Text, "45 minutes") || !strings.Contains(mailer.message.Text, "https://admin.example/reset-password#token=v1.") {
+	if !strings.Contains(mailer.message.Text, "Expires at: 1970-01-01 00:46:40 UTC") || !strings.Contains(mailer.message.Text, "https://admin.example/reset-password#token=v1.") {
 		t.Fatalf("reset message = %q", mailer.message.Text)
 	}
 	assertResetMailHTML(t, mailer.message.HTML, mailer.message.Text, "https://admin.example/reset-password#token=v1.")
@@ -124,6 +124,89 @@ func TestMailDispatcherReconstructsResetLinkAndUsesStableMessageID(t *testing.T)
 	selector, digest, ok := domain.ParsePasswordResetToken(token)
 	if !ok || !bytes.Equal(selector, material.Selector) || !bytes.Equal(digest, material.VerifierDigest) {
 		t.Fatalf("reconstructed token = %q, %x, %x, %t", token, selector, digest, ok)
+	}
+}
+
+func TestMailDispatcherPreservesLinkDeadlineAcrossRetries(t *testing.T) {
+	resetKey := bytes.Repeat([]byte{0x61}, 32)
+	invitationKey := bytes.Repeat([]byte{0x62}, 32)
+	selector := bytes.Repeat([]byte{0x17}, 16)
+	resetMaterial, err := domain.NewPasswordResetMaterial(resetKey, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitationMaterial, err := domain.NewInvitationMaterial(invitationKey, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiresAt := time.Date(2026, time.September, 6, 12, 34, 56, 789000000, time.FixedZone("CST", 8*60*60))
+	const deadline = "2026-09-06 04:34:56 UTC"
+	for _, kind := range []struct {
+		kind   MailKind
+		digest []byte
+		ttl    time.Duration
+	}{
+		{kind: MailPasswordReset, digest: resetMaterial.VerifierDigest, ttl: 45 * time.Minute},
+		{kind: MailUserInvitation, digest: invitationMaterial.VerifierDigest, ttl: 72 * time.Hour},
+	} {
+		for _, locale := range []struct {
+			locale    domain.Locale
+			htmlLabel string
+			textLabel string
+			singleUse string
+		}{
+			{locale: domain.LocaleEnglish, htmlLabel: "EXPIRES AT", textLabel: "Expires at: ", singleUse: "This link can be used once."},
+			{locale: domain.LocaleChinese, htmlLabel: "到期时间", textLabel: "到期时间：", singleUse: "链接只能使用一次。"},
+		} {
+			t.Run(string(kind.kind)+"/"+string(locale.locale), func(t *testing.T) {
+				// Separate database timestamps can make a nominal TTL slightly short.
+				created := expiresAt.Add(-kind.ttl + time.Microsecond)
+				outbox := &dispatcherOutboxFake{job: &MailJob{
+					ID:             "00000000-0000-4000-8000-000000000007",
+					Kind:           kind.kind,
+					Name:           "Ada",
+					Email:          "ada@example.com",
+					Locale:         locale.locale,
+					ResetSelector:  selector,
+					VerifierDigest: kind.digest,
+					Attempts:       1,
+					CreatedAt:      created,
+					ExpiresAt:      expiresAt,
+				}}
+				mailer := &dispatcherMailerFake{err: &MailDeliveryError{Code: "temporary", Temporary: true}}
+				dispatcher := NewMailDispatcher(outbox, mailer, &fakeRandom{value: 9}, resetKey, "https://admin.example", time.Second, 30*time.Second, time.Second, time.Minute, invitationKey)
+				dispatcher.now = func() time.Time { return created.Add(time.Minute) }
+				if err := dispatcher.ProcessOnce(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				if !outbox.retried || outbox.sent || outbox.dead || outbox.discarded {
+					t.Fatalf("initial delivery state = %#v", outbox)
+				}
+				first := mailer.message
+				assertEmailSafeHTML(t, first.HTML)
+				if !strings.Contains(first.Text, locale.textLabel+deadline) {
+					t.Fatalf("plain text does not show the link deadline: %q", first.Text)
+				}
+				for _, want := range []string{locale.htmlLabel, deadline, locale.singleUse} {
+					if !strings.Contains(first.HTML, want) {
+						t.Fatalf("HTML is missing %q", want)
+					}
+				}
+
+				mailer.err = nil
+				outbox.job.Attempts++
+				dispatcher.now = func() time.Time { return created.Add(10 * time.Minute) }
+				if err := dispatcher.ProcessOnce(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				if !outbox.sent || outbox.dead || outbox.discarded {
+					t.Fatalf("retry delivery state = %#v", outbox)
+				}
+				if mailer.message != first {
+					t.Fatal("delayed delivery changed the link email")
+				}
+			})
+		}
 	}
 }
 
@@ -145,11 +228,11 @@ func TestMailTemplatesRenderBilingualSecurityLayouts(t *testing.T) {
 		changedCopy  string
 		footer       string
 	}{
-		{name: "english", locale: domain.LocaleEnglish, resetTitle: "Reset your password", changedTitle: "Your password was changed", resetCopy: "Did not request this?", expiry: "45 minutes", singleUse: "This link can be used once.", changedCopy: "Did not make this change?", footer: "Account security"},
-		{name: "chinese", locale: domain.LocaleChinese, resetTitle: "重置你的密码", changedTitle: "你的密码已修改", resetCopy: "不是你发起的请求？", expiry: "45 分钟", singleUse: "链接只能使用一次。", changedCopy: "不是你发起的操作？", footer: "账户安全"},
+		{name: "english", locale: domain.LocaleEnglish, resetTitle: "Reset your password", changedTitle: "Your password was changed", resetCopy: "Did not request this?", expiry: "2026-09-01 05:19:56 UTC", singleUse: "This link can be used once.", changedCopy: "Did not make this change?", footer: "Account security"},
+		{name: "chinese", locale: domain.LocaleChinese, resetTitle: "重置你的密码", changedTitle: "你的密码已修改", resetCopy: "不是你发起的请求？", expiry: "2026-09-01 05:19:56 UTC", singleUse: "链接只能使用一次。", changedCopy: "不是你发起的操作？", footer: "账户安全"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			reset := resetMail(OutgoingMail{Name: name}, link, test.locale, 45*time.Minute)
+			reset := resetMail(OutgoingMail{Name: name}, link, test.locale, changedAt.Add(45*time.Minute))
 			changed := changedMail(OutgoingMail{Name: name}, changedAt, test.locale)
 			assertEmailSafeHTML(t, reset.HTML)
 			assertEmailSafeHTML(t, changed.HTML)
@@ -208,7 +291,7 @@ func assertEmailSafeHTML(t *testing.T, value string) {
 func assertResetMailHTML(t *testing.T, value, text, linkPrefix string) {
 	t.Helper()
 	assertEmailSafeHTML(t, value)
-	if !strings.Contains(value, "PASSWORD RECOVERY") || !strings.Contains(value, "LINK EXPIRY") || !strings.Contains(value, "Did not request this?") || !strings.Contains(value, "Button not working?") {
+	if !strings.Contains(value, "PASSWORD RECOVERY") || !strings.Contains(value, "EXPIRES AT") || !strings.Contains(value, "Did not request this?") || !strings.Contains(value, "Button not working?") {
 		t.Fatal("reset HTML is missing the recovery structure")
 	}
 	if !strings.Contains(text, linkPrefix) {

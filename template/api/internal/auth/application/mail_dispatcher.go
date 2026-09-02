@@ -175,11 +175,7 @@ func (d *MailDispatcher) compose(job MailJob) (OutgoingMail, error) {
 			return OutgoingMail{}, ErrInvalidPasswordResetToken
 		}
 		link := d.publicURL + "/reset-password#token=" + token
-		ttl := job.ExpiresAt.Sub(job.CreatedAt)
-		if ttl <= 0 {
-			ttl = 30 * time.Minute
-		}
-		return resetMail(message, link, job.Locale, ttl), nil
+		return resetMail(message, link, job.Locale, job.ExpiresAt), nil
 	}
 	if job.Kind == MailPasswordChanged {
 		return changedMail(message, job.CreatedAt, job.Locale), nil
@@ -197,11 +193,7 @@ func (d *MailDispatcher) compose(job MailJob) (OutgoingMail, error) {
 			return OutgoingMail{}, ErrInvitationInvalid
 		}
 		link := d.publicURL + "/accept-invitation#token=" + token
-		ttl := job.ExpiresAt.Sub(job.CreatedAt)
-		if ttl <= 0 {
-			ttl = 72 * time.Hour
-		}
-		return invitationMail(message, link, job.Locale, ttl), nil
+		return invitationMail(message, link, job.Locale, job.ExpiresAt), nil
 	}
 	return OutgoingMail{}, fmt.Errorf("unsupported mail kind")
 }
@@ -298,61 +290,61 @@ func newLeaseToken(random RandomSource) (string, error) {
 	return encoded[0:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:32], nil
 }
 
-func resetMail(message OutgoingMail, link string, locale domain.Locale, ttl time.Duration) OutgoingMail {
-	expiresIn := formatMailDuration(ttl, locale)
+func resetMail(message OutgoingMail, link string, locale domain.Locale, expiresAt time.Time) OutgoingMail {
+	expiry := formatMailExpiry(expiresAt)
 	if locale == domain.LocaleChinese {
 		message.Subject = "重置 Temvia 密码"
-		message.Text = "Temvia · 账户安全\n\n密码恢复\n\n您好，" + message.Name + "：\n\n我们收到了一次重置 Temvia 密码的请求。请使用下面的链接设置新密码。\n\n有效期：" + expiresIn + "\n\n设置新密码：\n" + link + "\n\n如果这不是您发起的请求，可以忽略这封邮件。只有完成重置流程后，密码才会改变。"
-		message.HTML = mailFrame(locale, "密码恢复", resetMailBody(locale, message.Name, link, expiresIn))
+		message.Text = "Temvia · 账户安全\n\n密码恢复\n\n您好，" + message.Name + "：\n\n我们收到了一次重置 Temvia 密码的请求。请使用下面的链接设置新密码。\n\n到期时间：" + expiry + "\n\n设置新密码：\n" + link + "\n\n如果这不是您发起的请求，可以忽略这封邮件。只有完成重置流程后，密码才会改变。"
+		message.HTML = mailFrame(locale, "密码恢复", resetMailBody(locale, message.Name, link, expiry))
 		return message
 	}
 	message.Subject = "Reset your Temvia password"
-	message.Text = "Temvia · ACCOUNT SECURITY\n\nPASSWORD RECOVERY\n\nHello " + message.Name + ",\n\nWe received a request to reset your Temvia password. Use the link below to choose a new password.\n\nLink expiry: " + expiresIn + "\n\nSet a new password:\n" + link + "\n\nIf you did not request this, you can safely ignore this email. Your password will not change unless you complete the reset."
-	message.HTML = mailFrame(locale, "PASSWORD RECOVERY", resetMailBody(locale, message.Name, link, expiresIn))
+	message.Text = "Temvia · ACCOUNT SECURITY\n\nPASSWORD RECOVERY\n\nHello " + message.Name + ",\n\nWe received a request to reset your Temvia password. Use the link below to choose a new password.\n\nExpires at: " + expiry + "\n\nSet a new password:\n" + link + "\n\nIf you did not request this, you can safely ignore this email. Your password will not change unless you complete the reset."
+	message.HTML = mailFrame(locale, "PASSWORD RECOVERY", resetMailBody(locale, message.Name, link, expiry))
 	return message
 }
 
-func invitationMail(message OutgoingMail, link string, locale domain.Locale, ttl time.Duration) OutgoingMail {
-	expiresIn := formatMailDuration(ttl, locale)
+func invitationMail(message OutgoingMail, link string, locale domain.Locale, expiresAt time.Time) OutgoingMail {
+	expiry := formatMailExpiry(expiresAt)
 	safeName := html.EscapeString(message.Name)
 	safeLink := html.EscapeString(link)
-	safeExpiry := html.EscapeString(expiresIn)
+	safeExpiry := html.EscapeString(expiry)
 	if locale == domain.LocaleChinese {
 		message.Subject = "加入 Temvia 管理后台"
-		message.Text = "Temvia · 管理员邀请\n\n您好，" + message.Name + "：\n\n您收到了一封 Temvia 管理后台邀请。请使用下面的一次性链接设置密码并激活账户。\n\n有效期：" + expiresIn + "\n\n接受邀请：\n" + link + "\n\n如果您不认识邀请方，可以忽略这封邮件。"
+		message.Text = "Temvia · 管理员邀请\n\n您好，" + message.Name + "：\n\n您收到了一封 Temvia 管理后台邀请。请使用下面的一次性链接设置密码并激活账户。\n\n到期时间：" + expiry + "\n\n接受邀请：\n" + link + "\n\n如果您不认识邀请方，可以忽略这封邮件。"
 		message.HTML = mailFrame(locale, "管理员邀请", `<span style="display:inline-block;padding:6px 10px;border:1px solid #C7D2FE;border-radius:999px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">管理员邀请</span>
 <h1 style="margin:18px 0 16px;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:30px;font-weight:700;letter-spacing:-0.5px;line-height:38px;">接受你的邀请</h1>
 <p style="margin:0 0 16px;color:#344054;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">您好，`+safeName+`：</p>
 <p style="margin:0 0 28px;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">您被邀请加入 Temvia 管理后台。请设置密码以激活您的账户。</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="padding:16px 18px;border-left:4px solid #5B5CE2;background:#EEF0FF;"><p style="margin:0 0 5px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">链接有效期</p><p style="margin:0;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;line-height:28px;">`+safeExpiry+`</p><p style="margin:5px 0 0;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">链接只能使用一次。</p></td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="padding:16px 18px;border-left:4px solid #5B5CE2;background:#EEF0FF;"><p style="margin:0 0 5px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">到期时间</p><p style="margin:0;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;line-height:28px;">`+safeExpiry+`</p><p style="margin:5px 0 0;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">链接只能使用一次。</p></td></tr></table>
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;"><tr><td bgcolor="#5B5CE2" style="border-radius:6px;background:#5B5CE2;"><a href="`+safeLink+`" style="display:inline-block;padding:13px 22px;border:1px solid #5B5CE2;border-radius:6px;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;line-height:24px;text-decoration:none;">接受邀请</a></td></tr></table>
 <p style="margin:0 0 8px;color:#667085;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">按钮无法打开？请将下面的链接复制到浏览器：</p><p style="margin:0 0 28px;color:#4338CA;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,&quot;Liberation Mono&quot;,&quot;Courier New&quot;,monospace;font-size:12px;line-height:19px;word-break:break-all;">`+safeLink+`</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:15px 16px;border-left:4px solid #D97706;background:#FFFAEB;"><p style="margin:0;color:#7A2E0C;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;"><strong>不是您发起的请求？</strong><br>可以忽略这封邮件。</p></td></tr></table>`)
 		return message
 	}
 	message.Subject = "You are invited to Temvia"
-	message.Text = "Temvia · ADMIN INVITATION\n\nHello " + message.Name + ",\n\nYou have been invited to the Temvia administration app. Use the one-time link below to set your password and activate your account.\n\nLink expiry: " + expiresIn + "\n\nAccept invitation:\n" + link + "\n\nIf you do not recognize this invitation, you can safely ignore this email."
+	message.Text = "Temvia · ADMIN INVITATION\n\nHello " + message.Name + ",\n\nYou have been invited to the Temvia administration app. Use the one-time link below to set your password and activate your account.\n\nExpires at: " + expiry + "\n\nAccept invitation:\n" + link + "\n\nIf you do not recognize this invitation, you can safely ignore this email."
 	message.HTML = mailFrame(locale, "ADMIN INVITATION", `<span style="display:inline-block;padding:6px 10px;border:1px solid #C7D2FE;border-radius:999px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">ADMIN INVITATION</span>
 <h1 style="margin:18px 0 16px;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:30px;font-weight:700;letter-spacing:-0.5px;line-height:38px;">Accept your invitation</h1>
 <p style="margin:0 0 16px;color:#344054;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">Hello `+safeName+`,</p>
 <p style="margin:0 0 28px;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">You have been invited to the Temvia administration app. Set a password to activate your account.</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="padding:16px 18px;border-left:4px solid #5B5CE2;background:#EEF0FF;"><p style="margin:0 0 5px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">LINK EXPIRY</p><p style="margin:0;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;line-height:28px;">`+safeExpiry+`</p><p style="margin:5px 0 0;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">This link can be used once.</p></td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="padding:16px 18px;border-left:4px solid #5B5CE2;background:#EEF0FF;"><p style="margin:0 0 5px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">EXPIRES AT</p><p style="margin:0;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;line-height:28px;">`+safeExpiry+`</p><p style="margin:5px 0 0;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">This link can be used once.</p></td></tr></table>
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;"><tr><td bgcolor="#5B5CE2" style="border-radius:6px;background:#5B5CE2;"><a href="`+safeLink+`" style="display:inline-block;padding:13px 22px;border:1px solid #5B5CE2;border-radius:6px;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;line-height:24px;text-decoration:none;">Accept invitation</a></td></tr></table>
 <p style="margin:0 0 8px;color:#667085;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">Button not working? Copy and paste this link into your browser:</p><p style="margin:0 0 28px;color:#4338CA;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,&quot;Liberation Mono&quot;,&quot;Courier New&quot;,sans-serif;font-size:12px;line-height:19px;word-break:break-all;">`+safeLink+`</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:15px 16px;border-left:4px solid #D97706;background:#FFFAEB;"><p style="margin:0;color:#7A2E0C;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;"><strong>Did not expect this?</strong><br>You can safely ignore this email.</p></td></tr></table>`)
 	return message
 }
 
-func resetMailBody(locale domain.Locale, name, link, expiresIn string) string {
+func resetMailBody(locale domain.Locale, name, link, expiry string) string {
 	safeName := html.EscapeString(name)
 	safeLink := html.EscapeString(link)
-	safeExpiry := html.EscapeString(expiresIn)
+	safeExpiry := html.EscapeString(expiry)
 	if locale == domain.LocaleChinese {
 		return `<span style="display:inline-block;padding:6px 10px;border:1px solid #C7D2FE;border-radius:999px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">密码恢复</span>
 <h1 style="margin:18px 0 16px;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:30px;font-weight:700;letter-spacing:-0.5px;line-height:38px;">重置你的密码</h1>
 <p style="margin:0 0 16px;color:#344054;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">您好，` + safeName + `：</p>
 <p style="margin:0 0 28px;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">我们收到了一次重置 Temvia 密码的请求。请使用下面的按钮设置新密码。</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="padding:16px 18px;border-left:4px solid #5B5CE2;background:#EEF0FF;"><p style="margin:0 0 5px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">链接有效期</p><p style="margin:0;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;line-height:28px;">` + safeExpiry + `</p><p style="margin:5px 0 0;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">链接只能使用一次。</p></td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="padding:16px 18px;border-left:4px solid #5B5CE2;background:#EEF0FF;"><p style="margin:0 0 5px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">到期时间</p><p style="margin:0;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;line-height:28px;">` + safeExpiry + `</p><p style="margin:5px 0 0;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">链接只能使用一次。</p></td></tr></table>
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;"><tr><td bgcolor="#5B5CE2" style="border-radius:6px;background:#5B5CE2;"><a href="` + safeLink + `" style="display:inline-block;padding:13px 22px;border:1px solid #5B5CE2;border-radius:6px;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;line-height:24px;text-decoration:none;">设置新密码</a></td></tr></table>
 <p style="margin:0 0 8px;color:#667085;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">按钮无法打开？请将下面的链接复制到浏览器：</p>
 <p style="margin:0 0 28px;color:#4338CA;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,&quot;Liberation Mono&quot;,&quot;Courier New&quot;,monospace;font-size:12px;line-height:19px;word-break:break-all;">` + safeLink + `</p>
@@ -362,7 +354,7 @@ func resetMailBody(locale domain.Locale, name, link, expiresIn string) string {
 <h1 style="margin:18px 0 16px;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:30px;font-weight:700;letter-spacing:-0.5px;line-height:38px;">Reset your password</h1>
 <p style="margin:0 0 16px;color:#344054;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">Hello ` + safeName + `,</p>
 <p style="margin:0 0 28px;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:26px;">We received a request to reset your Temvia password. Use the button below to choose a new password.</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="padding:16px 18px;border-left:4px solid #5B5CE2;background:#EEF0FF;"><p style="margin:0 0 5px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">LINK EXPIRY</p><p style="margin:0;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;line-height:28px;">` + safeExpiry + `</p><p style="margin:5px 0 0;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">This link can be used once.</p></td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="padding:16px 18px;border-left:4px solid #5B5CE2;background:#EEF0FF;"><p style="margin:0 0 5px;color:#4338CA;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1.2px;line-height:16px;">EXPIRES AT</p><p style="margin:0;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;line-height:28px;">` + safeExpiry + `</p><p style="margin:5px 0 0;color:#475467;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">This link can be used once.</p></td></tr></table>
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;"><tr><td bgcolor="#5B5CE2" style="border-radius:6px;background:#5B5CE2;"><a href="` + safeLink + `" style="display:inline-block;padding:13px 22px;border:1px solid #5B5CE2;border-radius:6px;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;line-height:24px;text-decoration:none;">Set a new password</a></td></tr></table>
 <p style="margin:0 0 8px;color:#667085;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;">Button not working? Copy and paste this link into your browser:</p>
 <p style="margin:0 0 28px;color:#4338CA;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,&quot;Liberation Mono&quot;,&quot;Courier New&quot;,monospace;font-size:12px;line-height:19px;word-break:break-all;">` + safeLink + `</p>
@@ -426,23 +418,6 @@ func changedMail(message OutgoingMail, changedAt time.Time, locale domain.Locale
 	return message
 }
 
-func formatMailDuration(value time.Duration, locale domain.Locale) string {
-	minutes := int(value / time.Minute)
-	if minutes > 0 && value%time.Minute == 0 {
-		if locale == domain.LocaleChinese {
-			return fmt.Sprintf("%d 分钟", minutes)
-		}
-		if minutes == 1 {
-			return "1 minute"
-		}
-		return fmt.Sprintf("%d minutes", minutes)
-	}
-	seconds := int(value / time.Second)
-	if locale == domain.LocaleChinese {
-		return fmt.Sprintf("%d 秒", seconds)
-	}
-	if seconds == 1 {
-		return "1 second"
-	}
-	return fmt.Sprintf("%d seconds", seconds)
+func formatMailExpiry(expiresAt time.Time) string {
+	return expiresAt.UTC().Format("2006-01-02 15:04:05 UTC")
 }
