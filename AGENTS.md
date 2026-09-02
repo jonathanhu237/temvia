@@ -1,5 +1,7 @@
 ## Agent skills
 
+Use globally installed skills in `~/.agents/skills/`. Do not vendor skill copies or a `skills-lock.json` in this repository.
+
 ### Issue tracker
 
 Issues and specs are tracked as local Markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
