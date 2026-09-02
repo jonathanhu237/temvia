@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Authentication UI composition, i18n, error and accessibility conventions"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Generated-template and Chromium runtime verification requirements"}
-{"file": ".trellis/tasks/09-01-keep-login-form-before-setup/research/current-login-gate.md", "reason": "Repository evidence for the current gate and backend login behavior"}

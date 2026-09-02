@@ -1,4 +1,0 @@
-{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Implement localized conditional FieldError content without breaking labels, ARIA associations, focus, or the shared auth-field composition."}
-{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Run the required admin and source-to-package-to-generated template quality gates."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve stable field validation codes and reuse the established Problem Details localization contract without backend changes."}
-{"file":".trellis/tasks/archive/2026-08/08-30-frontend-auth-ui/research/validation-options.md","reason":"Retain the accepted separation between locale-independent Zod validation codes and localized UI rendering."}

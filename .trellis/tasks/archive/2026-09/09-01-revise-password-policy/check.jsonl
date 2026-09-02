@@ -1,5 +1,0 @@
-{"file":".trellis/spec/backend/authentication-contract.md","reason":"Audit creation-versus-login compatibility, exact code-point rules, and unchanged Argon2/session/database behavior."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Verify stable, route-appropriate field codes and unchanged Problem Details privacy and precedence."}
-{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Audit accurate localized copy, raw-code suppression, ARIA wiring, focus, paste, and autocomplete."}
-{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Verify source, packed artifact, generated project, containers, and runtime behavior with required tooling."}
-{"file":".trellis/tasks/09-01-revise-password-policy/research/password-policy-guidance.md","reason":"Confirm the implementation matches the user-selected policy without misrepresenting current NIST/OWASP guidance."}

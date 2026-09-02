@@ -1,5 +1,0 @@
-{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Implement the accepted shadcn Card composition, semantic icon treatment, field/error association, and Sidebar conventions."}
-{"file":".trellis/spec/frontend/directory-structure.md","reason":"Keep presentation changes in auth feature/routes/i18n boundaries and avoid modifying shared shadcn primitives for one page."}
-{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Preserve frontend checks, real-stack visual verification, and source-to-package-to-generated template integrity."}
-{"file":".trellis/spec/backend/scaffolding-contract.md","reason":"Preserve the packed CLI and generated-project byte/inventory contract while changing template contents."}
-{"file":".trellis/tasks/08-31-admin-interface-polish/research/interface-audit.md","reason":"Code and screenshot audit records the accepted defects, affected surfaces, and applicable UI/accessibility guidance."}

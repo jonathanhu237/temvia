@@ -1,4 +1,0 @@
-{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Audit field error localization, rendered-node ARIA references, focus, autocomplete, paste, and shared component behavior."}
-{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Verify admin checks plus packed/generated template integrity in proportion to the fix."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Confirm server field Problem Details translation remains unchanged and shares the same stable code mapping."}
-{"file":".trellis/tasks/archive/2026-08/08-30-frontend-auth-ui/research/validation-options.md","reason":"Check that schema codes remain stable and i18n stays at the display boundary."}

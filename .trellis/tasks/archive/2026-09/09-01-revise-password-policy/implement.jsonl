@@ -1,5 +1,0 @@
-{"file":".trellis/spec/backend/authentication-contract.md","reason":"Implement the authoritative setup/login password boundary, normalization, compatibility, and generated-project verification contract."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve RFC 9457 field-error semantics while separating new-password and login-input validation codes."}
-{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Keep localized field errors, ARIA associations, paste/autofill, and shared authentication field behavior correct."}
-{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Run admin, package, generated-output, container, and Chromium quality gates."}
-{"file":".trellis/tasks/09-01-revise-password-policy/research/password-policy-guidance.md","reason":"Carry the accepted deliberate policy deviation and exact standards/repository evidence into implementation."}

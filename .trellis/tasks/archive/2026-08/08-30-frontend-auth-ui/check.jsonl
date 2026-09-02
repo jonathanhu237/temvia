@@ -1,8 +1,0 @@
-{"file": ".trellis/spec/backend/authentication-contract.md", "reason": "Verify every browser flow preserves the shipped auth, setup, cookie and availability contract."}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify stable-code localization and correct error classification without leaking diagnostics."}
-{"file": ".trellis/spec/backend/scaffolding-contract.md", "reason": "Verify generator, npm payload, generated output and Centaurus evidence across boundaries."}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Audit intentional replacement of the old demo contract and all frontend quality gates."}
-{"file": ".trellis/tasks/08-30-frontend-auth-ui/research/testing-options.md", "reason": "Check that behavior is tested at unit, component and real-browser boundaries without redundant stacks."}
-{"file": ".trellis/tasks/08-30-frontend-auth-ui/research/production-serving-options.md", "reason": "Check Caddy routing, cache, origin and runtime-image acceptance behavior."}
-{"file": ".trellis/tasks/08-30-frontend-auth-ui/research/i18n-runtime-options.md", "reason": "Check deterministic locale selection and stable-code translation rules."}
-{"file": ".trellis/tasks/08-30-frontend-auth-ui/research/validation-options.md", "reason": "Check browser/server validation ownership, Unicode behavior and field-error mapping."}
