@@ -7,14 +7,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { FieldGroup } from '@/components/ui/field'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
-import { fieldProblemFor, translateFieldProblem, translatePasswordResetProblem } from '@/shared/api/problems'
+import { fieldProblemFor, translatePasswordResetProblem } from '@/shared/api/problems'
 import { type Locale } from '@/shared/i18n/resources'
 import { normalizePasswordResetRequestValues, passwordResetRequestFormSchema, type PasswordResetRequestFormValues } from './schemas'
 import { TextField } from './form-fields'
 
 export function PasswordResetRequestForm({ api, onAccepted }: { api: ApiClient; onAccepted: () => void }) {
   const { t, i18n } = useTranslation(['auth', 'problems'])
-  const [formError, setFormError] = useState<string>()
+  const [formError, setFormError] = useState<unknown>()
   const form = useForm<PasswordResetRequestFormValues>({
     resolver: zodResolver(passwordResetRequestFormSchema),
     mode: 'onBlur',
@@ -36,16 +36,16 @@ export function PasswordResetRequestForm({ api, onAccepted }: { api: ApiClient; 
       await mutation.mutateAsync(values)
     } catch (error) {
       if (error instanceof ApiProblemError) {
-        const field = translateFieldProblem(fieldProblemFor(error, '/email'), t)
-        if (field) form.setError('email', { type: 'server', message: field }, { shouldFocus: true })
+        const field = fieldProblemFor(error, '/email')
+        if (field) form.setError('email', { type: 'server', message: field.code }, { shouldFocus: true })
       }
-      setFormError(translatePasswordResetProblem(error, t))
+      setFormError(error)
     }
   })
 
   return (
     <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-6">
-      {formError && <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{formError}</AlertDescription></Alert>}
+      {formError !== undefined ? <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{translatePasswordResetProblem(formError, t)}</AlertDescription></Alert> : null}
       <FieldGroup className="gap-5">
         <TextField id="email" label={t('emailLabel')} registration={form.register('email')} error={form.formState.errors.email} type="email" inputMode="email" autoComplete="email" />
       </FieldGroup>

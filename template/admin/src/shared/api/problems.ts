@@ -139,6 +139,5 @@ export function translateClientFieldError(
   t: unknown,
 ): string | undefined {
   if (!error) return undefined
-  if (error.type === 'server') return error.message
   return (t as (key: string) => string)(fieldMessageKey(error.message))
 }

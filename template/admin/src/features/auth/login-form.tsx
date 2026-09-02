@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { FieldGroup } from '@/components/ui/field'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
-import { fieldProblemFor, translateFieldProblem, translateProblem } from '@/shared/api/problems'
+import { fieldProblemFor, translateProblem } from '@/shared/api/problems'
 import { currentUserQueryKey } from './queries'
 import { loginFormSchema, normalizeLoginValues, type LoginFormValues } from './schemas'
 import { PasswordField, TextField } from './form-fields'
@@ -15,7 +15,7 @@ import { PasswordField, TextField } from './form-fields'
 export function LoginForm({ api, onSuccess }: { api: ApiClient; onSuccess: () => void }) {
   const { t } = useTranslation(['auth', 'problems'])
   const queryClient = useQueryClient()
-  const [formError, setFormError] = useState<string>()
+  const [formError, setFormError] = useState<unknown>()
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginFormSchema),
     mode: 'onBlur',
@@ -40,20 +40,19 @@ export function LoginForm({ api, onSuccess }: { api: ApiClient; onSuccess: () =>
       if (error instanceof ApiProblemError) {
         for (const fieldName of ['email', 'password'] as const) {
           const field = fieldProblemFor(error, `/${fieldName}`)
-          const message = translateFieldProblem(field, t)
-          if (message) {
-            form.setError(fieldName, { type: 'server', message }, { shouldFocus: !focused })
+          if (field) {
+            form.setError(fieldName, { type: 'server', message: field.code }, { shouldFocus: !focused })
             focused = true
           }
         }
       }
-      setFormError(translateProblem(error, t))
+      setFormError(error)
     }
   })
 
   return (
     <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-6">
-      {formError && <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{formError}</AlertDescription></Alert>}
+      {formError !== undefined ? <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{translateProblem(formError, t)}</AlertDescription></Alert> : null}
       <FieldGroup className="gap-5">
         <TextField id="email" label={t('emailLabel')} registration={form.register('email')} error={form.formState.errors.email} type="email" inputMode="email" autoComplete="username" />
         <PasswordField id="password" label={t('passwordLabel')} registration={form.register('password')} error={form.formState.errors.password} autoComplete="current-password" />

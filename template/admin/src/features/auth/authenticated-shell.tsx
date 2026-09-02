@@ -32,7 +32,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
-  const [logoutError, setLogoutError] = useState<string>()
+  const [logoutError, setLogoutError] = useState<unknown>()
   const locale: Locale = i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
   const logout = useMutation({
     retry: false,
@@ -43,7 +43,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
       void navigate({ to: '/login', replace: true })
     },
     onError: (error) => {
-      setLogoutError(translateProblem(error, t))
+      setLogoutError(error)
     },
   })
 
@@ -127,11 +127,11 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
           <p className="text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/roles') ? t('access:roles') : t('home')}</p>
         </header>
         <div className="flex min-h-[calc(100dvh-3.5rem)] flex-1 flex-col gap-5 p-4 sm:p-6 lg:p-8">
-          {logoutError && (
+          {logoutError !== undefined && (
             <Alert variant="destructive" role="alert" aria-live="polite" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <AlertTitle>{t('auth:logoutFailedTitle')}</AlertTitle>
-                <AlertDescription>{logoutError}</AlertDescription>
+                <AlertDescription>{translateProblem(logoutError, t)}</AlertDescription>
               </div>
               <Button type="button" variant="outline" size="sm" onClick={() => { setLogoutError(undefined); logout.mutate() }}>
                 {t('retry')}

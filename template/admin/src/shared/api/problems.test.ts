@@ -42,6 +42,15 @@ describe('localized problem mapping', () => {
     expect(translateClientFieldError({ type: 'custom', message: code }, i18n.t.bind(i18n))).toBe(message)
   })
 
+  it('localizes server field codes at render time', async () => {
+    await initializeI18n()
+    await i18n.changeLanguage('en')
+    expect(translateClientFieldError({ type: 'server', message: 'invalid_email' }, i18n.t.bind(i18n))).toBe('Enter a valid email address.')
+
+    await i18n.changeLanguage('zh-CN')
+    expect(translateClientFieldError({ type: 'server', message: 'invalid_email' }, i18n.t.bind(i18n))).toBe('请输入有效的邮箱地址。')
+  })
+
   it.each([
     ['en', 'Enter a non-empty password of at most 128 characters.'],
     ['zh-CN', '请输入非空且不超过 128 个字符的密码。'],

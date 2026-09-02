@@ -166,6 +166,16 @@ test.describe('administrator authentication', () => {
     await page.getByLabel('Password', { exact: true }).fill('not-a-real-password')
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page.getByRole('alert')).toHaveText('The email or password is incorrect.')
+
+    await page.getByRole('button', { name: 'Language' }).click()
+    await page.getByRole('menuitemradio', { name: '简体中文' }).click()
+    await expect(page.getByRole('alert')).toHaveText('邮箱或密码不正确。')
+    await expect(page.getByLabel('邮箱')).toHaveValue('unknown@example.com')
+    await expect(page.getByLabel('密码', { exact: true })).toHaveValue('not-a-real-password')
+
+    await page.getByRole('button', { name: '语言' }).click()
+    await page.getByRole('menuitemradio', { name: 'English' }).click()
+    await expect(page.getByRole('alert')).toHaveText('The email or password is incorrect.')
     expect(setupStatusRequests).toEqual([])
     expect(browserErrors).toEqual([])
   })
@@ -261,9 +271,39 @@ test.describe('administrator authentication', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.reload()
 
+    let logoutAttempts = 0
+    await page.route('**/api/auth/logout', async (route) => {
+      logoutAttempts += 1
+      if (logoutAttempts === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/problem+json',
+          body: JSON.stringify({
+            type: '/problems/service-unavailable',
+            title: 'Service unavailable',
+            status: 503,
+            code: 'service_unavailable',
+          }),
+        })
+        return
+      }
+      await route.continue()
+    })
     await page.getByRole('button', { name: new RegExp(name) }).click()
     await page.getByRole('menuitem', { name: /退出登录|log out/i }).click()
+    await expect(page.getByRole('alert')).toContainText('服务器没有确认会话已经撤销，请重试。')
+
+    const englishMenuItem = page.getByRole('menuitemradio', { name: 'English' })
+    if (await englishMenuItem.isVisible()) {
+      await englishMenuItem.click()
+    } else {
+      await page.getByRole('button', { name: new RegExp(name) }).click()
+      await englishMenuItem.click()
+    }
+    await expect(page.getByRole('alert')).toContainText('The server did not confirm that your session was revoked. Try again.')
+    await page.getByRole('button', { name: 'Retry' }).click()
     await expect(page).toHaveURL(/\/login$/)
+    expect(logoutAttempts).toBe(2)
     expect(browserErrors).toEqual([])
   })
 

@@ -116,6 +116,32 @@ describe('access components', () => {
     expect(within(inviteForm!).getByRole('checkbox', { name: 'Users reader' })).not.toBeChecked()
   })
 
+  it('updates an existing invitation validation message when the language changes', async () => {
+    const api = mockApi({
+      getUsers: vi.fn().mockResolvedValue({ users: [{ id: '019535d9-3df7-79fb-b466-fa907fa17f91', name: 'Ada', email: 'ada@example.com', createdAt: '2026-09-02T00:00:00Z', authVersion: 1, roles: [usersRole] }] }),
+      getRoles: vi.fn().mockResolvedValue({ roles: [systemRole, usersRole], permissions: permissionDefinitions }),
+      getInvitations: vi.fn().mockResolvedValue({ invitations: [] }),
+      createInvitation: vi.fn(),
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<UsersPage api={api} canManage />)
+
+    await screen.findByText('Ada')
+    await user.click(screen.getByRole('button', { name: 'Invite user' }))
+    const name = screen.getByLabelText('Name')
+    const email = screen.getByLabelText('Email')
+    await user.type(name, 'Lin')
+    await user.type(email, 'lin@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }))
+    expect(await screen.findByText('Select at least one role.')).toBeVisible()
+
+    await i18n.changeLanguage('zh-CN')
+
+    expect(await screen.findByText('至少选择一个角色。')).toBeVisible()
+    expect(screen.getByDisplayValue('Lin')).toBe(name)
+    expect(screen.getByDisplayValue('lin@example.com')).toBe(email)
+  })
+
   it('distinguishes forbidden failures and does not offer a misleading retry', () => {
     render(<AccessError error={problem('/problems/forbidden', 403, 'forbidden')} onRetry={vi.fn()} />)
 

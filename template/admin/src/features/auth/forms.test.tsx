@@ -6,6 +6,7 @@ import { LoginForm } from './login-form'
 import { PasswordResetForm } from './password-reset-form'
 import { PasswordResetRequestForm } from './password-reset-request-form'
 import { SetupForm } from './setup-form'
+import { InvitationAcceptanceForm } from '@/features/access/invitation-acceptance-form'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import { captureSetupAuthority, getSetupAuthority } from '@/shared/bootstrap/setup-authority'
 import { i18n, initializeI18n } from '@/shared/i18n'
@@ -147,6 +148,109 @@ describe('authentication forms', () => {
     expect(screen.queryByText('private diagnostic')).not.toBeInTheDocument()
   })
 
+  it('updates an existing server error when the language changes', async () => {
+    const user = userEvent.setup()
+    const api = mockApi({
+      login: vi.fn().mockRejectedValue(new ApiProblemError({
+        type: '/problems/invalid-credentials',
+        title: 'diagnostic',
+        status: 401,
+        code: 'invalid_credentials',
+      })),
+    })
+    renderWithQueryClient(<LoginForm api={api} onSuccess={vi.fn()} />)
+
+    const email = screen.getByLabelText('Email')
+    const password = screen.getByLabelText('Password', { exact: true })
+    await user.type(email, 'admin@example.com')
+    await user.type(password, 'correct horse battery')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The email or password is incorrect.')
+
+    await i18n.changeLanguage('zh-CN')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('邮箱或密码不正确。')
+    expect(screen.getByDisplayValue('admin@example.com')).toBe(email)
+    expect(screen.getByDisplayValue('correct horse battery')).toBe(password)
+  })
+
+  it('uses the current language for a response that arrives after switching language', async () => {
+    const user = userEvent.setup()
+    let rejectRequest: (error: unknown) => void = () => undefined
+    const api = mockApi({
+      requestPasswordReset: vi.fn(() => new Promise<void>((_, reject) => { rejectRequest = reject })),
+    })
+    renderWithQueryClient(<PasswordResetRequestForm api={api} onAccepted={vi.fn()} />)
+
+    const email = screen.getByLabelText('Email')
+    await user.type(email, 'admin@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send reset link' }))
+    await waitFor(() => expect(api.requestPasswordReset).toHaveBeenCalledOnce())
+
+    await i18n.changeLanguage('zh-CN')
+    rejectRequest(new ApiProblemError({
+      type: '/problems/rate-limited',
+      title: 'diagnostic',
+      status: 429,
+      code: 'rate_limited',
+    }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('密码重置请求次数过多，请稍后重试。')
+    expect(screen.getByDisplayValue('admin@example.com')).toBe(email)
+    expect(api.requestPasswordReset).toHaveBeenCalledOnce()
+  })
+
+  it('updates invitation acceptance errors when the language changes', async () => {
+    const user = userEvent.setup()
+    const api = mockApi({
+      acceptInvitation: vi.fn().mockRejectedValue(new ApiProblemError({
+        type: '/problems/validation-failed',
+        title: 'diagnostic',
+        status: 422,
+        code: 'validation_failed',
+        errors: [{ pointer: '/password', code: 'invalid_password' }],
+      })),
+    })
+    renderWithQueryClient(<InvitationAcceptanceForm api={api} token="v1.token" onSuccess={vi.fn()} onInvalid={vi.fn()} />)
+
+    const password = screen.getByLabelText('Password', { exact: true })
+    await user.type(password, 'Aa1!xxxx')
+    await user.type(screen.getByLabelText('Confirm password'), 'Aa1!xxxx')
+    await user.click(screen.getByRole('button', { name: 'Accept invitation' }))
+    expect(await screen.findByText('Review the highlighted fields and try again.')).toBeVisible()
+    expect(await screen.findByText('Use a password between 8 and 128 characters with uppercase, lowercase, a number, and a special character.')).toBeVisible()
+
+    await i18n.changeLanguage('zh-CN')
+
+    expect(await screen.findByText('请检查标记出的字段后重试。')).toBeVisible()
+    expect(await screen.findByText('请输入 8 到 128 个字符的密码，并至少包含大写字母、小写字母、数字和特殊符号。')).toBeVisible()
+    expect(password).toHaveValue('Aa1!xxxx')
+  })
+
+  it('updates password reset errors when the language changes', async () => {
+    const user = userEvent.setup()
+    const api = mockApi({
+      completePasswordReset: vi.fn().mockRejectedValue(new ApiProblemError({
+        type: '/problems/service-unavailable',
+        title: 'diagnostic',
+        status: 503,
+        code: 'service_unavailable',
+      })),
+    })
+    renderWithQueryClient(<PasswordResetForm api={api} token="v1.token" onSuccess={vi.fn()} onInvalidAuthority={vi.fn()} />)
+
+    const password = screen.getByLabelText('Password', { exact: true })
+    await user.type(password, 'Aa1!xxxx')
+    await user.type(screen.getByLabelText('Confirm password'), 'Aa1!xxxx')
+    await user.click(screen.getByRole('button', { name: 'Set new password' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('A required service is temporarily unavailable. Try again shortly.')
+
+    await i18n.changeLanguage('zh-CN')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('所需服务暂时不可用，请稍后重试。')
+    expect(password).toHaveValue('Aa1!xxxx')
+  })
+
   it('toggles password visibility with an accessible control', async () => {
     const user = userEvent.setup()
     const api = mockApi()
@@ -210,6 +314,12 @@ describe('authentication forms', () => {
     expect(await screen.findByText('Enter a valid email address.')).toBeVisible()
     expect(email).toHaveAttribute('aria-describedby', 'email-error')
     await waitFor(() => expect(email).toHaveFocus())
+
+    await i18n.changeLanguage('zh-CN')
+
+    expect(await screen.findByText('请检查标记出的字段后重试。')).toBeVisible()
+    expect(await screen.findByText('请输入有效的邮箱地址。')).toBeVisible()
+    expect(screen.getByDisplayValue('admin@example.com')).toBe(email)
   })
 
   it.each([
