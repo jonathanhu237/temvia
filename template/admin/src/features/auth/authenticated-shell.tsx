@@ -1,11 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { House, LogOut, ShieldCheck, Users } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import {
   Sidebar,
   SidebarContent,
@@ -20,26 +20,33 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
-import { changeLocale } from '@/shared/i18n'
-import type { Locale } from '@/shared/i18n/resources'
+import { PreferencesMenuItems } from './preferences-menu'
 import { translateProblem } from '@/shared/api/problems'
 import type { ApiClient } from '@/shared/api/client'
 import { currentUserQueryKey } from './queries'
 import type { User } from '@/shared/api/contracts'
+import { clearAccessDrafts, useAccessDraftStore } from '@/features/access/drafts'
 
 export function AuthenticatedShell({ api, user, children }: { api: ApiClient; user: User; children: React.ReactNode }) {
-  const { t, i18n } = useTranslation(['common', 'auth', 'problems', 'access'])
+  const { t } = useTranslation(['common', 'auth', 'problems', 'access'])
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
   const [logoutError, setLogoutError] = useState<unknown>()
-  const locale: Locale = i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
+  useEffect(() => {
+    const previousOwnerID = useAccessDraftStore.getState().ownerID
+    if (previousOwnerID !== user.id) queryClient.removeQueries({ queryKey: ['access'] })
+    useAccessDraftStore.getState().setOwner(user.id)
+  }, [queryClient, user.id])
   const logout = useMutation({
     retry: false,
+    meta: { preserveAccessDraftsOnError: true },
     mutationFn: () => api.logout(),
     onSuccess: () => {
       setLogoutError(undefined)
+      clearAccessDrafts()
       queryClient.removeQueries({ queryKey: currentUserQueryKey })
+      queryClient.removeQueries({ queryKey: ['access'] })
       void navigate({ to: '/login', replace: true })
     },
     onError: (error) => {
@@ -105,12 +112,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
                 <p className="truncate text-sm font-medium">{user.name}</p>
                 <p className="truncate text-xs text-muted-foreground">{user.email}</p>
               </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel>{t('language')}</DropdownMenuLabel>
-              <DropdownMenuRadioGroup value={locale} onValueChange={(value) => void changeLocale(value as Locale)}>
-                <DropdownMenuRadioItem value="zh-CN">{t('chinese')}</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="en">{t('english')}</DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
+              <PreferencesMenuItems />
               <DropdownMenuSeparator />
               <DropdownMenuItem disabled={logout.isPending} onSelect={(event) => { event.preventDefault(); setLogoutError(undefined); logout.mutate() }}>
                 <LogOut aria-hidden="true" data-icon="inline-start" />

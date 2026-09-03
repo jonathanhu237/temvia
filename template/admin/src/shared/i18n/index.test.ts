@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { changeLocale, i18n, initializeI18n, LOCALE_STORAGE_KEY, selectInitialLocale } from './index'
 
 describe('locale selection', () => {
@@ -25,5 +25,14 @@ describe('locale selection', () => {
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('en')
     expect(document.documentElement).toHaveAttribute('lang', 'en')
     expect(document.documentElement).toHaveAttribute('dir', 'ltr')
+  })
+
+  it('applies a locale changed in another same-origin tab', async () => {
+    await initializeI18n()
+    const change = vi.spyOn(i18n, 'changeLanguage')
+    window.dispatchEvent(new StorageEvent('storage', { key: LOCALE_STORAGE_KEY, newValue: 'zh-CN' }))
+    await vi.waitFor(() => expect(i18n.language).toBe('zh-CN'))
+    expect(change).toHaveBeenCalledWith('zh-CN')
+    change.mockRestore()
   })
 })

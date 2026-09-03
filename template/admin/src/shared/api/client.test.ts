@@ -69,4 +69,17 @@ describe('Fetch API boundary', () => {
 		expect(requestBody).toEqual({ email: 'ada@example.com', locale: 'en' })
 		await expect(api.completePasswordReset({ token: `v1.${'A'.repeat(22)}.${'B'.repeat(43)}`, password: 'Aa1!xxxx', locale: 'zh-CN' })).resolves.toBeUndefined()
 	})
+
+	it('encodes access-list search and sort options in the query string', async () => {
+		let requestURL = ''
+		server.use(http.get('/api/users', ({ request }) => {
+			requestURL = request.url
+			return HttpResponse.json({ users: [] })
+		}))
+
+		await expect(api.getUsers?.({ q: 'Ada_%', sort: 'name', direction: 'asc' })).resolves.toEqual({ users: [] })
+		expect(new URL(requestURL).searchParams.get('q')).toBe('Ada_%')
+		expect(new URL(requestURL).searchParams.get('sort')).toBe('name')
+		expect(new URL(requestURL).searchParams.get('direction')).toBe('asc')
+	})
 })

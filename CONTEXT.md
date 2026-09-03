@@ -7,6 +7,10 @@ The language used for account invitations and password recovery in Temvia admini
 **Invitation link**:
 A single-use link that lets an invited person set a password and activate their account.
 
+**Invitation language**:
+The language selected for an invitation email, independent of the sender's current interface language.
+_Avoid_: Account language, interface language
+
 **Password reset link**:
 A single-use link that lets an account holder choose a new password after requesting password recovery.
 

@@ -175,6 +175,9 @@ func resetAuthState(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, `DELETE FROM auth_users`); err != nil {
 		return err
 	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM auth_roles WHERE system_key IS NULL`); err != nil {
+		return err
+	}
 	_, err := db.ExecContext(ctx, `UPDATE auth_setup SET token_digest = NULL, token_expires_at = NULL, completed_at = NULL WHERE singleton = true`)
 	return err
 }
@@ -555,5 +558,120 @@ func TestStoreIntegrationRBACAndInvitationLifecycle(t *testing.T) {
 	}
 	if err := store.DeleteRole(ctx, role.ID); err != nil {
 		t.Fatalf("DeleteRole(after reassignment) = %v", err)
+	}
+}
+
+func TestStoreIntegrationAccessListQueryOptions(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not set")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	store := NewStore(db)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if err := resetAuthState(cleanupCtx, db); err != nil {
+			t.Errorf("reset auth state: %v", err)
+		}
+		_ = db.Close()
+	})
+	if err := resetAuthState(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CheckSchema(ctx); err != nil {
+		t.Fatalf("CheckSchema() error = %v", err)
+	}
+
+	setupDigest := sha256.Sum256([]byte("access list setup token"))
+	if complete, err := store.ReplaceCurrentToken(ctx, setupDigest[:], time.Hour); err != nil || complete {
+		t.Fatalf("ReplaceCurrentToken() = %t, %v", complete, err)
+	}
+	adminName, _ := domain.NewName("List Admin")
+	adminEmail, _ := domain.NewEmail("list-admin@example.com")
+	admin, err := store.Complete(ctx, setupDigest[:], adminName, adminEmail, "$argon2id$test")
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	role, err := store.CreateRole(ctx, "List reader", "", []domain.PermissionKey{domain.PermissionUsersRead})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+
+	userRows := []struct {
+		id, name, email string
+		createdAt       time.Time
+	}{
+		{id: "00000000-0000-4000-8000-000000000032", name: "Ada", email: "ada-b@example.com", createdAt: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)},
+		{id: "00000000-0000-4000-8000-000000000033", name: "Ada", email: "ada-a@example.com", createdAt: time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC)},
+		{id: "00000000-0000-4000-8000-000000000034", name: "Zoe", email: "zoe@example.com", createdAt: time.Date(2026, 9, 3, 8, 0, 0, 0, time.UTC)},
+	}
+	for _, row := range userRows {
+		if _, err := db.ExecContext(ctx, `INSERT INTO auth_users (id, name, email, email_canonical, password_hash, created_at) VALUES ($1::uuid, $2, $3, lower($3), 'hash', $4)`, row.id, row.name, row.email, row.createdAt); err != nil {
+			t.Fatalf("insert user %s: %v", row.id, err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO auth_user_roles (user_id, role_id) VALUES ($1::uuid, $2::uuid)`, row.id, role.ID); err != nil {
+			t.Fatalf("assign user %s: %v", row.id, err)
+		}
+	}
+
+	users, err := store.ListUsersWithOptions(ctx, application.AccessListOptions{Query: "  ADA ", Sort: "name", Direction: "asc", Limit: 1})
+	if err != nil {
+		t.Fatalf("ListUsersWithOptions(first) error = %v", err)
+	}
+	if len(users.Items) != 1 || users.Items[0].User.ID != userRows[0].id || users.NextCursor == "" {
+		t.Fatalf("ListUsersWithOptions(first) = %#v, want first Ada and a cursor", users)
+	}
+	users, err = store.ListUsersWithOptions(ctx, application.AccessListOptions{Cursor: users.NextCursor, Query: "ADA", Sort: "name", Direction: "asc", Limit: 1})
+	if err != nil {
+		t.Fatalf("ListUsersWithOptions(second) error = %v", err)
+	}
+	if len(users.Items) != 1 || users.Items[0].User.ID != userRows[1].id {
+		t.Fatalf("ListUsersWithOptions(second) = %#v, want second Ada", users)
+	}
+	if _, err := store.ListUsersWithOptions(ctx, application.AccessListOptions{Sort: "email", Direction: "asc", Limit: 1}); err != nil {
+		t.Fatalf("ListUsersWithOptions(email) error = %v", err)
+	}
+
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	invitations := []struct {
+		id, name, email string
+		expiresAt       time.Time
+	}{
+		{id: "00000000-0000-4000-8000-000000000042", name: "Pending early", email: "pending-early@example.com", expiresAt: now.Add(time.Hour)},
+		{id: "00000000-0000-4000-8000-000000000043", name: "Pending late", email: "pending-late@example.com", expiresAt: now.Add(2 * time.Hour)},
+	}
+	for index, invitation := range invitations {
+		selector := bytes.Repeat([]byte{byte(0x51 + index)}, 16)
+		digest := bytes.Repeat([]byte{byte(0x61 + index)}, 32)
+		if _, err := db.ExecContext(ctx, `INSERT INTO auth_user_invitations (id, name, email, email_canonical, selector, verifier_digest, locale, expires_at, created_by, created_at) VALUES ($1::uuid, $2, $3, lower($3), $4, $5, 'en', $6, $7::uuid, $8)`, invitation.id, invitation.name, invitation.email, selector, digest, invitation.expiresAt, admin.ID, now); err != nil {
+			t.Fatalf("insert invitation %s: %v", invitation.id, err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO auth_invitation_roles (invitation_id, role_id) VALUES ($1::uuid, $2::uuid)`, invitation.id, role.ID); err != nil {
+			t.Fatalf("assign invitation %s: %v", invitation.id, err)
+		}
+	}
+	listedInvitations, err := store.ListInvitationsWithOptions(ctx, application.AccessListOptions{Query: "pending", Sort: "expiresAt", Direction: "asc", Limit: 1})
+	if err != nil {
+		t.Fatalf("ListInvitationsWithOptions(first) error = %v", err)
+	}
+	if len(listedInvitations.Items) != 1 || listedInvitations.Items[0].ID != invitations[0].id || listedInvitations.NextCursor == "" {
+		t.Fatalf("ListInvitationsWithOptions(first) = %#v, want earliest invitation and a cursor", listedInvitations)
+	}
+	listedInvitations, err = store.ListInvitationsWithOptions(ctx, application.AccessListOptions{Cursor: listedInvitations.NextCursor, Query: "pending", Sort: "expiresAt", Direction: "asc", Limit: 1})
+	if err != nil {
+		t.Fatalf("ListInvitationsWithOptions(second) error = %v", err)
+	}
+	if len(listedInvitations.Items) != 1 || listedInvitations.Items[0].ID != invitations[1].id {
+		t.Fatalf("ListInvitationsWithOptions(second) = %#v, want latest invitation", listedInvitations)
 	}
 }

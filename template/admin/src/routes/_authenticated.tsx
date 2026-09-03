@@ -3,6 +3,7 @@ import { AuthenticatedShell } from '@/features/auth/authenticated-shell'
 import { SessionError } from '@/features/auth/session-error'
 import { currentUserOptions } from '@/features/auth/queries'
 import { isUnauthenticated } from '@/shared/api/problems'
+import { clearAccessDrafts } from '@/features/access/drafts'
 
 export const Route = createFileRoute('/_authenticated')({
   loader: async ({ context }) => {
@@ -11,7 +12,9 @@ export const Route = createFileRoute('/_authenticated')({
       return { user }
     } catch (error) {
       if (isUnauthenticated(error)) {
+        clearAccessDrafts()
         context.queryClient.removeQueries({ queryKey: ['auth', 'current-user'] })
+        context.queryClient.removeQueries({ queryKey: ['access'] })
         throw redirect({ to: '/login', replace: true })
       }
       if (isRedirect(error)) throw error
@@ -27,4 +30,3 @@ function AuthenticatedRoute() {
   const { api } = Route.useRouteContext()
   return <AuthenticatedShell api={api} user={user}><Outlet /></AuthenticatedShell>
 }
-

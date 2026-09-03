@@ -6,9 +6,11 @@ import { createAppQueryClient } from '@/app/query-client'
 import { createApiClient } from '@/shared/api/client'
 import { captureInvitationAuthority, capturePasswordResetAuthority, captureSetupAuthority } from '@/shared/bootstrap/setup-authority'
 import { initializeI18n } from '@/shared/i18n'
+import { initializeTheme } from '@/shared/theme'
 import './index.css'
 
 async function bootstrap() {
+	initializeTheme()
 	captureSetupAuthority()
   capturePasswordResetAuthority()
   captureInvitationAuthority()

@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"time"
+	"unicode"
 
 	"example.com/temvia/api/internal/auth/domain"
+	"golang.org/x/text/unicode/norm"
 )
 
 type RolePage struct {
@@ -60,6 +63,14 @@ type AccessStore interface {
 	RevokeInvitation(context.Context, string) error
 	PreflightInvitation(context.Context, []byte, []byte) error
 	CompleteInvitation(context.Context, []byte, []byte, string) error
+}
+
+// QueryableAccessStore is implemented by stores that support the searchable,
+// sortable access listings. The legacy list methods remain in AccessStore so
+// adapters can be upgraded without breaking simpler test and embedding stores.
+type QueryableAccessStore interface {
+	ListUsersWithOptions(context.Context, AccessListOptions) (UserPage, error)
+	ListInvitationsWithOptions(context.Context, AccessListOptions) (InvitationPage, error)
 }
 
 type AccessManagement struct {
@@ -210,10 +221,42 @@ func (m *AccessManagement) Users(ctx context.Context, actorID, cursor string, li
 	if err := validatePage(cursor, limit); err != nil {
 		return UserPage{}, err
 	}
+	if limit == 0 {
+		limit = DefaultAccessPageSize
+	}
 	page, err := m.store.ListUsers(ctx, cursor, limit)
 	if err != nil {
 		return UserPage{}, dependencyError(err)
 	}
+	return m.normalizeUsersPage(page)
+}
+
+// UsersWithOptions returns users using a validated query, sort, direction,
+// and opaque cursor. Users keeps the original method for existing callers.
+func (m *AccessManagement) UsersWithOptions(ctx context.Context, actorID string, options AccessListOptions) (UserPage, error) {
+	if err := m.require(ctx, actorID, domain.PermissionUsersRead); err != nil {
+		return UserPage{}, err
+	}
+	normalized, err := normalizeAccessListOptions(options, false)
+	if err != nil {
+		return UserPage{}, err
+	}
+	var page UserPage
+	if queryable, ok := m.store.(QueryableAccessStore); ok {
+		page, err = queryable.ListUsersWithOptions(ctx, normalized)
+	} else {
+		page, err = m.store.ListUsers(ctx, normalized.Cursor, normalized.Limit)
+	}
+	if err != nil {
+		if errors.Is(err, ErrInvalidCursor) {
+			return UserPage{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "cursor", Code: "invalid_cursor"}}}
+		}
+		return UserPage{}, dependencyError(err)
+	}
+	return m.normalizeUsersPage(page)
+}
+
+func (m *AccessManagement) normalizeUsersPage(page UserPage) (UserPage, error) {
 	for i := range page.Items {
 		if len(page.Items[i].Roles) == 0 {
 			return UserPage{}, ErrDependencyUnavailable
@@ -287,10 +330,40 @@ func (m *AccessManagement) Invitations(ctx context.Context, actorID, cursor stri
 	if err := validatePage(cursor, limit); err != nil {
 		return InvitationPage{}, err
 	}
+	if limit == 0 {
+		limit = DefaultAccessPageSize
+	}
 	page, err := m.store.ListInvitations(ctx, cursor, limit)
 	if err != nil {
 		return InvitationPage{}, dependencyError(err)
 	}
+	return m.normalizeInvitationsPage(page)
+}
+
+func (m *AccessManagement) InvitationsWithOptions(ctx context.Context, actorID string, options AccessListOptions) (InvitationPage, error) {
+	if err := m.requireSuper(ctx, actorID); err != nil {
+		return InvitationPage{}, err
+	}
+	normalized, err := normalizeAccessListOptions(options, true)
+	if err != nil {
+		return InvitationPage{}, err
+	}
+	var page InvitationPage
+	if queryable, ok := m.store.(QueryableAccessStore); ok {
+		page, err = queryable.ListInvitationsWithOptions(ctx, normalized)
+	} else {
+		page, err = m.store.ListInvitations(ctx, normalized.Cursor, normalized.Limit)
+	}
+	if err != nil {
+		if errors.Is(err, ErrInvalidCursor) {
+			return InvitationPage{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "cursor", Code: "invalid_cursor"}}}
+		}
+		return InvitationPage{}, dependencyError(err)
+	}
+	return m.normalizeInvitationsPage(page)
+}
+
+func (m *AccessManagement) normalizeInvitationsPage(page InvitationPage) (InvitationPage, error) {
 	for i := range page.Items {
 		if len(page.Items[i].Roles) == 0 {
 			return InvitationPage{}, ErrDependencyUnavailable
@@ -435,13 +508,74 @@ func validateRoleIDs(ids []string) error {
 
 func validatePage(cursor string, limit int) error {
 	if limit == 0 {
-		limit = 25
+		limit = DefaultAccessPageSize
 	}
-	if limit < 1 || limit > 100 {
+	if limit < 1 || limit > MaxAccessPageSize {
 		return &domain.ValidationErrors{Items: []domain.FieldError{{Field: "limit", Code: "invalid_limit"}}}
 	}
 	if cursor != "" && !domain.IsCanonicalUUID(cursor) {
-		return &domain.ValidationErrors{Items: []domain.FieldError{{Field: "cursor", Code: "invalid_cursor"}}}
+		decoded, err := DecodeAccessCursor(cursor)
+		if err != nil || decoded.Query != "" || decoded.Sort != "createdAt" || decoded.Direction != "desc" || validateAccessCursorValue(decoded, false) != nil {
+			return &domain.ValidationErrors{Items: []domain.FieldError{{Field: "cursor", Code: "invalid_cursor"}}}
+		}
+	}
+	return nil
+}
+
+func normalizeAccessListOptions(options AccessListOptions, invitations bool) (AccessListOptions, error) {
+	if options.Limit == 0 {
+		options.Limit = DefaultAccessPageSize
+	}
+	if options.Limit < 1 || options.Limit > MaxAccessPageSize {
+		return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "limit", Code: "invalid_limit"}}}
+	}
+	options.Query = norm.NFC.String(strings.TrimFunc(options.Query, unicode.IsSpace))
+	if options.Sort == "" {
+		options.Sort = "createdAt"
+	}
+	if options.Direction == "" {
+		options.Direction = "desc"
+	}
+	allowed := map[string]struct{}{"name": {}, "email": {}, "createdAt": {}}
+	if invitations {
+		allowed["expiresAt"] = struct{}{}
+	}
+	if _, ok := allowed[options.Sort]; !ok {
+		return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "sort", Code: "invalid_value"}}}
+	}
+	if options.Direction != "asc" && options.Direction != "desc" {
+		return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "direction", Code: "invalid_value"}}}
+	}
+	if options.Cursor != "" {
+		// Keep accepting the pre-query UUID cursor for the default listing so
+		// older clients can finish a pagination sequence while the API rolls
+		// out opaque, query-aware cursors.
+		if domain.IsCanonicalUUID(options.Cursor) {
+			if options.Query != "" || options.Sort != "createdAt" || options.Direction != "desc" {
+				return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "cursor", Code: "invalid_cursor"}}}
+			}
+			return options, nil
+		}
+		cursor, err := DecodeAccessCursor(options.Cursor)
+		if err != nil || cursor.Query != options.Query || cursor.Sort != options.Sort || cursor.Direction != options.Direction {
+			return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "cursor", Code: "invalid_cursor"}}}
+		}
+		if err := validateAccessCursorValue(cursor, invitations); err != nil {
+			return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "cursor", Code: "invalid_cursor"}}}
+		}
+	}
+	return options, nil
+}
+
+func validateAccessCursorValue(cursor AccessCursor, invitations bool) error {
+	if cursor.Value == "" {
+		return ErrInvalidCursor
+	}
+	if cursor.Sort != "createdAt" && !(invitations && cursor.Sort == "expiresAt") {
+		return nil
+	}
+	if _, err := time.Parse(time.RFC3339Nano, cursor.Value); err != nil {
+		return ErrInvalidCursor
 	}
 	return nil
 }

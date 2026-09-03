@@ -27,8 +27,19 @@ function syncDocumentLanguage(locale: Locale): void {
 }
 
 export const i18n = i18next.createInstance()
+let localeStorageListenerAttached = false
+
+function attachLocaleStorageListener(): void {
+  if (typeof window === 'undefined' || localeStorageListenerAttached) return
+  window.addEventListener('storage', (event) => {
+    if (event.key !== LOCALE_STORAGE_KEY || (event.newValue !== 'en' && event.newValue !== 'zh-CN')) return
+    void changeLocale(event.newValue)
+  })
+  localeStorageListenerAttached = true
+}
 
 export async function initializeI18n(): Promise<I18nInstance> {
+  attachLocaleStorageListener()
   const stored = (() => {
     try {
       return window.localStorage.getItem(LOCALE_STORAGE_KEY)

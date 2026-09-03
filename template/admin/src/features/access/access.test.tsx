@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RolesPage } from './roles-page'
 import { UsersPage } from './users-page'
 import { AccessError } from './access-error'
+import { clearAccessDrafts } from './drafts'
 import { ApiProblemError, ApiTransportError, type ApiClient } from '@/shared/api/client'
 import type { Permission, Role } from '@/shared/api/contracts'
 import { i18n, initializeI18n } from '@/shared/i18n'
@@ -68,22 +69,39 @@ describe('access components', () => {
   beforeEach(async () => {
     await initializeI18n()
     await i18n.changeLanguage('en')
+    clearAccessDrafts()
   })
 
   it('groups the role permission picker by resource', async () => {
     const api = mockApi({
       getRoles: vi.fn().mockResolvedValue({ roles: [systemRole, usersRole, rolesRole], permissions: permissionDefinitions }),
     })
-    const view = renderWithQueryClient(<RolesPage api={api} canManage />)
+    renderWithQueryClient(<RolesPage api={api} canManage />)
 
     await screen.findByRole('heading', { name: 'Roles and permissions' })
     await userEvent.setup().click(screen.getByRole('button', { name: 'Create role' }))
 
-    await waitFor(() => expect(view.container.querySelectorAll('fieldset > legend')).toHaveLength(3))
-    const legends = Array.from(view.container.querySelectorAll('fieldset > legend')).map((legend) => legend.textContent)
+    const dialog = await screen.findByRole('dialog', { name: 'Create role' })
+    await waitFor(() => expect(dialog.querySelectorAll('fieldset > legend')).toHaveLength(3))
+    const legends = Array.from(dialog.querySelectorAll('fieldset > legend')).map((legend) => legend.textContent)
     expect(legends).toEqual(['Permissions', 'Roles', 'Users'])
-    expect(screen.getByRole('checkbox', { name: /View users/ })).toBeVisible()
-    expect(screen.getByRole('checkbox', { name: /View roles/ })).toBeVisible()
+    expect(within(dialog).getByRole('checkbox', { name: /View users/ })).toBeVisible()
+    expect(within(dialog).getByRole('checkbox', { name: /View roles/ })).toBeVisible()
+  })
+
+  it('sorts role rows through the data table', async () => {
+    const api = mockApi({
+      getRoles: vi.fn().mockResolvedValue({ roles: [usersRole, systemRole, rolesRole], permissions: permissionDefinitions }),
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<RolesPage api={api} canManage={false} />)
+
+    const table = await screen.findByRole('table')
+    await user.click(within(table).getByRole('button', { name: 'Role name' }))
+    const rows = within(table).getAllByRole('row')
+    expect(rows[1]).toHaveTextContent('Roles reader')
+    expect(rows[2]).toHaveTextContent('Super Admin')
+    expect(rows[3]).toHaveTextContent('Users reader')
   })
 
   it('renders a read-only users page without loading role administration data', async () => {
@@ -191,7 +209,7 @@ describe('access components', () => {
     await user.click(screen.getByRole('button', { name: 'Save role' }))
     await screen.findByRole('heading', { name: 'This record changed' })
 
-    await user.click(screen.getByRole('button', { name: 'Reload' }))
+    await user.click(screen.getByRole('button', { name: 'Discard draft and reload' }))
     await waitFor(() => expect(screen.getByDisplayValue('Users editor')).toBeVisible())
     expect(screen.getByDisplayValue('Updated users')).toBeVisible()
 
@@ -229,27 +247,105 @@ describe('access components', () => {
     renderWithQueryClient(<UsersPage api={api} canManage />)
 
     await screen.findByText('Ada')
-    const usersCheckbox = screen.getByRole('checkbox', { name: 'Users reader' })
-    const rolesCheckbox = screen.getByRole('checkbox', { name: 'Roles reader' })
+    await user.click(screen.getByRole('button', { name: 'Assign roles' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Assign roles' })
+    const usersCheckbox = within(dialog).getByRole('checkbox', { name: 'Users reader' })
+    const rolesCheckbox = within(dialog).getByRole('checkbox', { name: 'Roles reader' })
     await user.click(usersCheckbox)
     await user.click(rolesCheckbox)
-    await user.click(screen.getByRole('button', { name: 'Save assignments' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Save assignments' }))
     await screen.findByRole('heading', { name: 'This record changed' })
 
-    await user.click(screen.getByRole('button', { name: 'Reload' }))
+    await user.click(screen.getByRole('button', { name: 'Discard draft and reload' }))
     await waitFor(() => {
-      expect(screen.getByRole('checkbox', { name: 'Users reader' })).not.toBeChecked()
-      expect(screen.getByRole('checkbox', { name: 'Roles reader' })).toBeChecked()
-      expect(screen.getByRole('button', { name: 'Save assignments' })).toBeDisabled()
+      expect(within(dialog).getByRole('checkbox', { name: 'Users reader' })).not.toBeChecked()
+      expect(within(dialog).getByRole('checkbox', { name: 'Roles reader' })).toBeChecked()
+      expect(within(dialog).getByRole('button', { name: 'Save assignments' })).toBeDisabled()
     })
 
-    await user.click(screen.getByRole('checkbox', { name: 'Roles reader' }))
-    await user.click(screen.getByRole('checkbox', { name: 'Users reader' }))
-    await user.click(screen.getByRole('button', { name: 'Save assignments' }))
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Roles reader' }))
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Users reader' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Save assignments' }))
     await waitFor(() => expect(replaceUserRoles).toHaveBeenCalledTimes(2))
     expect(replaceUserRoles).toHaveBeenLastCalledWith(refreshedUser.id, {
       roleIds: [usersRole.id],
       authVersion: 2,
     })
+  })
+
+  it('keeps a role draft when its dialog is closed and reopened', async () => {
+    const api = mockApi({
+      getRoles: vi.fn().mockResolvedValue({ roles: [systemRole], permissions: permissionDefinitions }),
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<RolesPage api={api} canManage />)
+
+    await screen.findByRole('heading', { name: 'Roles and permissions' })
+    await user.click(screen.getByRole('button', { name: 'Create role' }))
+    await user.type(screen.getByLabelText('Role name'), 'Auditor')
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(screen.getByRole('button', { name: 'Create role' }))
+    expect(screen.getByDisplayValue('Auditor')).toBeVisible()
+  })
+
+  it('does not let a late role result close a newer editor', async () => {
+    let resolveSave: ((role: Role) => void) | undefined
+    const api = mockApi({
+      getRoles: vi.fn().mockResolvedValue({ roles: [systemRole, usersRole], permissions: permissionDefinitions }),
+      replaceRole: vi.fn(() => new Promise<Role>((resolve) => { resolveSave = resolve })),
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<RolesPage api={api} canManage />)
+
+    await screen.findByRole('heading', { name: 'Roles and permissions' })
+    await user.click(screen.getByText('Users reader'))
+    await user.click(screen.getByRole('button', { name: 'Save role' }))
+    await waitFor(() => expect(api.replaceRole).toHaveBeenCalledOnce())
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(screen.getByRole('button', { name: 'Create role' }))
+    await user.type(screen.getByLabelText('Role name'), 'Auditor')
+
+    resolveSave?.({ ...usersRole, name: 'Users updated', revision: 2 })
+    const dialog = await screen.findByRole('dialog', { name: 'Create role' })
+    expect(within(dialog).getByDisplayValue('Auditor')).toBeVisible()
+    expect(dialog).toBeVisible()
+  })
+
+  it('keeps an invitation draft independent from interface language', async () => {
+    const api = mockApi({
+      getUsers: vi.fn().mockResolvedValue({ users: [{ id: '019535d9-3df7-79fb-b466-fa907fa17f91', name: 'Ada', email: 'ada@example.com', createdAt: '2026-09-02T00:00:00Z', authVersion: 1, roles: [usersRole] }] }),
+      getRoles: vi.fn().mockResolvedValue({ roles: [usersRole], permissions: permissionDefinitions }),
+      getInvitations: vi.fn().mockResolvedValue({ invitations: [] }),
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<UsersPage api={api} canManage />)
+    await screen.findByText('Ada')
+    await user.click(screen.getByRole('button', { name: 'Invite user' }))
+    await user.type(screen.getByLabelText('Name'), 'Lin')
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(screen.getByRole('button', { name: 'Invite user' }))
+    expect(screen.getByDisplayValue('Lin')).toBeVisible()
+    await i18n.changeLanguage('zh-CN')
+    expect(screen.getByDisplayValue('Lin')).toBeVisible()
+  })
+
+  it('opens user role assignment in a dialog and submits the optimistic version', async () => {
+    const userRecord = { id: '019535d9-3df7-79fb-b466-fa907fa17f91', name: 'Ada', email: 'ada@example.com', createdAt: '2026-09-02T00:00:00Z', authVersion: 3, roles: [usersRole] }
+    const replaceUserRoles = vi.fn().mockResolvedValue({ user: { ...userRecord, roles: [rolesRole], authVersion: 4 } })
+    const api = mockApi({
+      getUsers: vi.fn().mockResolvedValue({ users: [userRecord] }),
+      getRoles: vi.fn().mockResolvedValue({ roles: [usersRole, rolesRole], permissions: permissionDefinitions }),
+      getInvitations: vi.fn().mockResolvedValue({ invitations: [] }),
+      replaceUserRoles,
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<UsersPage api={api} canManage />)
+    await screen.findByText('Ada')
+    await user.click(screen.getByRole('button', { name: 'Assign roles' }))
+    const dialog = screen.getByRole('dialog', { name: 'Assign roles' })
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Roles reader' }))
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Users reader' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Save assignments' }))
+    await waitFor(() => expect(replaceUserRoles).toHaveBeenCalledWith(userRecord.id, { roleIds: [rolesRole.id], authVersion: 3 }))
   })
 })

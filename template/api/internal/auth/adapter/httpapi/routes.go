@@ -42,6 +42,11 @@ type AccessService interface {
 	RevokeInvitation(context.Context, string, string) error
 }
 
+type QueryableAccessService interface {
+	UsersWithOptions(context.Context, string, application.AccessListOptions) (application.UserPage, error)
+	InvitationsWithOptions(context.Context, string, application.AccessListOptions) (application.InvitationPage, error)
+}
+
 type InvitationAcceptanceService interface {
 	Complete(context.Context, string, string) error
 }
@@ -489,18 +494,44 @@ func parsePageQuery(r *http.Request) (string, int, error) {
 	return cursor, limit, nil
 }
 
+func parseAccessListQuery(r *http.Request) application.AccessListOptions {
+	query := r.URL.Query()
+	limit := 25
+	if raw := query.Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			limit = -1
+		} else {
+			limit = parsed
+		}
+	}
+	return application.AccessListOptions{
+		Cursor:    query.Get("cursor"),
+		Query:     query.Get("q"),
+		Sort:      query.Get("sort"),
+		Direction: query.Get("direction"),
+		Limit:     limit,
+	}
+}
+
 func (h *Handler) users(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.currentPrincipal(r)
 	if err != nil {
 		writeApplicationError(w, err)
 		return
 	}
-	cursor, limit, err := parsePageQuery(r)
-	if err != nil {
-		writeApplicationError(w, err)
-		return
+	options := parseAccessListQuery(r)
+	var page application.UserPage
+	if queryable, ok := h.access.(QueryableAccessService); ok {
+		page, err = queryable.UsersWithOptions(r.Context(), principal.User.ID, options)
+	} else {
+		cursor, limit, parseErr := parsePageQuery(r)
+		if parseErr != nil {
+			writeApplicationError(w, parseErr)
+			return
+		}
+		page, err = h.access.Users(r.Context(), principal.User.ID, cursor, limit)
 	}
-	page, err := h.access.Users(r.Context(), principal.User.ID, cursor, limit)
 	if err != nil {
 		writeApplicationError(w, err)
 		return
@@ -555,12 +586,18 @@ func (h *Handler) invitations(w http.ResponseWriter, r *http.Request) {
 		writeApplicationError(w, err)
 		return
 	}
-	cursor, limit, err := parsePageQuery(r)
-	if err != nil {
-		writeApplicationError(w, err)
-		return
+	options := parseAccessListQuery(r)
+	var page application.InvitationPage
+	if queryable, ok := h.access.(QueryableAccessService); ok {
+		page, err = queryable.InvitationsWithOptions(r.Context(), principal.User.ID, options)
+	} else {
+		cursor, limit, parseErr := parsePageQuery(r)
+		if parseErr != nil {
+			writeApplicationError(w, parseErr)
+			return
+		}
+		page, err = h.access.Invitations(r.Context(), principal.User.ID, cursor, limit)
 	}
-	page, err := h.access.Invitations(r.Context(), principal.User.ID, cursor, limit)
 	if err != nil {
 		writeApplicationError(w, err)
 		return

@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -327,20 +329,49 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 }
 
 func (s *Store) ListUsers(ctx context.Context, cursor string, limit int) (application.UserPage, error) {
-	if limit <= 0 {
-		limit = 25
+	return s.listUsersWithOptions(ctx, application.AccessListOptions{Cursor: cursor, Limit: limit, Sort: "createdAt", Direction: "desc"}, true)
+}
+
+func (s *Store) ListUsersWithOptions(ctx context.Context, options application.AccessListOptions) (application.UserPage, error) {
+	return s.listUsersWithOptions(ctx, options, false)
+}
+
+func (s *Store) listUsersWithOptions(ctx context.Context, options application.AccessListOptions, forceLegacy bool) (application.UserPage, error) {
+	options = storeListOptions(options, false)
+	cursor, legacy, err := storeCursor(options, false)
+	if err != nil {
+		return application.UserPage{}, err
 	}
-	args := []any{}
-	where := ""
-	if cursor != "" {
-		where = "WHERE u.id > $1::uuid"
-		args = append(args, cursor)
+	legacy = legacy || (forceLegacy && (options.Cursor == "" || domain.IsCanonicalUUID(options.Cursor)))
+	args := []any{likePattern(options.Query)}
+	where := []string{"($1 = '' OR lower(u.name) LIKE '%' || $1 || '%' ESCAPE '\\' OR lower(u.email) LIKE '%' || $1 || '%' ESCAPE '\\')"}
+	if cursor.ID != "" {
+		if legacy {
+			args = append(args, cursor.ID)
+			where = append(where, "u.id > $"+strconv.Itoa(len(args))+"::uuid")
+		} else {
+			boundary, boundaryArgs, boundaryErr := cursorBoundary("u", cursor, options.Sort, options.Direction, len(args))
+			if boundaryErr != nil {
+				return application.UserPage{}, boundaryErr
+			}
+			where = append(where, boundary)
+			args = append(args, boundaryArgs...)
+		}
 	}
-	args = append(args, limit+1)
-	rows, err := s.db.QueryContext(ctx, `
+	args = append(args, options.Limit+1)
+	order := accessOrder("u", options.Sort, options.Direction)
+	if legacy {
+		// UUID cursors were issued by the previous ID-ascending endpoint. Keep
+		// that sequence self-consistent for clients finishing an old page.
+		order = "u.id ASC"
+	}
+	query := fmt.Sprintf(`
 		WITH selected_users AS (
-			SELECT u.id, u.name, u.email, u.created_at, u.auth_version
-			FROM auth_users AS u `+where+` ORDER BY u.id LIMIT $`+itoa(len(args))+`
+			SELECT u.id, u.name, u.email, u.email_canonical, u.created_at, u.auth_version
+			FROM auth_users AS u
+			WHERE %s
+			ORDER BY %s
+			LIMIT $%d
 		)
 		SELECT u.id::text, u.name, u.email, u.created_at, u.auth_version,
 		       COALESCE(r.id::text, ''), COALESCE(r.system_key, ''), COALESCE(r.name, ''), COALESCE(r.description, ''), COALESCE(r.revision, 0),
@@ -349,7 +380,30 @@ func (s *Store) ListUsers(ctx context.Context, cursor string, limit int) (applic
 		LEFT JOIN auth_user_roles AS ur ON ur.user_id = u.id
 		LEFT JOIN auth_roles AS r ON r.id = ur.role_id
 		LEFT JOIN auth_role_permissions AS rp ON rp.role_id = r.id
-		ORDER BY u.id, (r.system_key IS NULL), r.name_canonical, r.id, rp.permission_key`, args...)
+		ORDER BY %s, (r.system_key IS NULL), r.name_canonical, r.id, rp.permission_key`, strings.Join(where, " AND "), order, len(args), order)
+	page, err := scanUsers(ctx, s.db, query, args...)
+	if err != nil {
+		return application.UserPage{}, err
+	}
+	if len(page.Items) > options.Limit {
+		last := page.Items[options.Limit-1]
+		if legacy {
+			page.NextCursor = last.User.ID
+		} else {
+			page.NextCursor, err = encodeUserCursor(last, options)
+			if err != nil {
+				return application.UserPage{}, err
+			}
+		}
+		page.Items = page.Items[:options.Limit]
+	}
+	return page, nil
+}
+
+func scanUsers(ctx context.Context, db interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, query string, args ...any) (application.UserPage, error) {
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return application.UserPage{}, err
 	}
@@ -387,43 +441,7 @@ func (s *Store) ListUsers(ctx context.Context, cursor string, limit int) (applic
 	for _, id := range order {
 		page.Items = append(page.Items, *users[id])
 	}
-	if len(page.Items) > limit {
-		page.NextCursor = page.Items[limit-1].User.ID
-		page.Items = page.Items[:limit]
-	}
 	return page, nil
-}
-
-// itoa is kept local to avoid pulling a formatting dependency into SQL paths.
-func itoa(value int) string {
-	if value == 1 {
-		return "1"
-	}
-	if value == 2 {
-		return "2"
-	}
-	if value == 3 {
-		return "3"
-	}
-	if value == 4 {
-		return "4"
-	}
-	if value == 5 {
-		return "5"
-	}
-	if value == 6 {
-		return "6"
-	}
-	if value == 7 {
-		return "7"
-	}
-	if value == 8 {
-		return "8"
-	}
-	if value == 9 {
-		return "9"
-	}
-	return "10"
 }
 
 func (s *Store) ReplaceUserRoles(ctx context.Context, userID string, authVersion int64, roleIDs []string) (domain.AccessUser, error) {
@@ -640,20 +658,49 @@ func lockRoles(ctx context.Context, tx *sql.Tx, roleIDs []string) error {
 }
 
 func (s *Store) ListInvitations(ctx context.Context, cursor string, limit int) (application.InvitationPage, error) {
-	if limit <= 0 {
-		limit = 25
+	return s.listInvitationsWithOptions(ctx, application.AccessListOptions{Cursor: cursor, Limit: limit, Sort: "createdAt", Direction: "desc"}, true)
+}
+
+func (s *Store) ListInvitationsWithOptions(ctx context.Context, options application.AccessListOptions) (application.InvitationPage, error) {
+	return s.listInvitationsWithOptions(ctx, options, false)
+}
+
+func (s *Store) listInvitationsWithOptions(ctx context.Context, options application.AccessListOptions, forceLegacy bool) (application.InvitationPage, error) {
+	options = storeListOptions(options, true)
+	cursor, legacy, err := storeCursor(options, true)
+	if err != nil {
+		return application.InvitationPage{}, err
 	}
-	args := []any{}
-	where := ""
-	if cursor != "" {
-		where = "WHERE i.id > $1::uuid"
-		args = append(args, cursor)
+	legacy = legacy || (forceLegacy && (options.Cursor == "" || domain.IsCanonicalUUID(options.Cursor)))
+	args := []any{likePattern(options.Query)}
+	where := []string{"($1 = '' OR lower(i.name) LIKE '%' || $1 || '%' ESCAPE '\\' OR lower(i.email) LIKE '%' || $1 || '%' ESCAPE '\\')"}
+	if cursor.ID != "" {
+		if legacy {
+			args = append(args, cursor.ID)
+			where = append(where, "i.id > $"+strconv.Itoa(len(args))+"::uuid")
+		} else {
+			boundary, boundaryArgs, boundaryErr := cursorBoundary("i", cursor, options.Sort, options.Direction, len(args))
+			if boundaryErr != nil {
+				return application.InvitationPage{}, boundaryErr
+			}
+			where = append(where, boundary)
+			args = append(args, boundaryArgs...)
+		}
 	}
-	args = append(args, limit+1)
-	rows, err := s.db.QueryContext(ctx, `
+	args = append(args, options.Limit+1)
+	order := accessOrder("i", options.Sort, options.Direction)
+	if legacy {
+		// UUID cursors were issued by the previous ID-ascending endpoint. Keep
+		// that sequence self-consistent for clients finishing an old page.
+		order = "i.id ASC"
+	}
+	query := fmt.Sprintf(`
 		WITH selected_invitations AS (
-			SELECT i.id, i.name, i.email, i.locale, i.expires_at, i.created_at, i.revision, i.created_by
-			FROM auth_user_invitations AS i `+where+` ORDER BY i.id LIMIT $`+itoa(len(args))+`
+			SELECT i.id, i.name, i.email, i.email_canonical, i.locale, i.expires_at, i.created_at, i.revision, i.created_by
+			FROM auth_user_invitations AS i
+			WHERE %s
+			ORDER BY %s
+			LIMIT $%d
 		)
 		SELECT i.id::text, i.name, i.email, i.locale, i.expires_at, i.created_at, i.revision, i.created_by::text,
 		       COALESCE(r.id::text, ''), COALESCE(r.system_key, ''), COALESCE(r.name, ''), COALESCE(r.description, ''), COALESCE(r.revision, 0),
@@ -662,7 +709,30 @@ func (s *Store) ListInvitations(ctx context.Context, cursor string, limit int) (
 		LEFT JOIN auth_invitation_roles AS ir ON ir.invitation_id = i.id
 		LEFT JOIN auth_roles AS r ON r.id = ir.role_id
 		LEFT JOIN auth_role_permissions AS rp ON rp.role_id = r.id
-		ORDER BY i.id, (r.system_key IS NULL), r.name_canonical, r.id, rp.permission_key`, args...)
+		ORDER BY %s, (r.system_key IS NULL), r.name_canonical, r.id, rp.permission_key`, strings.Join(where, " AND "), order, len(args), order)
+	page, err := scanInvitations(ctx, s.db, query, args...)
+	if err != nil {
+		return application.InvitationPage{}, err
+	}
+	if len(page.Items) > options.Limit {
+		last := page.Items[options.Limit-1]
+		if legacy {
+			page.NextCursor = last.ID
+		} else {
+			page.NextCursor, err = encodeInvitationCursor(last, options)
+			if err != nil {
+				return application.InvitationPage{}, err
+			}
+		}
+		page.Items = page.Items[:options.Limit]
+	}
+	return page, nil
+}
+
+func scanInvitations(ctx context.Context, db interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, query string, args ...any) (application.InvitationPage, error) {
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return application.InvitationPage{}, err
 	}
@@ -700,11 +770,126 @@ func (s *Store) ListInvitations(ctx context.Context, cursor string, limit int) (
 	for _, id := range order {
 		page.Items = append(page.Items, *invitations[id])
 	}
-	if len(page.Items) > limit {
-		page.NextCursor = page.Items[limit-1].ID
-		page.Items = page.Items[:limit]
-	}
 	return page, nil
+}
+
+func storeListOptions(options application.AccessListOptions, invitations bool) application.AccessListOptions {
+	options.Query = strings.TrimSpace(options.Query)
+	if options.Limit <= 0 {
+		options.Limit = application.DefaultAccessPageSize
+	}
+	if options.Sort == "" {
+		options.Sort = "createdAt"
+	}
+	if options.Direction != "asc" && options.Direction != "desc" {
+		options.Direction = "desc"
+	}
+	if !invitations && options.Sort == "expiresAt" {
+		options.Sort = "createdAt"
+	}
+	if options.Sort != "name" && options.Sort != "email" && options.Sort != "createdAt" && options.Sort != "expiresAt" {
+		options.Sort = "createdAt"
+	}
+	return options
+}
+
+func storeCursor(options application.AccessListOptions, invitations bool) (application.AccessCursor, bool, error) {
+	if options.Cursor == "" {
+		return application.AccessCursor{}, false, nil
+	}
+	if domain.IsCanonicalUUID(options.Cursor) {
+		if options.Query != "" || options.Sort != "createdAt" || options.Direction != "desc" {
+			return application.AccessCursor{}, false, application.ErrInvalidCursor
+		}
+		return application.AccessCursor{Version: 1, ID: options.Cursor, Query: options.Query, Sort: options.Sort, Direction: options.Direction}, true, nil
+	}
+	cursor, err := application.DecodeAccessCursor(options.Cursor)
+	if err != nil || cursor.Query != options.Query || cursor.Sort != options.Sort || cursor.Direction != options.Direction {
+		return application.AccessCursor{}, false, application.ErrInvalidCursor
+	}
+	if !invitations && cursor.Sort == "expiresAt" {
+		return application.AccessCursor{}, false, application.ErrInvalidCursor
+	}
+	return cursor, false, nil
+}
+
+func accessOrder(alias, sortKey, direction string) string {
+	expression := "created_at"
+	switch sortKey {
+	case "name":
+		expression = "lower(" + alias + ".name)"
+	case "email":
+		expression = alias + ".email_canonical"
+	case "expiresAt":
+		expression = alias + ".expires_at"
+	default:
+		expression = alias + ".created_at"
+	}
+	if direction != "asc" {
+		direction = "desc"
+	}
+	return expression + " " + direction + ", " + alias + ".id " + direction
+}
+
+func cursorBoundary(alias string, cursor application.AccessCursor, sortKey, direction string, argumentOffset int) (string, []any, error) {
+	expression := ""
+	value := any(cursor.Value)
+	switch sortKey {
+	case "name":
+		expression = "lower(" + alias + ".name)"
+	case "email":
+		expression = alias + ".email_canonical"
+	case "createdAt":
+		expression = alias + ".created_at"
+	case "expiresAt":
+		expression = alias + ".expires_at"
+		parsed, err := time.Parse(time.RFC3339Nano, cursor.Value)
+		if err != nil {
+			return "", nil, application.ErrInvalidCursor
+		}
+		value = parsed
+	default:
+		return "", nil, application.ErrInvalidCursor
+	}
+	operator := "<"
+	if direction == "asc" {
+		operator = ">"
+	}
+	valuePlaceholder := "$" + strconv.Itoa(argumentOffset+1)
+	idPlaceholder := "$" + strconv.Itoa(argumentOffset+2)
+	return fmt.Sprintf("(%s %s %s OR (%s = %s AND %s %s %s::uuid))", expression, operator, valuePlaceholder, expression, valuePlaceholder, alias+".id", operator, idPlaceholder), []any{value, cursor.ID}, nil
+}
+
+func likePattern(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(value))
+}
+
+func encodeUserCursor(user domain.AccessUser, options application.AccessListOptions) (string, error) {
+	value := ""
+	switch options.Sort {
+	case "name":
+		value = strings.ToLower(user.User.Name)
+	case "email":
+		value = strings.ToLower(user.User.Email)
+	default:
+		value = user.User.CreatedAt.Format(time.RFC3339Nano)
+	}
+	return application.EncodeAccessCursor(application.AccessCursor{Version: 1, Query: options.Query, Sort: options.Sort, Direction: options.Direction, Value: value, ID: user.User.ID})
+}
+
+func encodeInvitationCursor(invitation domain.Invitation, options application.AccessListOptions) (string, error) {
+	value := ""
+	switch options.Sort {
+	case "name":
+		value = strings.ToLower(invitation.Name)
+	case "email":
+		value = strings.ToLower(invitation.Email)
+	case "expiresAt":
+		value = invitation.ExpiresAt.Format(time.RFC3339Nano)
+	default:
+		value = invitation.CreatedAt.Format(time.RFC3339Nano)
+	}
+	return application.EncodeAccessCursor(application.AccessCursor{Version: 1, Query: options.Query, Sort: options.Sort, Direction: options.Direction, Value: value, ID: invitation.ID})
 }
 
 func (s *Store) populateInvitationRoles(ctx context.Context, invitation domain.Invitation) (domain.Invitation, error) {

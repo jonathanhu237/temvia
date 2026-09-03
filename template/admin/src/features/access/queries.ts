@@ -3,8 +3,9 @@ import { ApiProtocolError, type ApiClient } from '@/shared/api/client'
 
 export const rolesQueryKey = ['access', 'roles'] as const
 export const roleQueryKey = (id: string) => ['access', 'roles', id] as const
-export const usersQueryKey = (cursor = '') => ['access', 'users', cursor] as const
-export const invitationsQueryKey = (cursor = '') => ['access', 'invitations', cursor] as const
+export type AccessListOptions = { cursor?: string; q?: string; sort?: string; direction?: 'asc' | 'desc' }
+export const usersQueryKey = (options: AccessListOptions = {}) => ['access', 'users', options.cursor ?? '', options.q ?? '', options.sort ?? '', options.direction ?? ''] as const
+export const invitationsQueryKey = (options: AccessListOptions = {}) => ['access', 'invitations', options.cursor ?? '', options.q ?? '', options.sort ?? '', options.direction ?? ''] as const
 
 const missingMethod = () => Promise.reject(new ApiProtocolError('This API client does not expose access management.'))
 
@@ -25,18 +26,18 @@ export function roleOptions(api: ApiClient, id: string) {
   })
 }
 
-export function usersOptions(api: ApiClient, cursor = '') {
+export function usersOptions(api: ApiClient, options: AccessListOptions = {}) {
   return queryOptions({
-    queryKey: usersQueryKey(cursor),
-    queryFn: ({ signal }) => api.getUsers ? api.getUsers({ cursor: cursor || undefined }, signal) : missingMethod(),
+    queryKey: usersQueryKey(options),
+    queryFn: ({ signal }) => api.getUsers ? api.getUsers({ cursor: options.cursor || undefined, q: options.q || undefined, sort: options.sort, direction: options.direction }, signal) : missingMethod(),
     retry: false,
   })
 }
 
-export function invitationsOptions(api: ApiClient, cursor = '') {
+export function invitationsOptions(api: ApiClient, options: AccessListOptions = {}) {
   return queryOptions({
-    queryKey: invitationsQueryKey(cursor),
-    queryFn: ({ signal }) => api.getInvitations ? api.getInvitations({ cursor: cursor || undefined }, signal) : missingMethod(),
+    queryKey: invitationsQueryKey(options),
+    queryFn: ({ signal }) => api.getInvitations ? api.getInvitations({ cursor: options.cursor || undefined, q: options.q || undefined, sort: options.sort, direction: options.direction }, signal) : missingMethod(),
     retry: false,
   })
 }
