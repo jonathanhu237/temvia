@@ -1,12 +1,18 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { AuthPage } from './auth-page'
 import { i18n, initializeI18n } from '@/shared/i18n'
+import { ThemeProvider } from '@/shared/theme'
 
 describe('authentication page shell', () => {
   beforeEach(async () => {
     await initializeI18n()
     await i18n.changeLanguage('en')
+    window.localStorage.removeItem('temvia.theme')
+    document.documentElement.className = ''
+    document.documentElement.removeAttribute('data-theme')
+    document.documentElement.style.colorScheme = ''
   })
 
   it('keeps the normal auth surface to one title and a header language menu', () => {
@@ -32,5 +38,23 @@ describe('authentication page shell', () => {
 
     expect(screen.getByText('Additional context.')).toBeVisible()
     expect(screen.getByText('Page content')).toBeVisible()
+  })
+
+  it('applies a selected theme from the authentication preferences menu', async () => {
+    const user = userEvent.setup()
+    render(
+      <ThemeProvider>
+        <AuthPage title="Sign in">
+          <form />
+        </AuthPage>
+      </ThemeProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Language' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Appearance settings' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Dark' }))
+
+    expect(document.documentElement).toHaveClass('dark')
+    expect(window.localStorage.getItem('temvia.theme')).toBe('dark')
   })
 })

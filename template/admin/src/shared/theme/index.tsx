@@ -75,6 +75,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       if (event.key !== THEME_STORAGE_KEY) return
       const next = isTheme(event.newValue) ? event.newValue : 'system'
       setThemeState(next)
+      applyTheme(next)
     }
     const addMediaListener = media ? media.addEventListener?.bind(media) ?? media.addListener?.bind(media) : undefined
     const removeMediaListener = media ? media.removeEventListener?.bind(media) ?? media.removeListener?.bind(media) : undefined
@@ -91,6 +92,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     resolvedTheme: theme === 'system' ? systemResolvedTheme : theme,
     setTheme: (next) => {
       if (next === 'system') setSystemResolvedTheme(systemTheme())
+      applyTheme(next)
       setThemeState(next)
     },
   }), [systemResolvedTheme, theme])

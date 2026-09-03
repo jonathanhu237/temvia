@@ -4,10 +4,11 @@ import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { changeLocale } from '@/shared/i18n'
@@ -21,19 +22,25 @@ export function PreferencesMenuItems() {
 
   return (
     <>
-      <DropdownMenuSeparator />
-      <DropdownMenuLabel>{t('appearance')}</DropdownMenuLabel>
-      <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setTheme(value as Theme)}>
-        <DropdownMenuRadioItem value="system">{t('system')}</DropdownMenuRadioItem>
-        <DropdownMenuRadioItem value="light">{t('light')}</DropdownMenuRadioItem>
-        <DropdownMenuRadioItem value="dark">{t('dark')}</DropdownMenuRadioItem>
-      </DropdownMenuRadioGroup>
-      <DropdownMenuSeparator />
-      <DropdownMenuLabel>{t('language')}</DropdownMenuLabel>
-      <DropdownMenuRadioGroup value={locale} onValueChange={(value) => void changeLocale(value as Locale)}>
-        <DropdownMenuRadioItem value="zh-CN">{t('chinese')}</DropdownMenuRadioItem>
-        <DropdownMenuRadioItem value="en">{t('english')}</DropdownMenuRadioItem>
-      </DropdownMenuRadioGroup>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>{t('appearanceSettings')}</DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setTheme(value as Theme)}>
+            <DropdownMenuRadioItem value="system">{t('system')}</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="light">{t('light')}</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="dark">{t('dark')}</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>{t('languageSettings')}</DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <DropdownMenuRadioGroup value={locale} onValueChange={(value) => void changeLocale(value as Locale)}>
+            <DropdownMenuRadioItem value="zh-CN">{t('chinese')}</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="en">{t('english')}</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
     </>
   )
 }
