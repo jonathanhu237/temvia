@@ -28,6 +28,7 @@ describe('authentication page shell', () => {
     expect(screen.getByRole('button', { name: 'Language settings' })).toHaveClass('max-sm:size-11', 'max-sm:shrink-0')
     expect(screen.getByRole('button', { name: 'Appearance settings' })).toHaveClass('h-10', 'w-10')
     expect(screen.getByRole('button', { name: 'Language settings' })).toHaveClass('h-10', 'w-10')
+    expect(screen.getByRole('button', { name: 'Appearance settings' }).parentElement).toHaveClass('gap-2')
     expect(screen.queryByText('Appearance')).not.toBeInTheDocument()
     expect(screen.queryByText('English')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Language' })).not.toBeInTheDocument()
