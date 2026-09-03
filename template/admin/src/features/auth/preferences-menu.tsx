@@ -13,11 +13,10 @@ import { changeLocale } from '@/shared/i18n'
 import type { Locale } from '@/shared/i18n/resources'
 import { useOptionalTheme, type Theme } from '@/shared/theme'
 
-const preferenceButtonClassName = 'max-sm:size-11 max-sm:shrink-0 max-sm:px-0'
+const preferenceButtonClassName = 'max-sm:size-11 max-sm:shrink-0'
 
 function PreferenceMenu({
   ariaLabel,
-  buttonLabel,
   className,
   icon: Icon,
   onValueChange,
@@ -25,7 +24,6 @@ function PreferenceMenu({
   value,
 }: {
   ariaLabel: string
-  buttonLabel: string
   className?: string
   icon: LucideIcon
   onValueChange: (value: string) => void
@@ -37,13 +35,12 @@ function PreferenceMenu({
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          size="sm"
+          size="icon"
           className={cn(preferenceButtonClassName, className)}
           aria-label={ariaLabel}
           title={ariaLabel}
         >
           <Icon aria-hidden="true" data-icon="inline-start" />
-          <span className="hidden sm:inline">{buttonLabel}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
@@ -66,7 +63,6 @@ export function AppearanceMenu({ className }: { className?: string }) {
   return (
     <PreferenceMenu
       ariaLabel={t('appearanceSettings')}
-      buttonLabel={t('appearance')}
       className={className}
       icon={SunMoon}
       onValueChange={(value) => setTheme(value as Theme)}
@@ -87,7 +83,6 @@ export function LanguageMenu({ className }: { className?: string }) {
   return (
     <PreferenceMenu
       ariaLabel={t('languageSettings')}
-      buttonLabel={locale === 'zh-CN' ? t('chinese') : t('english')}
       className={className}
       icon={Globe2}
       onValueChange={(value) => void changeLocale(value as Locale)}
