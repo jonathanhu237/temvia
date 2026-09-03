@@ -1,4 +1,4 @@
-import { Globe2 } from 'lucide-react'
+import { Globe2, Languages, SunMoon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,11 +19,19 @@ export function PreferencesMenuItems() {
   const { t, i18n } = useTranslation('common')
   const { theme, setTheme } = useOptionalTheme()
   const locale: Locale = i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
+  const themeLabel = theme === 'system' ? t('system') : theme === 'light' ? t('light') : t('dark')
+  const localeLabel = locale === 'zh-CN' ? t('chinese') : t('english')
 
   return (
     <>
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger>{t('appearanceSettings')}</DropdownMenuSubTrigger>
+        <DropdownMenuSubTrigger className="min-h-14 gap-3 px-3 py-2">
+          <SunMoon aria-hidden="true" className="text-muted-foreground" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium leading-5">{t('appearanceSettings')}</span>
+            <span className="block text-xs font-normal leading-4 text-muted-foreground">{themeLabel}</span>
+          </span>
+        </DropdownMenuSubTrigger>
         <DropdownMenuSubContent>
           <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setTheme(value as Theme)}>
             <DropdownMenuRadioItem value="system">{t('system')}</DropdownMenuRadioItem>
@@ -33,7 +41,13 @@ export function PreferencesMenuItems() {
         </DropdownMenuSubContent>
       </DropdownMenuSub>
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger>{t('languageSettings')}</DropdownMenuSubTrigger>
+        <DropdownMenuSubTrigger className="min-h-14 gap-3 px-3 py-2">
+          <Languages aria-hidden="true" className="text-muted-foreground" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium leading-5">{t('languageSettings')}</span>
+            <span className="block text-xs font-normal leading-4 text-muted-foreground">{localeLabel}</span>
+          </span>
+        </DropdownMenuSubTrigger>
         <DropdownMenuSubContent>
           <DropdownMenuRadioGroup value={locale} onValueChange={(value) => void changeLocale(value as Locale)}>
             <DropdownMenuRadioItem value="zh-CN">{t('chinese')}</DropdownMenuRadioItem>
@@ -62,7 +76,7 @@ export function PreferencesMenu() {
           <span className="hidden sm:inline">{locale === 'zh-CN' ? t('chinese') : t('english')}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="w-64">
         <PreferencesMenuItems />
       </DropdownMenuContent>
     </DropdownMenu>

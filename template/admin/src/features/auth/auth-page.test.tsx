@@ -51,7 +51,9 @@ describe('authentication page shell', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Language' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Appearance settings' }))
+    expect(screen.getByRole('menuitem', { name: /Appearance settings.*Follow system/ })).toBeVisible()
+    expect(screen.getByRole('menuitem', { name: /Language settings.*English/ })).toBeVisible()
+    await user.click(screen.getByRole('menuitem', { name: /Appearance settings/ }))
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Dark' }))
 
     expect(document.documentElement).toHaveClass('dark')

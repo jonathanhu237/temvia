@@ -100,7 +100,7 @@ async function signIn(page: Page, userEmail: string, userPassword: string, origi
 }
 
 async function selectPreference(page: Page, section: string, option: string): Promise<void> {
-  const sectionItem = page.getByRole('menuitem', { name: section, exact: true })
+  const sectionItem = page.getByRole('menuitem', { name: section })
   await sectionItem.hover()
   const optionItem = page.getByRole('menuitemradio', { name: option, exact: true })
   await expect(optionItem).toBeVisible()
@@ -301,7 +301,7 @@ test.describe('administrator authentication', () => {
     await page.getByRole('menuitem', { name: /退出登录|log out/i }).click()
     await expect(page.getByRole('alert')).toContainText('服务器没有确认会话已经撤销，请重试。')
 
-    const languageSettingsItem = page.getByRole('menuitem', { name: '语言设置', exact: true })
+    const languageSettingsItem = page.getByRole('menuitem', { name: '语言设置' })
     if (!(await languageSettingsItem.isVisible())) {
       await page.getByRole('button', { name: new RegExp(name) }).click()
     }
