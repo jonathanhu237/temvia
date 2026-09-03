@@ -1,10 +1,6 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { PreferencesMenu } from './preferences-menu'
-
-export function LanguageMenu() {
-  return <PreferencesMenu />
-}
+import { PreferencesButtons } from './preferences-menu'
 
 export function AuthPage({
   title,
@@ -25,7 +21,7 @@ export function AuthPage({
             </CardTitle>
             {description && <CardDescription className="mt-3 max-w-[38ch] text-base leading-relaxed">{description}</CardDescription>}
           </div>
-          <LanguageMenu />
+          <PreferencesButtons className="shrink-0" />
         </CardHeader>
         <CardContent>{children}</CardContent>
       </Card>

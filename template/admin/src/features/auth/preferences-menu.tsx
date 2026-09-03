@@ -1,4 +1,4 @@
-import { Globe2, Languages, SunMoon } from 'lucide-react'
+import { Globe2, SunMoon, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
@@ -6,79 +6,105 @@ import {
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { cn } from '@/lib/utils'
 import { changeLocale } from '@/shared/i18n'
 import type { Locale } from '@/shared/i18n/resources'
 import { useOptionalTheme, type Theme } from '@/shared/theme'
 
-export function PreferencesMenuItems() {
-  const { t, i18n } = useTranslation('common')
-  const { theme, setTheme } = useOptionalTheme()
-  const locale: Locale = i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
-  const themeLabel = theme === 'system' ? t('system') : theme === 'light' ? t('light') : t('dark')
-  const localeLabel = locale === 'zh-CN' ? t('chinese') : t('english')
+const preferenceButtonClassName = 'max-sm:size-11 max-sm:shrink-0 max-sm:px-0'
 
-  return (
-    <>
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger className="min-h-14 gap-3 px-3 py-2">
-          <SunMoon aria-hidden="true" className="text-muted-foreground" />
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium leading-5">{t('appearanceSettings')}</span>
-            <span className="block text-xs font-normal leading-4 text-muted-foreground">{themeLabel}</span>
-          </span>
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent>
-          <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setTheme(value as Theme)}>
-            <DropdownMenuRadioItem value="system">{t('system')}</DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="light">{t('light')}</DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="dark">{t('dark')}</DropdownMenuRadioItem>
-          </DropdownMenuRadioGroup>
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger className="min-h-14 gap-3 px-3 py-2">
-          <Languages aria-hidden="true" className="text-muted-foreground" />
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium leading-5">{t('languageSettings')}</span>
-            <span className="block text-xs font-normal leading-4 text-muted-foreground">{localeLabel}</span>
-          </span>
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent>
-          <DropdownMenuRadioGroup value={locale} onValueChange={(value) => void changeLocale(value as Locale)}>
-            <DropdownMenuRadioItem value="zh-CN">{t('chinese')}</DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="en">{t('english')}</DropdownMenuRadioItem>
-          </DropdownMenuRadioGroup>
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
-    </>
-  )
-}
-
-export function PreferencesMenu() {
-  const { t, i18n } = useTranslation('common')
-  const locale: Locale = i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
-
+function PreferenceMenu({
+  ariaLabel,
+  buttonLabel,
+  className,
+  icon: Icon,
+  onValueChange,
+  options,
+  value,
+}: {
+  ariaLabel: string
+  buttonLabel: string
+  className?: string
+  icon: LucideIcon
+  onValueChange: (value: string) => void
+  options: Array<{ value: string; label: string }>
+  value: string
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
           size="sm"
-          className="max-sm:size-11 max-sm:shrink-0 max-sm:px-0"
-          aria-label={t('language')}
+          className={cn(preferenceButtonClassName, className)}
+          aria-label={ariaLabel}
+          title={ariaLabel}
         >
-          <Globe2 aria-hidden="true" data-icon="inline-start" />
-          <span className="hidden sm:inline">{locale === 'zh-CN' ? t('chinese') : t('english')}</span>
+          <Icon aria-hidden="true" data-icon="inline-start" />
+          <span className="hidden sm:inline">{buttonLabel}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
-        <PreferencesMenuItems />
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuRadioGroup value={value} onValueChange={onValueChange}>
+          {options.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value}>
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+export function AppearanceMenu({ className }: { className?: string }) {
+  const { t } = useTranslation('common')
+  const { theme, setTheme } = useOptionalTheme()
+
+  return (
+    <PreferenceMenu
+      ariaLabel={t('appearanceSettings')}
+      buttonLabel={t('appearance')}
+      className={className}
+      icon={SunMoon}
+      onValueChange={(value) => setTheme(value as Theme)}
+      options={[
+        { value: 'system', label: t('system') },
+        { value: 'light', label: t('light') },
+        { value: 'dark', label: t('dark') },
+      ]}
+      value={theme}
+    />
+  )
+}
+
+export function LanguageMenu({ className }: { className?: string }) {
+  const { t, i18n } = useTranslation('common')
+  const locale: Locale = i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
+
+  return (
+    <PreferenceMenu
+      ariaLabel={t('languageSettings')}
+      buttonLabel={locale === 'zh-CN' ? t('chinese') : t('english')}
+      className={className}
+      icon={Globe2}
+      onValueChange={(value) => void changeLocale(value as Locale)}
+      options={[
+        { value: 'zh-CN', label: t('chinese') },
+        { value: 'en', label: t('english') },
+      ]}
+      value={locale}
+    />
+  )
+}
+
+export function PreferencesButtons({ className }: { className?: string }) {
+  return (
+    <div className={cn('flex items-center gap-1', className)}>
+      <AppearanceMenu />
+      <LanguageMenu />
+    </div>
   )
 }

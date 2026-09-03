@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { AuthPage } from './auth-page'
@@ -15,7 +15,7 @@ describe('authentication page shell', () => {
     document.documentElement.style.colorScheme = ''
   })
 
-  it('keeps the normal auth surface to one title and a header language menu', () => {
+  it('exposes separate appearance and language controls in the auth header', () => {
     render(
       <AuthPage title="Create your administrator account">
         <form aria-label="Create administrator" />
@@ -24,8 +24,11 @@ describe('authentication page shell', () => {
 
     expect(screen.getByRole('heading', { name: 'Create your administrator account' })).toBeVisible()
     expect(screen.getAllByRole('heading')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: 'Language' })).toHaveClass('max-sm:size-11', 'max-sm:shrink-0', 'max-sm:px-0')
+    expect(screen.getByRole('button', { name: 'Appearance settings' })).toHaveClass('max-sm:size-11', 'max-sm:shrink-0', 'max-sm:px-0')
+    expect(screen.getByRole('button', { name: 'Language settings' })).toHaveClass('max-sm:size-11', 'max-sm:shrink-0', 'max-sm:px-0')
+    expect(screen.getByText('Appearance')).toHaveClass('hidden', 'sm:inline')
     expect(screen.getByText('English')).toHaveClass('hidden', 'sm:inline')
+    expect(screen.queryByRole('button', { name: 'Language' })).not.toBeInTheDocument()
     expect(screen.queryByText('Temvia')).not.toBeInTheDocument()
   })
 
@@ -40,7 +43,7 @@ describe('authentication page shell', () => {
     expect(screen.getByText('Page content')).toBeVisible()
   })
 
-  it('applies a selected theme from the authentication preferences menu', async () => {
+  it('opens each authentication preference menu directly and keeps selections independent', async () => {
     const user = userEvent.setup()
     render(
       <ThemeProvider>
@@ -50,13 +53,21 @@ describe('authentication page shell', () => {
       </ThemeProvider>,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Language' }))
-    expect(screen.getByRole('menuitem', { name: /Appearance settings.*Follow system/ })).toBeVisible()
-    expect(screen.getByRole('menuitem', { name: /Language settings.*English/ })).toBeVisible()
-    await user.click(screen.getByRole('menuitem', { name: /Appearance settings/ }))
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Dark' }))
+    await user.click(screen.getByRole('button', { name: 'Appearance settings' }))
+    expect(screen.getByRole('menuitemradio', { name: 'Follow system' })).toBeVisible()
+    expect(screen.getByRole('menuitemradio', { name: 'Light' })).toBeVisible()
+    expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toBeVisible()
+    expect(screen.queryByRole('menuitemradio', { name: 'English' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('menuitemradio', { name: 'Dark' }))
 
     expect(document.documentElement).toHaveClass('dark')
     expect(window.localStorage.getItem('temvia.theme')).toBe('dark')
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Appearance settings' }))
+
+    await user.click(screen.getByRole('button', { name: 'Language settings' }))
+    expect(screen.getByRole('menuitemradio', { name: 'English' })).toBeVisible()
+    expect(screen.getByRole('menuitemradio', { name: '简体中文' })).toBeVisible()
+    expect(screen.queryByRole('menuitemradio', { name: 'Dark' })).not.toBeInTheDocument()
+    expect(document.documentElement).toHaveClass('dark')
   })
 })

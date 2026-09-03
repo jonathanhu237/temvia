@@ -99,9 +99,8 @@ async function signIn(page: Page, userEmail: string, userPassword: string, origi
   await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
 }
 
-async function selectPreference(page: Page, section: string, option: string): Promise<void> {
-  const sectionItem = page.getByRole('menuitem', { name: section })
-  await sectionItem.hover()
+async function selectPreference(page: Page, buttonName: string, option: string): Promise<void> {
+  await page.getByRole('button', { name: buttonName, exact: true }).click()
   const optionItem = page.getByRole('menuitemradio', { name: option, exact: true })
   await expect(optionItem).toBeVisible()
   await optionItem.click()
@@ -175,13 +174,11 @@ test.describe('administrator authentication', () => {
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page.getByRole('alert')).toHaveText('The email or password is incorrect.')
 
-    await page.getByRole('button', { name: 'Language' }).click()
     await selectPreference(page, 'Language settings', '简体中文')
     await expect(page.getByRole('alert')).toHaveText('邮箱或密码不正确。')
     await expect(page.getByLabel('邮箱')).toHaveValue('unknown@example.com')
     await expect(page.getByLabel('密码', { exact: true })).toHaveValue('not-a-real-password')
 
-    await page.getByRole('button', { name: '语言' }).click()
     await selectPreference(page, '语言设置', 'English')
     await expect(page.getByRole('alert')).toHaveText('The email or password is incorrect.')
     expect(setupStatusRequests).toEqual([])
@@ -223,7 +220,8 @@ test.describe('administrator authentication', () => {
     await expect(page.getByRole('heading', { name: /create your administrator account/i })).toBeVisible()
     await expect(page.getByRole('heading')).toHaveCount(1)
     await expect(page.locator('[data-slot="field-description"]')).toHaveCount(0)
-    await expect(page.locator('main > div').getByRole('button', { name: 'Language' })).toBeVisible()
+    await expect(page.locator('main > div').getByRole('button', { name: 'Appearance settings' })).toBeVisible()
+    await expect(page.locator('main > div').getByRole('button', { name: 'Language settings' })).toBeVisible()
     await expectNoA11yViolations(page)
 
     const setupStatusRequestsBeforeReload = setupStatusRequests.length
@@ -255,6 +253,21 @@ test.describe('administrator authentication', () => {
     await expect(page.getByText(new RegExp(`Welcome back, ${name}`))).toBeVisible()
     await expect(page.locator('[data-sidebar="header"]')).toHaveCount(0)
 
+    const header = page.locator('header')
+    const appearanceButton = header.getByRole('button', { name: 'Appearance settings', exact: true })
+    const languageButton = header.getByRole('button', { name: 'Language settings', exact: true })
+    await expect(appearanceButton).toBeVisible()
+    await expect(languageButton).toBeVisible()
+    const appearanceBox = await appearanceButton.boundingBox()
+    const languageBox = await languageButton.boundingBox()
+    expect(appearanceBox).not.toBeNull()
+    expect(languageBox).not.toBeNull()
+    expect(appearanceBox!.x).toBeLessThan(languageBox!.x)
+    await appearanceButton.click()
+    await page.getByRole('menuitemradio', { name: 'Dark', exact: true }).click()
+    await expect(page.locator('html')).toHaveClass(/dark/)
+    await expect(appearanceButton).toBeFocused()
+
     const sidebarBox = await page.locator('[data-sidebar="sidebar"]:visible').first().boundingBox()
     const headingBox = await page.getByRole('heading', { name: 'Home' }).boundingBox()
     expect(sidebarBox).not.toBeNull()
@@ -270,6 +283,9 @@ test.describe('administrator authentication', () => {
     await page.reload()
     await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
     await page.getByRole('button', { name: new RegExp(name) }).click()
+    await expect(page.getByRole('menuitem', { name: /退出登录|log out/i })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: /Appearance settings|Language settings/ })).toHaveCount(0)
+    await page.keyboard.press('Escape')
     await selectPreference(page, 'Language settings', '简体中文')
     await expect(page.getByRole('heading', { name: '主页' })).toBeVisible()
 
@@ -301,10 +317,7 @@ test.describe('administrator authentication', () => {
     await page.getByRole('menuitem', { name: /退出登录|log out/i }).click()
     await expect(page.getByRole('alert')).toContainText('服务器没有确认会话已经撤销，请重试。')
 
-    const languageSettingsItem = page.getByRole('menuitem', { name: '语言设置' })
-    if (!(await languageSettingsItem.isVisible())) {
-      await page.getByRole('button', { name: new RegExp(name) }).click()
-    }
+    await page.keyboard.press('Escape')
     await selectPreference(page, '语言设置', 'English')
     await expect(page.getByRole('alert')).toContainText('The server did not confirm that your session was revoked. Try again.')
     await page.getByRole('button', { name: 'Retry' }).click()

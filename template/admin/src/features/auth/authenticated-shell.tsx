@@ -20,7 +20,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
-import { PreferencesMenuItems } from './preferences-menu'
+import { PreferencesButtons } from './preferences-menu'
 import { translateProblem } from '@/shared/api/problems'
 import type { ApiClient } from '@/shared/api/client'
 import { currentUserQueryKey } from './queries'
@@ -112,7 +112,6 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
                 <p className="truncate text-sm font-medium">{user.name}</p>
                 <p className="truncate text-xs text-muted-foreground">{user.email}</p>
               </DropdownMenuLabel>
-              <PreferencesMenuItems />
               <DropdownMenuSeparator />
               <DropdownMenuItem disabled={logout.isPending} onSelect={(event) => { event.preventDefault(); setLogoutError(undefined); logout.mutate() }}>
                 <LogOut aria-hidden="true" data-icon="inline-start" />
@@ -124,9 +123,12 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
       </Sidebar>
       <SidebarInset>
         <header className="flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <SidebarTrigger aria-label={t('menu')} />
-          <div className="h-4 w-px bg-border" aria-hidden="true" />
-          <p className="text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/roles') ? t('access:roles') : t('home')}</p>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <SidebarTrigger aria-label={t('menu')} />
+            <div className="h-4 w-px bg-border" aria-hidden="true" />
+            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/roles') ? t('access:roles') : t('home')}</p>
+          </div>
+          <PreferencesButtons className="shrink-0" />
         </header>
         <div className="flex min-h-[calc(100dvh-3.5rem)] flex-1 flex-col gap-5 p-4 sm:p-6 lg:p-8">
           {logoutError !== undefined && (
