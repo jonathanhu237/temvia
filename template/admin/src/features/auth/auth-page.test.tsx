@@ -57,6 +57,8 @@ describe('authentication page shell', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Appearance settings' }))
+    expect(document.body).not.toHaveStyle({ overflow: 'hidden' })
+    expect(document.body).not.toHaveStyle({ pointerEvents: 'none' })
     expect(screen.getByRole('menuitemradio', { name: 'Follow system' })).toBeVisible()
     expect(screen.getByRole('menuitemradio', { name: 'Light' })).toBeVisible()
     expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toBeVisible()

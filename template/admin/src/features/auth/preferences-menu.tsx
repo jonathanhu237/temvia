@@ -31,7 +31,7 @@ function PreferenceMenu({
   value: string
 }) {
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"

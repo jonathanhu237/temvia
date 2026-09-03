@@ -263,7 +263,14 @@ test.describe('administrator authentication', () => {
     expect(appearanceBox).not.toBeNull()
     expect(languageBox).not.toBeNull()
     expect(appearanceBox!.x).toBeLessThan(languageBox!.x)
+    const viewportWidthBeforeMenu = await page.evaluate(() => document.documentElement.clientWidth)
     await appearanceButton.click()
+    const menuScrollState = await page.evaluate(() => ({
+      bodyOverflow: getComputedStyle(document.body).overflow,
+      clientWidth: document.documentElement.clientWidth,
+    }))
+    expect(menuScrollState.bodyOverflow).not.toBe('hidden')
+    expect(menuScrollState.clientWidth).toBe(viewportWidthBeforeMenu)
     await page.getByRole('menuitemradio', { name: 'Dark', exact: true }).click()
     await expect(page.locator('html')).toHaveClass(/dark/)
     await expect(appearanceButton).toBeFocused()
