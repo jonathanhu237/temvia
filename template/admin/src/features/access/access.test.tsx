@@ -4,10 +4,11 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RolesPage } from './roles-page'
 import { UsersPage } from './users-page'
+import { InvitationsPage } from './invitations-page'
 import { AccessError } from './access-error'
 import { clearAccessDrafts } from './drafts'
 import { ApiProblemError, ApiTransportError, type ApiClient } from '@/shared/api/client'
-import type { Permission, Role } from '@/shared/api/contracts'
+import type { Invitation, Permission, Role } from '@/shared/api/contracts'
 import { i18n, initializeI18n } from '@/shared/i18n'
 
 const usersRole: Role = {
@@ -42,6 +43,23 @@ const permissionDefinitions: Permission[] = [
   { key: 'users.read', resource: 'users', action: 'read', labelKey: 'permissions.users.read', description: 'View users' },
   { key: 'roles.read', resource: 'roles', action: 'read', labelKey: 'permissions.roles.read', description: 'View roles' },
 ]
+
+const invitationPermissionDefinitions: Permission[] = [
+  ...permissionDefinitions,
+  { key: 'invitations.read', resource: 'invitations', action: 'read', labelKey: 'permissions.invitations.read', description: 'View invitations', dependencies: ['users.read'] },
+  { key: 'invitations.manage', resource: 'invitations', action: 'manage', labelKey: 'permissions.invitations.manage', description: 'Manage invitations', dependencies: ['invitations.read', 'roles.read'] },
+]
+
+const pendingInvitation: Invitation = {
+  id: '019535d9-3df7-79fb-b466-fa907fa17f97',
+  name: 'Lin',
+  email: 'lin@example.com',
+  locale: 'zh-CN',
+  roles: [usersRole],
+  expiresAt: '2099-01-02T00:00:00Z',
+  createdAt: '2026-09-03T00:00:00Z',
+  revision: 1,
+}
 
 function mockApi(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
@@ -78,7 +96,7 @@ describe('access components', () => {
     })
     renderWithQueryClient(<RolesPage api={api} canManage />)
 
-    await screen.findByRole('heading', { name: 'Roles and permissions' })
+    await screen.findByRole('heading', { name: 'Role management' })
     await userEvent.setup().click(screen.getByRole('button', { name: 'Create role' }))
 
     const dialog = await screen.findByRole('dialog', { name: 'Create role' })
@@ -117,6 +135,102 @@ describe('access components', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
+  it('keeps invitations on their own page and confirms the original mail language', async () => {
+    const resendInvitation = vi.fn().mockResolvedValue({ invitation: pendingInvitation })
+    const api = mockApi({
+      getInvitations: vi.fn().mockResolvedValue({ invitations: [pendingInvitation] }),
+      getRoles: vi.fn().mockResolvedValue({ roles: [usersRole], permissions: permissionDefinitions }),
+      resendInvitation,
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<InvitationsPage api={api} canManage actorSuperAdmin />)
+
+    const table = await screen.findByRole('table')
+    expect(within(table).getByText('Lin')).toBeVisible()
+    expect(within(table).getByText('Pending')).toBeVisible()
+    expect(within(table).getByText(/Expires Jan 2, 2099/)).toBeVisible()
+    expect(within(table).queryByRole('columnheader', { name: 'Email language' })).not.toBeInTheDocument()
+
+    await user.click(within(table).getByRole('button', { name: 'Resend' }))
+    const confirmation = await screen.findByRole('alertdialog')
+    expect(confirmation).toHaveTextContent('简体中文')
+    expect(confirmation).toHaveTextContent('previous link will stop working')
+    await user.click(within(confirmation).getByRole('button', { name: 'Resend' }))
+    await waitFor(() => expect(resendInvitation).toHaveBeenCalledWith(pendingInvitation.id))
+  })
+
+  it('shows role details without type labels and localizes permissions', async () => {
+    const api = mockApi({
+      getRoles: vi.fn().mockResolvedValue({ roles: [systemRole, usersRole], permissions: permissionDefinitions }),
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<RolesPage api={api} canManage={false} />)
+
+    const table = await screen.findByRole('table')
+    expect(within(table).queryByRole('columnheader', { name: 'Type' })).not.toBeInTheDocument()
+    await user.click(within(table).getByRole('button', { name: /Super Admin/ }))
+    const detail = await screen.findByRole('dialog', { name: 'Super Admin' })
+    expect(detail).toHaveTextContent('Built-in role')
+    expect(detail).toHaveTextContent('View users')
+    expect(detail).not.toHaveTextContent('users.read')
+  })
+
+  it('explains why an assigned role cannot be deleted', async () => {
+    const api = mockApi({
+      getRoles: vi.fn().mockResolvedValue({ roles: [usersRole], permissions: permissionDefinitions }),
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<RolesPage api={api} canManage />)
+
+    const row = (await screen.findByText('Users reader')).closest('tr')
+    expect(row).not.toBeNull()
+    await user.click(within(row!).getByRole('button', { name: 'More actions' }))
+    const deleteItem = await screen.findByRole('menuitem', { name: 'Delete' })
+    expect(deleteItem).toHaveAttribute('aria-disabled', 'true')
+    expect(deleteItem).toHaveAttribute('title', 'Reassign all users and invitations before deleting this role.')
+  })
+
+  it('selects and locks transitive permission dependencies in the role editor', async () => {
+    const api = mockApi({
+      getRoles: vi.fn().mockResolvedValue({ roles: [systemRole], permissions: invitationPermissionDefinitions }),
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<RolesPage api={api} canManage />)
+
+    await screen.findByRole('heading', { name: 'Role management' })
+    await user.click(screen.getByRole('button', { name: 'Create role' }))
+    const editor = await screen.findByRole('dialog', { name: 'Create role' })
+    const manage = within(editor).getByRole('checkbox', { name: 'Manage invitations' })
+    await user.click(manage)
+    expect(manage).toBeChecked()
+    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).toBeChecked()
+    expect(within(editor).getByRole('checkbox', { name: 'View users' })).toBeChecked()
+    expect(within(editor).getByRole('checkbox', { name: 'View roles' })).toBeChecked()
+    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).toBeDisabled()
+    expect(within(editor).getByRole('checkbox', { name: 'View users' })).toBeDisabled()
+    expect(within(editor).getByRole('checkbox', { name: 'View roles' })).toBeDisabled()
+
+    await user.click(manage)
+    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).toBeChecked()
+    expect(within(editor).getByRole('checkbox', { name: 'View users' })).toBeChecked()
+    expect(within(editor).getByRole('checkbox', { name: 'View roles' })).toBeChecked()
+    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).not.toBeDisabled()
+  })
+
+  it('disables invitation actions when the selected role exceeds the actor permissions', async () => {
+    const api = mockApi({
+      getInvitations: vi.fn().mockResolvedValue({ invitations: [{ ...pendingInvitation, roles: [systemRole] }] }),
+      getRoles: vi.fn().mockResolvedValue({ roles: [systemRole], permissions: permissionDefinitions }),
+    })
+    renderWithQueryClient(<InvitationsPage api={api} canManage actorPermissions={['invitations.manage', 'invitations.read', 'users.read', 'roles.read']} />)
+
+    const table = await screen.findByRole('table')
+    const resend = within(table).getByRole('button', { name: /Resend: You need higher permissions/ })
+    const revoke = within(table).getByRole('button', { name: /Revoke: You need higher permissions/ })
+    expect(resend).toBeDisabled()
+    expect(revoke).toBeDisabled()
+  })
+
   it('requires explicit invitation role selection instead of defaulting to Super Admin', async () => {
     const api = mockApi({
       getUsers: vi.fn().mockResolvedValue({ users: [{ id: '019535d9-3df7-79fb-b466-fa907fa17f91', name: 'Ada', email: 'ada@example.com', createdAt: '2026-09-02T00:00:00Z', authVersion: 1, roles: [usersRole] }] }),
@@ -124,9 +238,9 @@ describe('access components', () => {
       getInvitations: vi.fn().mockResolvedValue({ invitations: [] }),
     })
     const user = userEvent.setup()
-    renderWithQueryClient(<UsersPage api={api} canManage />)
+    renderWithQueryClient(<InvitationsPage api={api} canManage actorSuperAdmin />)
 
-    await screen.findByText('Ada')
+    await screen.findByRole('heading', { name: 'Invitation management' })
     await user.click(screen.getByRole('button', { name: 'Invite user' }))
     const inviteForm = screen.getByLabelText('Name').closest('form')
     expect(inviteForm).not.toBeNull()
@@ -142,9 +256,9 @@ describe('access components', () => {
       createInvitation: vi.fn(),
     })
     const user = userEvent.setup()
-    renderWithQueryClient(<UsersPage api={api} canManage />)
+    renderWithQueryClient(<InvitationsPage api={api} canManage actorSuperAdmin />)
 
-    await screen.findByText('Ada')
+    await screen.findByRole('heading', { name: 'Invitation management' })
     await user.click(screen.getByRole('button', { name: 'Invite user' }))
     const name = screen.getByLabelText('Name')
     const email = screen.getByLabelText('Email')
@@ -204,8 +318,11 @@ describe('access components', () => {
     const user = userEvent.setup()
     renderWithQueryClient(<RolesPage api={api} canManage />)
 
-    await screen.findByRole('heading', { name: 'Roles and permissions' })
-    await user.click(screen.getByText('Users reader'))
+    await screen.findByRole('heading', { name: 'Role management' })
+    const roleRow = screen.getByText('Users reader').closest('tr')
+    expect(roleRow).not.toBeNull()
+    await user.click(within(roleRow!).getByRole('button', { name: 'More actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit' }))
     await user.click(screen.getByRole('button', { name: 'Save role' }))
     await screen.findByRole('heading', { name: 'This record changed' })
 
@@ -280,7 +397,7 @@ describe('access components', () => {
     const user = userEvent.setup()
     renderWithQueryClient(<RolesPage api={api} canManage />)
 
-    await screen.findByRole('heading', { name: 'Roles and permissions' })
+    await screen.findByRole('heading', { name: 'Role management' })
     await user.click(screen.getByRole('button', { name: 'Create role' }))
     await user.type(screen.getByLabelText('Role name'), 'Auditor')
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
@@ -297,8 +414,11 @@ describe('access components', () => {
     const user = userEvent.setup()
     renderWithQueryClient(<RolesPage api={api} canManage />)
 
-    await screen.findByRole('heading', { name: 'Roles and permissions' })
-    await user.click(screen.getByText('Users reader'))
+    await screen.findByRole('heading', { name: 'Role management' })
+    const roleRow = screen.getByText('Users reader').closest('tr')
+    expect(roleRow).not.toBeNull()
+    await user.click(within(roleRow!).getByRole('button', { name: 'More actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit' }))
     await user.click(screen.getByRole('button', { name: 'Save role' }))
     await waitFor(() => expect(api.replaceRole).toHaveBeenCalledOnce())
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
@@ -318,8 +438,8 @@ describe('access components', () => {
       getInvitations: vi.fn().mockResolvedValue({ invitations: [] }),
     })
     const user = userEvent.setup()
-    renderWithQueryClient(<UsersPage api={api} canManage />)
-    await screen.findByText('Ada')
+    renderWithQueryClient(<InvitationsPage api={api} canManage actorSuperAdmin />)
+    await screen.findByRole('heading', { name: 'Invitation management' })
     await user.click(screen.getByRole('button', { name: 'Invite user' }))
     await user.type(screen.getByLabelText('Name'), 'Lin')
     await user.click(screen.getByRole('button', { name: 'Cancel' }))

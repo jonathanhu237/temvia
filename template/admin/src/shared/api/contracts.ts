@@ -23,7 +23,10 @@ export const permissionSchema = z.object({
   action: z.string(),
   labelKey: z.string(),
   description: z.string(),
+  dependencies: z.array(z.string()).optional(),
 }).strict()
+
+export const roleOptionSchema = z.object({ id: z.string().uuid(), name: z.string() }).strict()
 
 export const roleSchema = z.object({
   id: z.string().uuid(),
@@ -39,6 +42,7 @@ export const roleSchema = z.object({
 
 export type Role = z.infer<typeof roleSchema>
 export type Permission = z.infer<typeof permissionSchema>
+export type RoleOption = z.infer<typeof roleOptionSchema>
 
 export const principalEnvelopeSchema = z.object({
   user: z.object({ id: z.string().uuid(), name: z.string(), email: z.string() }).strict(),
@@ -54,6 +58,8 @@ export const rolesResponseSchema = z.object({
   roles: z.array(roleSchema),
   permissions: z.array(permissionSchema),
 }).strict()
+
+export const roleOptionsResponseSchema = z.object({ roles: z.array(roleOptionSchema) }).strict()
 
 export const roleResponseSchema = z.object({ role: roleSchema }).strict()
 

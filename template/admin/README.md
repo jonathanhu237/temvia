@@ -63,13 +63,16 @@ as defense in depth for fragment credentials.
 
 ## Access management
 
-The authenticated Users and Roles routes consume the current principal's
-permissions. `users.read` shows activated users and role badges; `roles.read`
-shows the catalog and role details. The built-in `Super Admin` role is assigned
-to the first setup account and cannot be edited or deleted. Super Admins can
-create non-empty custom roles, replace a user's complete non-empty role set,
-and invite, resend, or revoke pending users. The API remains authoritative for
-all of these checks, including direct navigation to a hidden route.
+The authenticated Users & Access navigation contains separate Users,
+Invitations, and Roles routes driven by the current principal's permissions.
+`users.read` shows activated users and role badges; `invitations.read` shows
+pending and expired invitations; `roles.read` shows the catalog and role
+details. The built-in `Super Admin` role is assigned to the first setup account
+and cannot be edited or deleted. Super Admins can create non-empty custom
+roles, replace a user's complete non-empty role set, and manage invitations.
+An invitation manager can only assign roles within its own effective
+permissions, and the API remains authoritative for all of these checks,
+including direct navigation to a hidden route.
 
 Invitations arrive at `/accept-invitation#token=...`. Bootstrap removes the
 fragment before React renders and keeps the one-time authority in module

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { House, LogOut, ShieldCheck, Users } from 'lucide-react'
+import { ChevronDown, House, LogOut, Mail, ShieldCheck, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
@@ -17,6 +17,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarProvider,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
@@ -33,6 +36,13 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
   const navigate = useNavigate()
   const location = useLocation()
   const [logoutError, setLogoutError] = useState<unknown>()
+  const hasUsersAccess = Boolean(user.superAdmin || user.permissions?.includes('users.read'))
+  const hasInvitationsAccess = Boolean(user.superAdmin || user.permissions?.includes('invitations.read'))
+  const hasRolesAccess = Boolean(user.superAdmin || user.permissions?.includes('roles.read'))
+  const hasAccessMenu = hasUsersAccess || hasInvitationsAccess || hasRolesAccess
+  const accessMenuActive = location.pathname.startsWith('/users') || location.pathname.startsWith('/invitations') || location.pathname.startsWith('/roles')
+  const [accessMenuOpen, setAccessMenuOpen] = useState(true)
+  const accessMenuExpanded = accessMenuOpen || accessMenuActive
   useEffect(() => {
     const previousOwnerID = useAccessDraftStore.getState().ownerID
     if (previousOwnerID !== user.id) queryClient.removeQueries({ queryKey: ['access'] })
@@ -70,24 +80,18 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-                {user.superAdmin || user.permissions?.includes('users.read') ? (
+                {hasAccessMenu ? (
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild isActive={location.pathname.startsWith('/users')} tooltip={t('access:users')}>
-                      <Link to="/users" aria-current={location.pathname.startsWith('/users') ? 'page' : undefined}>
-                        <Users aria-hidden="true" data-icon="inline-start" />
-                        <span>{t('access:users')}</span>
-                      </Link>
+                    <SidebarMenuButton type="button" isActive={accessMenuActive} tooltip={t('access:usersAccess')} aria-expanded={accessMenuExpanded} onClick={() => setAccessMenuOpen((open) => !open)}>
+                      <Users aria-hidden="true" data-icon="inline-start" />
+                      <span>{t('access:usersAccess')}</span>
+                      <ChevronDown aria-hidden="true" className="ml-auto transition-transform data-[open=false]:-rotate-90 group-data-[collapsible=icon]:hidden" data-open={accessMenuExpanded} />
                     </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ) : null}
-                {user.superAdmin || user.permissions?.includes('roles.read') ? (
-                  <SidebarMenuItem>
-                    <SidebarMenuButton asChild isActive={location.pathname.startsWith('/roles')} tooltip={t('access:roles')}>
-                      <Link to="/roles" aria-current={location.pathname.startsWith('/roles') ? 'page' : undefined}>
-                        <ShieldCheck aria-hidden="true" data-icon="inline-start" />
-                        <span>{t('access:roles')}</span>
-                      </Link>
-                    </SidebarMenuButton>
+                    {accessMenuExpanded ? <SidebarMenuSub>
+                      {hasUsersAccess ? <SidebarMenuSubItem><SidebarMenuSubButton asChild isActive={location.pathname.startsWith('/users')}><Link to="/users" aria-current={location.pathname.startsWith('/users') ? 'page' : undefined}><UserRound aria-hidden="true" /><span>{t('access:users')}</span></Link></SidebarMenuSubButton></SidebarMenuSubItem> : null}
+                      {hasInvitationsAccess ? <SidebarMenuSubItem><SidebarMenuSubButton asChild isActive={location.pathname.startsWith('/invitations')}><Link to="/invitations" aria-current={location.pathname.startsWith('/invitations') ? 'page' : undefined}><Mail aria-hidden="true" /><span>{t('access:invitations')}</span></Link></SidebarMenuSubButton></SidebarMenuSubItem> : null}
+                      {hasRolesAccess ? <SidebarMenuSubItem><SidebarMenuSubButton asChild isActive={location.pathname.startsWith('/roles')}><Link to="/roles" aria-current={location.pathname.startsWith('/roles') ? 'page' : undefined}><ShieldCheck aria-hidden="true" /><span>{t('access:roles')}</span></Link></SidebarMenuSubButton></SidebarMenuSubItem> : null}
+                    </SidebarMenuSub> : null}
                   </SidebarMenuItem>
                 ) : null}
               </SidebarMenu>
@@ -126,7 +130,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger aria-label={t('menu')} />
             <div className="h-4 w-px bg-border" aria-hidden="true" />
-            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/roles') ? t('access:roles') : t('home')}</p>
+            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : t('home')}</p>
           </div>
           <PreferencesButtons className="shrink-0" />
         </header>

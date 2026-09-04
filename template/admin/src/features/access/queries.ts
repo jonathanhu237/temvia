@@ -3,9 +3,10 @@ import { ApiProtocolError, type ApiClient } from '@/shared/api/client'
 
 export const rolesQueryKey = ['access', 'roles'] as const
 export const roleQueryKey = (id: string) => ['access', 'roles', id] as const
-export type AccessListOptions = { cursor?: string; q?: string; sort?: string; direction?: 'asc' | 'desc' }
-export const usersQueryKey = (options: AccessListOptions = {}) => ['access', 'users', options.cursor ?? '', options.q ?? '', options.sort ?? '', options.direction ?? ''] as const
-export const invitationsQueryKey = (options: AccessListOptions = {}) => ['access', 'invitations', options.cursor ?? '', options.q ?? '', options.sort ?? '', options.direction ?? ''] as const
+export type AccessListOptions = { cursor?: string; q?: string; roleId?: string; status?: 'pending' | 'expired'; sort?: string; direction?: 'asc' | 'desc' }
+export const usersQueryKey = (options: AccessListOptions = {}) => ['access', 'users', options.cursor ?? '', options.q ?? '', options.roleId ?? '', options.sort ?? '', options.direction ?? ''] as const
+export const invitationsQueryKey = (options: AccessListOptions = {}) => ['access', 'invitations', options.cursor ?? '', options.q ?? '', options.roleId ?? '', options.status ?? '', options.sort ?? '', options.direction ?? ''] as const
+export const roleOptionsQueryKey = ['access', 'role-options'] as const
 
 const missingMethod = () => Promise.reject(new ApiProtocolError('This API client does not expose access management.'))
 
@@ -15,6 +16,15 @@ export function rolesOptions(api: ApiClient) {
     queryFn: ({ signal }) => api.getRoles ? api.getRoles(signal) : missingMethod(),
     retry: false,
     staleTime: 10_000,
+  })
+}
+
+export function roleOptionsOptions(api: ApiClient) {
+  return queryOptions({
+    queryKey: roleOptionsQueryKey,
+    queryFn: ({ signal }) => api.getRoleOptions ? api.getRoleOptions(signal) : missingMethod(),
+    retry: false,
+    staleTime: 30_000,
   })
 }
 
@@ -29,7 +39,7 @@ export function roleOptions(api: ApiClient, id: string) {
 export function usersOptions(api: ApiClient, options: AccessListOptions = {}) {
   return queryOptions({
     queryKey: usersQueryKey(options),
-    queryFn: ({ signal }) => api.getUsers ? api.getUsers({ cursor: options.cursor || undefined, q: options.q || undefined, sort: options.sort, direction: options.direction }, signal) : missingMethod(),
+    queryFn: ({ signal }) => api.getUsers ? api.getUsers({ cursor: options.cursor || undefined, q: options.q || undefined, roleId: options.roleId || undefined, sort: options.sort, direction: options.direction }, signal) : missingMethod(),
     retry: false,
   })
 }
@@ -37,7 +47,7 @@ export function usersOptions(api: ApiClient, options: AccessListOptions = {}) {
 export function invitationsOptions(api: ApiClient, options: AccessListOptions = {}) {
   return queryOptions({
     queryKey: invitationsQueryKey(options),
-    queryFn: ({ signal }) => api.getInvitations ? api.getInvitations({ cursor: options.cursor || undefined, q: options.q || undefined, sort: options.sort, direction: options.direction }, signal) : missingMethod(),
+    queryFn: ({ signal }) => api.getInvitations ? api.getInvitations({ cursor: options.cursor || undefined, q: options.q || undefined, roleId: options.roleId || undefined, status: options.status, sort: options.sort, direction: options.direction }, signal) : missingMethod(),
     retry: false,
   })
 }

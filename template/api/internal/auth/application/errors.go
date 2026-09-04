@@ -25,4 +25,6 @@ var (
 	ErrInvalidRoleSet            = errors.New("invalid role set")
 	ErrInvitationPending         = errors.New("invitation is already pending")
 	ErrInvitationInvalid         = errors.New("invalid invitation")
+	ErrInvitationRoleForbidden   = errors.New("invitation role is outside actor permissions")
+	ErrInvitationNotManageable   = errors.New("invitation is not manageable by actor")
 )

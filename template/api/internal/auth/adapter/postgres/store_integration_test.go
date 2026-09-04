@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -464,8 +465,8 @@ func TestStoreIntegrationRBACAndInvitationLifecycle(t *testing.T) {
 	if err != nil || !principal.SuperAdmin || len(principal.Roles) != 1 {
 		t.Fatalf("initial principal = %#v, %v", principal, err)
 	}
-	if got := principal.EffectivePermissions(domain.DefaultPermissionCatalog()); len(got) != 2 {
-		t.Fatalf("initial effective permissions = %#v", got)
+	if got := principal.EffectivePermissions(domain.DefaultPermissionCatalog()); !reflect.DeepEqual(got, domain.DefaultPermissionCatalog().Keys()) {
+		t.Fatalf("initial effective permissions = %#v, want %#v", got, domain.DefaultPermissionCatalog().Keys())
 	}
 
 	role, err := store.CreateRole(ctx, "Read Only", "", []domain.PermissionKey{domain.PermissionUsersRead})

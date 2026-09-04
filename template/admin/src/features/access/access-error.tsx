@@ -55,3 +55,7 @@ export function AccessError({ error, onRetry, onReload, reloadLabel, description
     </Alert>
   )
 }
+
+export function AccessDenied() {
+  return <AccessError error={new ApiProblemError({ type: '/problems/forbidden', title: 'forbidden', status: 403, code: 'forbidden' })} />
+}

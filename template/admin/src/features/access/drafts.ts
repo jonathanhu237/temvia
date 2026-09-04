@@ -6,6 +6,8 @@ export type RoleDraft = {
   name: string
   description: string
   permissions: string[]
+  /** Permissions explicitly selected by the administrator in this draft. */
+  explicitPermissions?: string[]
   submitting: boolean
   conflict: boolean
   submissionID?: string

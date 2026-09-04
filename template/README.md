@@ -113,13 +113,16 @@ returns `204`, clears any presented session cookie, invalidates all old
 sessions, and requires an explicit login with the new password.
 
 After setup, the first administrator is assigned to the immutable `Super
-Admin` role. The Users and Roles pages support additive role assignment and
-the initial `users.read`/`roles.read` permission catalog. Only a current Super
-Admin may create or edit custom roles, invite users, replace assignments, or
-revoke invitations. Custom roles must retain at least one permission, users
-and invitations at least one role, and a role cannot be deleted while assigned
-to a user or pending invitation. The API refuses any change that would leave
-zero usable Super Admin accounts.
+Admin` role. The Users, Invitations, and Roles pages are grouped under the
+authenticated Users & Access navigation. `users.read`, `roles.read`,
+`invitations.read`, and `invitations.manage` form the live permission catalog;
+invitation permissions include their documented dependencies. Super Admins
+retain full access, while invitation managers may create, resend, renew, or
+revoke only invitations whose roles fit their own effective permissions.
+Custom roles must retain at least one permission, users and invitations at
+least one role, and a role cannot be deleted while assigned to a user or
+invitation. The API refuses any change that would leave zero usable Super
+Admin accounts.
 
 Invitations are separate from activated users. A one-time link opens
 `/accept-invitation#token=...`; the admin removes the fragment before render,

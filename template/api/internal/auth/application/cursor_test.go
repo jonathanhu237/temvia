@@ -8,6 +8,8 @@ func TestAccessCursorRoundTripPreservesQueryContext(t *testing.T) {
 	want := AccessCursor{
 		Version:   1,
 		Query:     "Ada_%",
+		RoleID:    "019535d9-3df7-79fb-b466-fa907fa17f95",
+		Status:    "expired",
 		Sort:      "createdAt",
 		Direction: "desc",
 		Value:     "2026-09-03T10:11:12.123456789Z",
@@ -23,6 +25,24 @@ func TestAccessCursorRoundTripPreservesQueryContext(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("DecodeAccessCursor() = %#v, want %#v", got, want)
+	}
+}
+
+func TestNormalizeAccessListOptionsRejectsCursorWithDifferentFilters(t *testing.T) {
+	cursor, err := EncodeAccessCursor(AccessCursor{
+		Version:   1,
+		RoleID:    "019535d9-3df7-79fb-b466-fa907fa17f95",
+		Status:    "pending",
+		Sort:      "createdAt",
+		Direction: "desc",
+		Value:     "2026-09-03T10:11:12.123456789Z",
+		ID:        "019535d9-3df7-79fb-b466-fa907fa17f96",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := normalizeAccessListOptions(AccessListOptions{Cursor: cursor, RoleID: "019535d9-3df7-79fb-b466-fa907fa17f95", Status: "expired", Sort: "createdAt", Direction: "desc", Limit: 25}, true); err == nil {
+		t.Fatal("normalizeAccessListOptions() accepted a cursor for different filters")
 	}
 }
 

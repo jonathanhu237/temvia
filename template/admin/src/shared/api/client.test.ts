@@ -70,16 +70,35 @@ describe('Fetch API boundary', () => {
 		await expect(api.completePasswordReset({ token: `v1.${'A'.repeat(22)}.${'B'.repeat(43)}`, password: 'Aa1!xxxx', locale: 'zh-CN' })).resolves.toBeUndefined()
 	})
 
-	it('encodes access-list search and sort options in the query string', async () => {
-		let requestURL = ''
-		server.use(http.get('/api/users', ({ request }) => {
-			requestURL = request.url
-			return HttpResponse.json({ users: [] })
-		}))
+	it('encodes access-list search, role, status, and sort options in the query string', async () => {
+		let usersURL = ''
+		let invitationsURL = ''
+		server.use(
+			http.get('/api/users', ({ request }) => {
+				usersURL = request.url
+				return HttpResponse.json({ users: [] })
+			}),
+			http.get('/api/user-invitations', ({ request }) => {
+				invitationsURL = request.url
+				return HttpResponse.json({ invitations: [] })
+			}),
+		)
 
-		await expect(api.getUsers?.({ q: 'Ada_%', sort: 'name', direction: 'asc' })).resolves.toEqual({ users: [] })
-		expect(new URL(requestURL).searchParams.get('q')).toBe('Ada_%')
-		expect(new URL(requestURL).searchParams.get('sort')).toBe('name')
-		expect(new URL(requestURL).searchParams.get('direction')).toBe('asc')
+		await expect(api.getUsers?.({ q: 'Ada_%', roleId: '00000000-0000-4000-8000-000000000002', sort: 'name', direction: 'asc' })).resolves.toEqual({ users: [] })
+		await expect(api.getInvitations?.({ q: 'Lin', roleId: '00000000-0000-4000-8000-000000000002', status: 'expired', sort: 'expiresAt', direction: 'desc' })).resolves.toEqual({ invitations: [] })
+		expect(new URL(usersURL).searchParams.get('q')).toBe('Ada_%')
+		expect(new URL(usersURL).searchParams.get('roleId')).toBe('00000000-0000-4000-8000-000000000002')
+		expect(new URL(usersURL).searchParams.get('sort')).toBe('name')
+		expect(new URL(usersURL).searchParams.get('direction')).toBe('asc')
+		expect(new URL(invitationsURL).searchParams.get('q')).toBe('Lin')
+		expect(new URL(invitationsURL).searchParams.get('roleId')).toBe('00000000-0000-4000-8000-000000000002')
+		expect(new URL(invitationsURL).searchParams.get('status')).toBe('expired')
+		expect(new URL(invitationsURL).searchParams.get('sort')).toBe('expiresAt')
+		expect(new URL(invitationsURL).searchParams.get('direction')).toBe('desc')
+	})
+
+	it('loads role filter options through the access endpoint', async () => {
+		server.use(http.get('/api/access/role-options', () => HttpResponse.json({ roles: [{ id: '00000000-0000-4000-8000-000000000002', name: 'Users reader' }] })))
+		await expect(api.getRoleOptions?.()).resolves.toEqual({ roles: [{ id: '00000000-0000-4000-8000-000000000002', name: 'Users reader' }] })
 	})
 })

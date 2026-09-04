@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef, OnChangeFn, SortingState } from '@tanstack/react-table'
-import { Pencil, Plus, Save, Trash2 } from 'lucide-react'
+import { Eye, LockKeyhole, MoreHorizontal, Pencil, Plus, Save, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -14,14 +14,17 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { Permission, Role } from '@/shared/api/contracts'
 import { AccessError } from './access-error'
+import { AssignmentCount, BuiltInRoleIndicator } from './access-components'
 import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { roleQueryKey, rolesOptions, rolesQueryKey } from './queries'
@@ -31,7 +34,8 @@ export function RolesPage({ api, canManage }: { api: ApiClient; canManage: boole
   const queryClient = useQueryClient()
   const query = useQuery(rolesOptions(api))
   const [selected, setSelected] = useState<Role | undefined>()
-  const [roleDialogOpen, setRoleDialogOpen] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [editorOpen, setEditorOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Role | undefined>()
   const [search, setSearch] = useState('')
   const [sorting, setSorting] = useState<SortingState>([])
@@ -43,6 +47,12 @@ export function RolesPage({ api, canManage }: { api: ApiClient; canManage: boole
     editorGenerationRef.current = next
     setEditorGeneration(next)
   }
+  const roles = useMemo(() => query.data?.roles ?? [], [query.data?.roles])
+  const selectedRole = selected ? roles.find((role) => role.id === selected.id) ?? selected : undefined
+  const filteredRoles = useMemo(() => {
+    const needle = search.trim().toLocaleLowerCase()
+    return needle ? roles.filter((role) => role.name.toLocaleLowerCase().includes(needle)) : roles
+  }, [roles, search])
 
   const deleteMutation = useMutation({
     retry: false,
@@ -53,7 +63,6 @@ export function RolesPage({ api, canManage }: { api: ApiClient; canManage: boole
     onSuccess: (_, role) => {
       setNotice(undefined)
       setSelected((current) => current?.id === role.id ? undefined : current)
-      setRoleDialogOpen(false)
       setDeleteTarget(undefined)
       useAccessDraftStore.getState().setRoleEdit(role.id, undefined)
       void queryClient.invalidateQueries({ queryKey: rolesQueryKey })
@@ -61,23 +70,25 @@ export function RolesPage({ api, canManage }: { api: ApiClient; canManage: boole
     onError: setNotice,
   })
 
-  const roles = useMemo(() => query.data?.roles ?? [], [query.data?.roles])
-  const selectedRole = selected ? roles.find((role) => role.id === selected.id) ?? selected : undefined
-  const filteredRoles = useMemo(() => {
-    const needle = search.trim().toLocaleLowerCase()
-    return needle ? roles.filter((role) => role.name.toLocaleLowerCase().includes(needle)) : roles
-  }, [roles, search])
-
   const openCreate = () => {
     advanceEditorGeneration()
     setSelected(undefined)
-    setRoleDialogOpen(true)
+    setEditorOpen(true)
+    setDetailOpen(false)
     setNotice(undefined)
   }
+  const openDetail = useCallback((role: Role) => {
+    setSelected(role)
+    setDetailOpen(true)
+    setEditorOpen(false)
+    setNotice(undefined)
+  }, [])
   const openEdit = useCallback((role: Role) => {
+    if (!canManage || role.system) return
     advanceEditorGeneration()
     setSelected(role)
-    setRoleDialogOpen(canManage && !role.system)
+    setDetailOpen(false)
+    setEditorOpen(true)
     setNotice(undefined)
   }, [canManage])
   const handleSorting: OnChangeFn<SortingState> = (updater) => {
@@ -90,7 +101,8 @@ export function RolesPage({ api, canManage }: { api: ApiClient; canManage: boole
     const refreshed = result.data.roles.find((role) => role.id === selectedRole.id)
     setSelected(refreshed)
     if (!refreshed) {
-      setRoleDialogOpen(false)
+      setDetailOpen(false)
+      setEditorOpen(false)
       return
     }
     useAccessDraftStore.getState().setRoleEdit(refreshed.id, undefined)
@@ -100,12 +112,7 @@ export function RolesPage({ api, canManage }: { api: ApiClient; canManage: boole
     {
       accessorKey: 'name',
       header: ({ column }) => <SortableHeader column={column}>{t('roleName')}</SortableHeader>,
-      cell: ({ row }) => (
-        <button type="button" className="flex min-w-0 flex-col items-start text-left" onClick={() => openEdit(row.original)}>
-          <span className="max-w-56 truncate font-medium">{row.original.name}</span>
-          <span className="max-w-72 truncate text-xs text-muted-foreground">{row.original.system ? t('systemRole') : t('customRole')}</span>
-        </button>
-      ),
+      cell: ({ row }) => <div className="flex min-w-0 items-center gap-2"><button type="button" className="min-w-0 truncate text-left font-medium" onClick={() => openDetail(row.original)}>{row.original.name}</button>{row.original.system ? <BuiltInRoleIndicator label={t('builtInRoleTooltip')} /> : null}</div>,
     },
     {
       accessorKey: 'description',
@@ -120,104 +127,76 @@ export function RolesPage({ api, canManage }: { api: ApiClient; canManage: boole
       cell: ({ row }) => <span>{row.original.permissions.length}</span>,
     },
     {
-      id: 'type',
-      accessorFn: (role) => role.system ? 'system' : 'custom',
-      header: ({ column }) => <SortableHeader column={column}>{t('type')}</SortableHeader>,
-      cell: ({ row }) => <span>{row.original.system ? t('systemRole') : t('customRole')}</span>,
-    },
-    {
       id: 'assignments',
       accessorFn: (role) => role.assignmentCount ?? 0,
       header: ({ column }) => <SortableHeader column={column}>{t('assignmentCount')}</SortableHeader>,
-      cell: ({ row }) => <span>{row.original.assignmentCount ?? 0}</span>,
+      cell: ({ row }) => <AssignmentCount count={row.original.assignmentCount ?? 0} />,
     },
     {
       id: 'actions',
       enableSorting: false,
       header: () => <span>{t('actions')}</span>,
-      cell: ({ row }) => canManage ? (
-        <div className="flex justify-end gap-1">
-          {!row.original.system ? <Button type="button" variant="ghost" size="sm" onClick={() => openEdit(row.original)}>
-            <Pencil aria-hidden="true" />
-            {t('edit')}
-          </Button> : null}
-          {!row.original.system ? <Button type="button" variant="ghost" size="sm" onClick={() => setDeleteTarget(row.original)}>
-            <Trash2 aria-hidden="true" />
-            {t('delete')}
-          </Button> : null}
-        </div>
-      ) : null,
+      cell: ({ row }) => {
+        const role = row.original
+        return <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label={t('moreActions')}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => openDetail(role)}><Eye aria-hidden="true" data-icon="inline-start" />{t('view')}</DropdownMenuItem>
+            {canManage && !role.system ? <DropdownMenuItem onSelect={() => openEdit(role)}><Pencil aria-hidden="true" data-icon="inline-start" />{t('edit')}</DropdownMenuItem> : null}
+            {canManage && !role.system ? <><DropdownMenuSeparator />{(() => {
+              const disabled = (role.assignmentCount ?? 0) > 0
+              const item = <DropdownMenuItem disabled={disabled} title={disabled ? t('deleteRoleDisabled') : undefined} onSelect={() => { if (!disabled) setDeleteTarget(role) }}><Trash2 aria-hidden="true" data-icon="inline-start" />{t('delete')}</DropdownMenuItem>
+              return disabled ? <TooltipProvider><Tooltip><TooltipTrigger asChild><span tabIndex={0} className="block" aria-label={`${t('delete')}: ${t('deleteRoleDisabled')}`}>{item}</span></TooltipTrigger><TooltipContent>{t('deleteRoleDisabled')}</TooltipContent></Tooltip></TooltipProvider> : item
+            })()}</> : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      },
     },
-  ], [canManage, openEdit, t])
+  ], [canManage, openDetail, openEdit, t])
 
   if (query.isPending) return <p role="status">{t('common:loading')}</p>
   if (query.isError) return <AccessError error={query.error} onRetry={() => void query.refetch()} />
 
-  return (
-    <section className="flex flex-col gap-5" aria-labelledby="roles-title">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1><p className="text-sm text-muted-foreground">{t('rolesDescription')}</p></div>
-        {canManage ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" />{t('createRole')}</Button> : null}
-      </div>
-      {notice !== undefined ? <AccessError error={notice} onReload={() => void reloadRoles()} /> : null}
-      <Card>
-        <CardHeader><CardTitle className="text-lg">{t('roles')}</CardTitle></CardHeader>
-        <CardContent>
-          <DataTable
-            columns={columns}
-            data={filteredRoles}
-            search={search}
-            onSearchChange={setSearch}
-            searchPlaceholder={t('searchRoles')}
-            clearSearchLabel={t('clearSearch')}
-            emptyMessage={search ? t('noSearchResults') : t('noRoles')}
-            manualFiltering
-            sorting={sorting}
-            onSortingChange={handleSorting}
-          />
-        </CardContent>
-      </Card>
-      {selectedRole && (!canManage || selectedRole.system) ? <RoleSummary role={selectedRole} /> : null}
-      <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
-        <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
-          <RoleEditor
-            key={selectedRole?.id ?? 'new'}
-            api={api}
-            role={selectedRole}
-            permissions={query.data?.permissions ?? []}
-            open={roleDialogOpen}
-            editorGeneration={editorGeneration}
-            onDone={(role, generation) => {
-              if (generation !== editorGenerationRef.current) return
-              setSelected(role)
-              setRoleDialogOpen(false)
-              void queryClient.invalidateQueries({ queryKey: rolesQueryKey })
-              void queryClient.invalidateQueries({ queryKey: roleQueryKey(role.id) })
-            }}
-            onReload={reloadRoles}
-          />
-        </DialogContent>
-      </Dialog>
-      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open) setDeleteTarget(undefined) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('deleteRole')}</AlertDialogTitle>
-            <AlertDialogDescription>{t('deleteRoleConfirm', { name: deleteTarget?.name ?? '' })}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common:cancel')}</AlertDialogCancel>
-            <AlertDialogAction disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>{t('delete')}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </section>
-  )
+  return <section className="flex flex-col gap-5" aria-labelledby="roles-title">
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1><p className="text-sm text-muted-foreground">{t('rolesDescription')}</p></div>{canManage ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" data-icon="inline-start" />{t('createRole')}</Button> : null}</div>
+    {notice !== undefined ? <AccessError error={notice} onReload={() => void reloadRoles()} /> : null}
+    <Card>
+      <CardHeader><CardTitle className="text-lg">{t('roles')}</CardTitle></CardHeader>
+      <CardContent><DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} /></CardContent>
+    </Card>
+    <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+        {selectedRole ? <RoleDetail role={selectedRole} permissions={query.data?.permissions ?? []} canManage={canManage} onEdit={() => openEdit(selectedRole)} /> : null}
+      </DialogContent>
+    </Dialog>
+    <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
+      <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+        <RoleEditor key={selectedRole?.id ?? 'new'} api={api} role={selectedRole} permissions={query.data?.permissions ?? []} open={editorOpen} editorGeneration={editorGeneration} onDone={(role, generation) => { if (generation !== editorGenerationRef.current) return; setSelected(role); setEditorOpen(false); void queryClient.invalidateQueries({ queryKey: rolesQueryKey }); void queryClient.invalidateQueries({ queryKey: roleQueryKey(role.id) }) }} onReload={reloadRoles} />
+      </DialogContent>
+    </Dialog>
+    <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open) setDeleteTarget(undefined) }}>
+      <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{t('deleteRole')}</AlertDialogTitle><AlertDialogDescription>{t('deleteRoleConfirm', { name: deleteTarget?.name ?? '' })}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>{t('common:cancel')}</AlertDialogCancel><AlertDialogAction disabled={deleteMutation.isPending || (deleteTarget?.assignmentCount ?? 0) > 0} onClick={() => { if (deleteTarget && (deleteTarget.assignmentCount ?? 0) === 0) deleteMutation.mutate(deleteTarget) }}>{t('delete')}</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
+    </AlertDialog>
+  </section>
 }
 
-function RoleSummary({ role }: { role: Role }) {
-  const { t } = useTranslation('access')
+function RoleDetail({ role, permissions, canManage, onEdit }: { role: Role; permissions: Permission[]; canManage: boolean; onEdit: () => void }) {
+  const { t } = useTranslation(['access', 'common'])
   const translate = (key: string) => t(key as never)
-  return <Card><CardHeader><CardTitle>{role.name}</CardTitle><CardDescription>{role.system ? t('systemRoleReadOnly') : t('customRole')}</CardDescription></CardHeader><CardContent><p className="text-sm text-muted-foreground">{role.description || '—'}</p><ul className="mt-4 list-disc pl-5 text-sm">{role.permissions.map((permission) => <li key={permission}>{localizedPermission(permission, translate)}</li>)}</ul></CardContent></Card>
+  const definitions = new Map(permissions.map((permission) => [permission.key, permission]))
+  const groups = Object.entries(role.permissions.reduce<Record<string, Permission[]>>((result, key) => {
+    const permission = definitions.get(key)
+    if (!permission) return result
+    const group = result[permission.resource] ?? []
+    group.push(permission)
+    result[permission.resource] = group
+    return result
+  }, {})).sort(([left], [right]) => left.localeCompare(right))
+  return <>
+    <DialogHeader><DialogTitle>{role.name}</DialogTitle><DialogDescription>{role.system ? t('builtInRoleDescription') : t('customRoleDescription')}</DialogDescription></DialogHeader>
+    <div className="flex flex-col gap-5"><p className="text-sm text-muted-foreground">{role.description || '—'}</p><div><h3 className="mb-2 text-sm font-medium">{t('permissions')} ({role.permissions.length})</h3>{groups.length > 0 ? <div className="flex flex-col gap-4">{groups.map(([resource, items]) => <section key={resource} className="rounded-md bg-muted/30 p-3"><h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{localizedResource(resource, translate)}</h4><ul className="mt-2 flex flex-col gap-2">{items.map((permission) => <li key={permission.key} className="flex flex-col"><span className="text-sm font-medium">{localizedPermission(permission.key, translate)}</span><span className="text-xs text-muted-foreground">{localizedPermissionDescription(permission.key, translate, permission.description)}</span></li>)}</ul></section>)}</div> : <p className="text-sm text-muted-foreground">{t('noPermissions')}</p>}</div><p className="text-sm text-muted-foreground">{t('assignmentCountDetail', { count: role.assignmentCount ?? 0 })}</p></div>
+    <DialogFooter><DialogClose asChild><Button type="button" variant="outline">{t('common:close')}</Button></DialogClose>{canManage && !role.system ? <Button type="button" onClick={onEdit}><Pencil aria-hidden="true" data-icon="inline-start" />{t('edit')}</Button> : null}</DialogFooter>
+  </>
 }
 
 function RoleEditor({ api, role, permissions, open, editorGeneration, onDone, onReload }: { api: ApiClient; role?: Role; permissions: Permission[]; open: boolean; editorGeneration: number; onDone: (role: Role, generation: number) => void; onReload: () => Promise<void> }) {
@@ -230,8 +209,8 @@ function RoleEditor({ api, role, permissions, open, editorGeneration, onDone, on
   const [error, setError] = useState<unknown>()
   const draft = role ? roleEdit : roleCreate
   const initial = useMemo(() => role
-    ? { id: role.id, revision: role.revision, name: role.name, description: role.description, permissions: role.permissions.slice() }
-    : { name: '', description: '', permissions: [] as string[] }, [role])
+    ? { id: role.id, revision: role.revision, name: role.name, description: role.description, permissions: role.permissions.slice(), explicitPermissions: role.permissions.slice() }
+    : { name: '', description: '', permissions: [] as string[], explicitPermissions: [] as string[] }, [role])
 
   useEffect(() => {
     if (!open) return
@@ -282,6 +261,7 @@ function RoleEditor({ api, role, permissions, open, editorGeneration, onDone, on
     groups[permission.resource] = group
     return groups
   }, {})).sort(([left], [right]) => left.localeCompare(right))
+  const requiredDependencies = requiredPermissionDependencies(current.explicitPermissions ?? current.permissions, permissions)
   const translate = (key: string) => t(key as never)
   const mutation = useMutation({
     retry: false,
@@ -348,9 +328,16 @@ function RoleEditor({ api, role, permissions, open, editorGeneration, onDone, on
             <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{localizedResource(resource, translate)}</legend>
             {items.map((permission) => {
               const checked = current.permissions.includes(permission.key)
+              const locked = requiredDependencies.has(permission.key)
+              const label = localizedPermission(permission.key, translate)
               return <label key={permission.key} className="flex items-start gap-3 rounded-md border bg-background p-3">
-                <Checkbox checked={checked} onCheckedChange={(value) => update({ permissions: value === true ? [...current.permissions, permission.key] : current.permissions.filter((key) => key !== permission.key), validationError: undefined })} aria-label={localizedPermission(permission.key, translate)} disabled={current.submitting || mutation.isPending} />
-                <span><span className="block text-sm font-medium">{localizedPermission(permission.key, translate)}</span><span className="block text-xs text-muted-foreground">{localizedPermissionDescription(permission.key, translate, permission.description)}</span></span>
+                <Checkbox checked={checked} onCheckedChange={(value) => {
+                  const explicit = current.explicitPermissions ?? current.permissions
+                  update(value === true
+                    ? { permissions: addPermissionDependencies(current.permissions, permission.key, permissions), explicitPermissions: Array.from(new Set([...explicit, permission.key])), validationError: undefined }
+                    : { permissions: current.permissions.filter((key) => key !== permission.key), explicitPermissions: explicit.filter((key) => key !== permission.key), validationError: undefined })
+                }} aria-label={label} disabled={locked || current.submitting || mutation.isPending} />
+                <span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-sm font-medium">{label}{locked ? <LockKeyhole aria-label={t('permissionRequired')} /> : null}</span><span className="block text-xs text-muted-foreground">{localizedPermissionDescription(permission.key, translate, permission.description)}{locked ? ` · ${t('permissionRequired')}` : ''}</span></span>
               </label>
             })}
           </fieldset>)}
@@ -373,11 +360,15 @@ function isStaleRevision(error: unknown): boolean {
 const permissionLabelKeys: Record<string, string> = {
   'users.read': 'permissionUsersRead',
   'roles.read': 'permissionRolesRead',
+  'invitations.read': 'permissionInvitationsRead',
+  'invitations.manage': 'permissionInvitationsManage',
 }
 
 const permissionDescriptionKeys: Record<string, string> = {
   'users.read': 'permissionUsersReadDescription',
   'roles.read': 'permissionRolesReadDescription',
+  'invitations.read': 'permissionInvitationsReadDescription',
+  'invitations.manage': 'permissionInvitationsManageDescription',
 }
 
 function localizedPermission(key: string, t: (key: string) => string): string {
@@ -391,8 +382,39 @@ function localizedPermissionDescription(key: string, t: (key: string) => string,
 const resourceLabelKeys: Record<string, string> = {
   users: 'users',
   roles: 'roles',
+  invitations: 'invitations',
 }
 
 function localizedResource(resource: string, t: (key: string) => string): string {
   return resourceLabelKeys[resource] ? t(resourceLabelKeys[resource]) : resource
+}
+
+function requiredPermissionDependencies(selected: string[], definitions: Permission[]): Set<string> {
+  const byKey = new Map(definitions.map((permission) => [permission.key, permission]))
+  const required = new Set<string>()
+  const visit = (key: string, seen: Set<string>) => {
+    if (seen.has(key)) return
+    seen.add(key)
+    const definition = byKey.get(key)
+    for (const dependency of definition?.dependencies ?? []) {
+      required.add(dependency)
+      visit(dependency, seen)
+    }
+  }
+  for (const key of selected) visit(key, new Set())
+  return required
+}
+
+function addPermissionDependencies(selected: string[], key: string, definitions: Permission[]): string[] {
+  const byKey = new Map(definitions.map((permission) => [permission.key, permission]))
+  const result = new Set(selected)
+  const visited = new Set<string>()
+  const visit = (current: string) => {
+    if (visited.has(current)) return
+    visited.add(current)
+    result.add(current)
+    for (const dependency of byKey.get(current)?.dependencies ?? []) visit(dependency)
+  }
+  visit(key)
+  return Array.from(result)
 }

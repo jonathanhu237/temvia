@@ -150,6 +150,26 @@ func (s *Store) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	return result, nil
 }
 
+func (s *Store) ListRoleOptions(ctx context.Context) ([]application.RoleOption, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id::text, name
+		FROM auth_roles
+		ORDER BY (system_key IS NULL), name_canonical, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	options := make([]application.RoleOption, 0)
+	for rows.Next() {
+		var option application.RoleOption
+		if err := rows.Scan(&option.ID, &option.Name); err != nil {
+			return nil, err
+		}
+		options = append(options, option)
+	}
+	return options, rows.Err()
+}
+
 func (s *Store) FindRole(ctx context.Context, id string) (domain.Role, error) {
 	var role domain.Role
 	var systemKey sql.NullString
@@ -345,6 +365,10 @@ func (s *Store) listUsersWithOptions(ctx context.Context, options application.Ac
 	legacy = legacy || (forceLegacy && (options.Cursor == "" || domain.IsCanonicalUUID(options.Cursor)))
 	args := []any{likePattern(options.Query)}
 	where := []string{"($1 = '' OR lower(u.name) LIKE '%' || $1 || '%' ESCAPE '\\' OR lower(u.email) LIKE '%' || $1 || '%' ESCAPE '\\')"}
+	if options.RoleID != "" {
+		args = append(args, options.RoleID)
+		where = append(where, "EXISTS (SELECT 1 FROM auth_user_roles AS ur_filter WHERE ur_filter.user_id = u.id AND ur_filter.role_id = $"+strconv.Itoa(len(args))+"::uuid)")
+	}
 	if cursor.ID != "" {
 		if legacy {
 			args = append(args, cursor.ID)
@@ -661,6 +685,21 @@ func (s *Store) ListInvitations(ctx context.Context, cursor string, limit int) (
 	return s.listInvitationsWithOptions(ctx, application.AccessListOptions{Cursor: cursor, Limit: limit, Sort: "createdAt", Direction: "desc"}, true)
 }
 
+func (s *Store) FindInvitation(ctx context.Context, id string) (domain.Invitation, error) {
+	var invitation domain.Invitation
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT id::text, name, email, locale, expires_at, created_at, revision, created_by::text
+		FROM auth_user_invitations
+		WHERE id = $1::uuid`, id).
+		Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Invitation{}, application.ErrInvitationNotFound
+		}
+		return domain.Invitation{}, err
+	}
+	return s.populateInvitationRoles(ctx, invitation)
+}
+
 func (s *Store) ListInvitationsWithOptions(ctx context.Context, options application.AccessListOptions) (application.InvitationPage, error) {
 	return s.listInvitationsWithOptions(ctx, options, false)
 }
@@ -674,6 +713,15 @@ func (s *Store) listInvitationsWithOptions(ctx context.Context, options applicat
 	legacy = legacy || (forceLegacy && (options.Cursor == "" || domain.IsCanonicalUUID(options.Cursor)))
 	args := []any{likePattern(options.Query)}
 	where := []string{"($1 = '' OR lower(i.name) LIKE '%' || $1 || '%' ESCAPE '\\' OR lower(i.email) LIKE '%' || $1 || '%' ESCAPE '\\')"}
+	if options.RoleID != "" {
+		args = append(args, options.RoleID)
+		where = append(where, "EXISTS (SELECT 1 FROM auth_invitation_roles AS ir_filter WHERE ir_filter.invitation_id = i.id AND ir_filter.role_id = $"+strconv.Itoa(len(args))+"::uuid)")
+	}
+	if options.Status == "pending" {
+		where = append(where, "i.expires_at > clock_timestamp()")
+	} else if options.Status == "expired" {
+		where = append(where, "i.expires_at <= clock_timestamp()")
+	}
 	if cursor.ID != "" {
 		if legacy {
 			args = append(args, cursor.ID)
@@ -798,13 +846,13 @@ func storeCursor(options application.AccessListOptions, invitations bool) (appli
 		return application.AccessCursor{}, false, nil
 	}
 	if domain.IsCanonicalUUID(options.Cursor) {
-		if options.Query != "" || options.Sort != "createdAt" || options.Direction != "desc" {
+		if options.Query != "" || options.RoleID != "" || options.Status != "" || options.Sort != "createdAt" || options.Direction != "desc" {
 			return application.AccessCursor{}, false, application.ErrInvalidCursor
 		}
 		return application.AccessCursor{Version: 1, ID: options.Cursor, Query: options.Query, Sort: options.Sort, Direction: options.Direction}, true, nil
 	}
 	cursor, err := application.DecodeAccessCursor(options.Cursor)
-	if err != nil || cursor.Query != options.Query || cursor.Sort != options.Sort || cursor.Direction != options.Direction {
+	if err != nil || cursor.Query != options.Query || cursor.RoleID != options.RoleID || cursor.Status != options.Status || cursor.Sort != options.Sort || cursor.Direction != options.Direction {
 		return application.AccessCursor{}, false, application.ErrInvalidCursor
 	}
 	if !invitations && cursor.Sort == "expiresAt" {
@@ -814,7 +862,7 @@ func storeCursor(options application.AccessListOptions, invitations bool) (appli
 }
 
 func accessOrder(alias, sortKey, direction string) string {
-	expression := "created_at"
+	expression := alias + ".created_at"
 	switch sortKey {
 	case "name":
 		expression = "lower(" + alias + ".name)"
@@ -874,7 +922,7 @@ func encodeUserCursor(user domain.AccessUser, options application.AccessListOpti
 	default:
 		value = user.User.CreatedAt.Format(time.RFC3339Nano)
 	}
-	return application.EncodeAccessCursor(application.AccessCursor{Version: 1, Query: options.Query, Sort: options.Sort, Direction: options.Direction, Value: value, ID: user.User.ID})
+	return application.EncodeAccessCursor(application.AccessCursor{Version: 1, Query: options.Query, RoleID: options.RoleID, Status: options.Status, Sort: options.Sort, Direction: options.Direction, Value: value, ID: user.User.ID})
 }
 
 func encodeInvitationCursor(invitation domain.Invitation, options application.AccessListOptions) (string, error) {
@@ -889,7 +937,7 @@ func encodeInvitationCursor(invitation domain.Invitation, options application.Ac
 	default:
 		value = invitation.CreatedAt.Format(time.RFC3339Nano)
 	}
-	return application.EncodeAccessCursor(application.AccessCursor{Version: 1, Query: options.Query, Sort: options.Sort, Direction: options.Direction, Value: value, ID: invitation.ID})
+	return application.EncodeAccessCursor(application.AccessCursor{Version: 1, Query: options.Query, RoleID: options.RoleID, Status: options.Status, Sort: options.Sort, Direction: options.Direction, Value: value, ID: invitation.ID})
 }
 
 func (s *Store) populateInvitationRoles(ctx context.Context, invitation domain.Invitation) (domain.Invitation, error) {

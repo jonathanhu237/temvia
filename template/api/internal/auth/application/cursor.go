@@ -14,6 +14,8 @@ import (
 type AccessListOptions struct {
 	Cursor    string
 	Query     string
+	RoleID    string
+	Status    string
 	Sort      string
 	Direction string
 	Limit     int
@@ -27,6 +29,8 @@ const (
 type AccessCursor struct {
 	Version   int    `json:"v"`
 	Query     string `json:"q"`
+	RoleID    string `json:"role,omitempty"`
+	Status    string `json:"status,omitempty"`
 	Sort      string `json:"s"`
 	Direction string `json:"d"`
 	Value     string `json:"value"`

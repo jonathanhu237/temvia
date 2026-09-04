@@ -47,6 +47,21 @@ func TestPermissionCatalogIsStrictAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestPermissionCatalogExpandsDependencies(t *testing.T) {
+	catalog := DefaultPermissionCatalog()
+	permissions, err := catalog.Validate([]PermissionKey{PermissionInvitationsManage})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []PermissionKey{PermissionInvitationsManage, PermissionInvitationsRead, PermissionRolesRead, PermissionUsersRead}
+	if !reflect.DeepEqual(permissions, want) {
+		t.Fatalf("Validate(manage invitations) = %#v, want %#v", permissions, want)
+	}
+	if dependencies := catalog.Dependencies(PermissionInvitationsManage); !reflect.DeepEqual(dependencies, []PermissionKey{PermissionInvitationsRead, PermissionRolesRead, PermissionUsersRead}) {
+		t.Fatalf("Dependencies(manage invitations) = %#v", dependencies)
+	}
+}
+
 func TestPrincipalPermissionsAreUnionedAndSuperAdminExpandsCatalog(t *testing.T) {
 	catalog := DefaultPermissionCatalog()
 	principal := Principal{Permissions: []PermissionKey{PermissionUsersRead, PermissionUsersRead, "future.write"}}

@@ -51,11 +51,21 @@ type roleListResponse struct {
 }
 
 type permissionResponseBody struct {
-	Key         string `json:"key"`
-	Resource    string `json:"resource"`
-	Action      string `json:"action"`
-	LabelKey    string `json:"labelKey"`
-	Description string `json:"description"`
+	Key          string   `json:"key"`
+	Resource     string   `json:"resource"`
+	Action       string   `json:"action"`
+	LabelKey     string   `json:"labelKey"`
+	Description  string   `json:"description"`
+	Dependencies []string `json:"dependencies,omitempty"`
+}
+
+type roleOptionResponseBody struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type roleOptionsResponse struct {
+	Roles []roleOptionResponseBody `json:"roles"`
 }
 
 type roleEnvelope struct {

@@ -41,6 +41,7 @@ type DataTableProps<T> = {
   onSortingChange?: OnChangeFn<SortingState>
   manualFiltering?: boolean
   manualSorting?: boolean
+  toolbar?: React.ReactNode
 }
 
 export function DataTable<T>({
@@ -55,6 +56,7 @@ export function DataTable<T>({
   onSortingChange,
   manualFiltering = false,
   manualSorting = false,
+  toolbar,
 }: DataTableProps<T>) {
   const stableColumns = useMemo(() => columns, [columns])
   const table = useReactTable({
@@ -88,14 +90,17 @@ export function DataTable<T>({
             className="pl-9"
           />
         </div>
-        {search ? (
-          <Button type="button" variant="ghost" size="sm" onClick={() => onSearchChange('')}>
-            <X aria-hidden="true" />
-            {clearSearchLabel}
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {toolbar}
+          {search ? (
+            <Button type="button" variant="ghost" size="sm" onClick={() => onSearchChange('')}>
+              <X aria-hidden="true" data-icon="inline-start" />
+              {clearSearchLabel}
+            </Button>
+          ) : null}
+        </div>
       </div>
-      <div className="overflow-hidden rounded-md border">
+      <div className="overflow-x-auto rounded-md border">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (

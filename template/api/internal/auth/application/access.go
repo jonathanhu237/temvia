@@ -27,6 +27,11 @@ type InvitationPage struct {
 	NextCursor string
 }
 
+type RoleOption struct {
+	ID   string
+	Name string
+}
+
 type RoleMutationInput struct {
 	Name        string
 	Description string
@@ -51,6 +56,7 @@ type InvitationInput struct {
 // mail-outbox ports, while the application layer only sees domain values.
 type AccessStore interface {
 	ListRoles(context.Context) ([]domain.Role, error)
+	ListRoleOptions(context.Context) ([]RoleOption, error)
 	FindRole(context.Context, string) (domain.Role, error)
 	CreateRole(context.Context, string, string, []domain.PermissionKey) (domain.Role, error)
 	ReplaceRole(context.Context, string, int64, string, string, []domain.PermissionKey) (domain.Role, error)
@@ -59,6 +65,7 @@ type AccessStore interface {
 	ReplaceUserRoles(context.Context, string, int64, []string) (domain.AccessUser, error)
 	CreateInvitation(context.Context, string, string, string, domain.Locale, []string, []byte, []byte, time.Duration) (domain.Invitation, error)
 	ListInvitations(context.Context, string, int) (InvitationPage, error)
+	FindInvitation(context.Context, string) (domain.Invitation, error)
 	ResendInvitation(context.Context, string, []byte, []byte, time.Duration) (domain.Invitation, error)
 	RevokeInvitation(context.Context, string) error
 	PreflightInvitation(context.Context, []byte, []byte) error
@@ -157,6 +164,17 @@ func (m *AccessManagement) Roles(ctx context.Context, actorID string) (RolePage,
 		}
 	}
 	return RolePage{Items: roles, Catalog: m.catalog.Definitions()}, nil
+}
+
+func (m *AccessManagement) RoleOptions(ctx context.Context, actorID string) ([]RoleOption, error) {
+	if err := m.require(ctx, actorID, domain.PermissionUsersRead); err != nil {
+		return nil, err
+	}
+	options, err := m.store.ListRoleOptions(ctx)
+	if err != nil {
+		return nil, dependencyError(err)
+	}
+	return options, nil
 }
 
 func (m *AccessManagement) Role(ctx context.Context, actorID, roleID string) (domain.Role, error) {
@@ -287,7 +305,8 @@ func (m *AccessManagement) ReplaceUserRoles(ctx context.Context, actorID, userID
 }
 
 func (m *AccessManagement) CreateInvitation(ctx context.Context, actorID string, input InvitationInput) (domain.Invitation, error) {
-	if err := m.requireSuper(ctx, actorID); err != nil {
+	principal, err := m.invitationManager(ctx, actorID)
+	if err != nil {
 		return domain.Invitation{}, err
 	}
 	if m.random == nil || len(m.invitationKey) != 32 || m.invitationTTL <= 0 {
@@ -308,6 +327,9 @@ func (m *AccessManagement) CreateInvitation(ctx context.Context, actorID string,
 	if err := validateRoleIDs(input.RoleIDs); err != nil {
 		return domain.Invitation{}, err
 	}
+	if err := m.authorizeInvitationRoles(ctx, principal, input.RoleIDs); err != nil {
+		return domain.Invitation{}, err
+	}
 	selector := make([]byte, 16)
 	if err := m.random.Read(selector); err != nil {
 		return domain.Invitation{}, dependencyError(err)
@@ -324,7 +346,7 @@ func (m *AccessManagement) CreateInvitation(ctx context.Context, actorID string,
 }
 
 func (m *AccessManagement) Invitations(ctx context.Context, actorID, cursor string, limit int) (InvitationPage, error) {
-	if err := m.requireSuper(ctx, actorID); err != nil {
+	if err := m.require(ctx, actorID, domain.PermissionInvitationsRead); err != nil {
 		return InvitationPage{}, err
 	}
 	if err := validatePage(cursor, limit); err != nil {
@@ -341,7 +363,7 @@ func (m *AccessManagement) Invitations(ctx context.Context, actorID, cursor stri
 }
 
 func (m *AccessManagement) InvitationsWithOptions(ctx context.Context, actorID string, options AccessListOptions) (InvitationPage, error) {
-	if err := m.requireSuper(ctx, actorID); err != nil {
+	if err := m.require(ctx, actorID, domain.PermissionInvitationsRead); err != nil {
 		return InvitationPage{}, err
 	}
 	normalized, err := normalizeAccessListOptions(options, true)
@@ -380,7 +402,11 @@ func (m *AccessManagement) normalizeInvitationsPage(page InvitationPage) (Invita
 }
 
 func (m *AccessManagement) ResendInvitation(ctx context.Context, actorID, invitationID string) (domain.Invitation, error) {
-	if err := m.requireSuper(ctx, actorID); err != nil {
+	principal, err := m.invitationManager(ctx, actorID)
+	if err != nil {
+		return domain.Invitation{}, err
+	}
+	if err := m.authorizeExistingInvitation(ctx, principal, invitationID); err != nil {
 		return domain.Invitation{}, err
 	}
 	if m.random == nil || len(m.invitationKey) != 32 || m.invitationTTL <= 0 {
@@ -402,11 +428,73 @@ func (m *AccessManagement) ResendInvitation(ctx context.Context, actorID, invita
 }
 
 func (m *AccessManagement) RevokeInvitation(ctx context.Context, actorID, invitationID string) error {
-	if err := m.requireSuper(ctx, actorID); err != nil {
+	principal, err := m.invitationManager(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	if err := m.authorizeExistingInvitation(ctx, principal, invitationID); err != nil {
 		return err
 	}
 	if err := m.store.RevokeInvitation(ctx, invitationID); err != nil {
 		return normalizeAccessError(err)
+	}
+	return nil
+}
+
+func (m *AccessManagement) invitationManager(ctx context.Context, actorID string) (domain.Principal, error) {
+	principal, err := m.principal(ctx, actorID)
+	if err != nil {
+		return domain.Principal{}, err
+	}
+	if !principal.Has(domain.PermissionInvitationsManage) {
+		return domain.Principal{}, ErrForbidden
+	}
+	return principal, nil
+}
+
+func (m *AccessManagement) authorizeInvitationRoles(ctx context.Context, principal domain.Principal, roleIDs []string) error {
+	if principal.SuperAdmin {
+		return nil
+	}
+	effective := make(map[domain.PermissionKey]struct{}, len(principal.Permissions))
+	for _, permission := range principal.EffectivePermissions(m.catalog) {
+		effective[permission] = struct{}{}
+	}
+	for _, roleID := range roleIDs {
+		role, err := m.store.FindRole(ctx, roleID)
+		if err != nil {
+			return normalizeAccessError(err)
+		}
+		role, err = normalizeRole(m.catalog, role)
+		if err != nil {
+			return err
+		}
+		if role.IsSystem() {
+			return ErrInvitationRoleForbidden
+		}
+		for _, permission := range role.Permissions {
+			if _, ok := effective[permission]; !ok {
+				return ErrInvitationRoleForbidden
+			}
+		}
+	}
+	return nil
+}
+
+func (m *AccessManagement) authorizeExistingInvitation(ctx context.Context, principal domain.Principal, invitationID string) error {
+	invitation, err := m.store.FindInvitation(ctx, invitationID)
+	if err != nil {
+		return normalizeAccessError(err)
+	}
+	roleIDs := make([]string, 0, len(invitation.Roles))
+	for _, role := range invitation.Roles {
+		roleIDs = append(roleIDs, role.ID)
+	}
+	if err := m.authorizeInvitationRoles(ctx, principal, roleIDs); err != nil {
+		if errors.Is(err, ErrInvitationRoleForbidden) {
+			return ErrInvitationNotManageable
+		}
+		return err
 	}
 	return nil
 }
@@ -530,6 +618,17 @@ func normalizeAccessListOptions(options AccessListOptions, invitations bool) (Ac
 		return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "limit", Code: "invalid_limit"}}}
 	}
 	options.Query = norm.NFC.String(strings.TrimFunc(options.Query, unicode.IsSpace))
+	options.RoleID = strings.TrimSpace(options.RoleID)
+	if options.RoleID != "" && !domain.IsCanonicalUUID(options.RoleID) {
+		return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "roleId", Code: "invalid_role"}}}
+	}
+	options.Status = strings.TrimSpace(options.Status)
+	if !invitations && options.Status != "" {
+		return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "status", Code: "invalid_value"}}}
+	}
+	if invitations && options.Status != "" && options.Status != "pending" && options.Status != "expired" {
+		return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "status", Code: "invalid_value"}}}
+	}
 	if options.Sort == "" {
 		options.Sort = "createdAt"
 	}
@@ -551,13 +650,13 @@ func normalizeAccessListOptions(options AccessListOptions, invitations bool) (Ac
 		// older clients can finish a pagination sequence while the API rolls
 		// out opaque, query-aware cursors.
 		if domain.IsCanonicalUUID(options.Cursor) {
-			if options.Query != "" || options.Sort != "createdAt" || options.Direction != "desc" {
+			if options.Query != "" || options.RoleID != "" || options.Status != "" || options.Sort != "createdAt" || options.Direction != "desc" {
 				return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "cursor", Code: "invalid_cursor"}}}
 			}
 			return options, nil
 		}
 		cursor, err := DecodeAccessCursor(options.Cursor)
-		if err != nil || cursor.Query != options.Query || cursor.Sort != options.Sort || cursor.Direction != options.Direction {
+		if err != nil || cursor.Query != options.Query || cursor.RoleID != options.RoleID || cursor.Status != options.Status || cursor.Sort != options.Sort || cursor.Direction != options.Direction {
 			return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "cursor", Code: "invalid_cursor"}}}
 		}
 		if err := validateAccessCursorValue(cursor, invitations); err != nil {
@@ -584,7 +683,7 @@ func normalizeAccessError(err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, known := range []error{ErrRoleNotFound, ErrRoleAlreadyExists, ErrUserNotFound, ErrInvitationNotFound, ErrRoleInUse, ErrImmutableRole, ErrLastSuperAdmin, ErrStaleRevision, ErrInvalidRoleSet, ErrInvitationPending, ErrInvitationInvalid, ErrEmailAlreadyRegistered, ErrForbidden, ErrDependencyUnavailable} {
+	for _, known := range []error{ErrRoleNotFound, ErrRoleAlreadyExists, ErrUserNotFound, ErrInvitationNotFound, ErrRoleInUse, ErrImmutableRole, ErrLastSuperAdmin, ErrStaleRevision, ErrInvalidRoleSet, ErrInvitationPending, ErrInvitationInvalid, ErrInvitationRoleForbidden, ErrInvitationNotManageable, ErrEmailAlreadyRegistered, ErrForbidden, ErrDependencyUnavailable} {
 		if errors.Is(err, known) {
 			return err
 		}
@@ -620,19 +719,10 @@ func normalizeRole(catalog domain.PermissionCatalog, role domain.Role) (domain.R
 	if len(role.Permissions) == 0 {
 		return domain.Role{}, ErrDependencyUnavailable
 	}
-	seen := make(map[domain.PermissionKey]struct{}, len(role.Permissions))
-	permissions := make([]domain.PermissionKey, 0, len(role.Permissions))
-	for _, permission := range role.Permissions {
-		if !catalog.Has(permission) {
-			return domain.Role{}, ErrDependencyUnavailable
-		}
-		if _, exists := seen[permission]; exists {
-			continue
-		}
-		seen[permission] = struct{}{}
-		permissions = append(permissions, permission)
+	permissions, err := catalog.Validate(role.Permissions)
+	if err != nil {
+		return domain.Role{}, ErrDependencyUnavailable
 	}
-	sort.Slice(permissions, func(i, j int) bool { return permissions[i] < permissions[j] })
 	role.Permissions = permissions
 	return role, nil
 }

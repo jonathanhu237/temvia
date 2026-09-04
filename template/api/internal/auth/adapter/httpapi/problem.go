@@ -87,6 +87,10 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusForbidden, "invalid-password-reset-token")
 	case applicationError(err, application.ErrInvitationInvalid):
 		writeProblem(w, http.StatusForbidden, "invalid-invitation")
+	case applicationError(err, application.ErrInvitationRoleForbidden):
+		writeProblemWithCode(w, http.StatusForbidden, "forbidden", "invitation_role_forbidden", "", nil)
+	case applicationError(err, application.ErrInvitationNotManageable):
+		writeProblemWithCode(w, http.StatusForbidden, "forbidden", "invitation_not_manageable", "", nil)
 	case applicationError(err, application.ErrSetupComplete):
 		writeProblem(w, http.StatusConflict, "setup-complete")
 	case applicationError(err, application.ErrEmailAlreadyRegistered):

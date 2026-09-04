@@ -30,6 +30,7 @@ type PasswordRecoveryService interface {
 
 type AccessService interface {
 	Roles(context.Context, string) (application.RolePage, error)
+	RoleOptions(context.Context, string) ([]application.RoleOption, error)
 	Role(context.Context, string, string) (domain.Role, error)
 	CreateRole(context.Context, string, application.RoleMutationInput) (domain.Role, error)
 	ReplaceRole(context.Context, string, string, application.RoleMutationInput) (domain.Role, error)
@@ -90,6 +91,7 @@ func newHandler(setup SetupService, auth AuthenticationService, cfg config.Confi
 	}
 	if h.access != nil {
 		h.mux.HandleFunc("GET /api/roles", h.roles)
+		h.mux.HandleFunc("GET /api/access/role-options", h.roleOptions)
 		h.mux.HandleFunc("GET /api/roles/{id}", h.role)
 		h.mux.HandleFunc("POST /api/roles", h.createRole)
 		h.mux.HandleFunc("PUT /api/roles/{id}", h.replaceRole)
@@ -138,6 +140,7 @@ var knownMethods = map[string]string{
 	"/api/auth/password-reset/request":  "POST",
 	"/api/auth/password-reset/complete": "POST",
 	"/api/roles":                        "GET, POST",
+	"/api/access/role-options":          "GET",
 	"/api/users":                        "GET",
 	"/api/user-invitations":             "GET, POST",
 	"/api/auth/invitations/accept":      "POST",
@@ -366,9 +369,31 @@ func (h *Handler) roles(w http.ResponseWriter, r *http.Request) {
 	}
 	permissions := make([]permissionResponseBody, 0, len(result.Catalog))
 	for _, definition := range result.Catalog {
-		permissions = append(permissions, permissionResponseBody{Key: string(definition.Key), Resource: definition.Resource, Action: definition.Action, LabelKey: definition.LabelKey, Description: definition.Description})
+		dependencies := make([]string, 0, len(definition.Dependencies))
+		for _, dependency := range definition.Dependencies {
+			dependencies = append(dependencies, string(dependency))
+		}
+		permissions = append(permissions, permissionResponseBody{Key: string(definition.Key), Resource: definition.Resource, Action: definition.Action, LabelKey: definition.LabelKey, Description: definition.Description, Dependencies: dependencies})
 	}
 	writeJSON(w, http.StatusOK, roleListResponse{Roles: roles, Permissions: permissions})
+}
+
+func (h *Handler) roleOptions(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.currentPrincipal(r)
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	options, err := h.access.RoleOptions(r.Context(), principal.User.ID)
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	items := make([]roleOptionResponseBody, 0, len(options))
+	for _, option := range options {
+		items = append(items, roleOptionResponseBody{ID: option.ID, Name: option.Name})
+	}
+	writeJSON(w, http.StatusOK, roleOptionsResponse{Roles: items})
 }
 
 func (h *Handler) role(w http.ResponseWriter, r *http.Request) {
@@ -508,6 +533,8 @@ func parseAccessListQuery(r *http.Request) application.AccessListOptions {
 	return application.AccessListOptions{
 		Cursor:    query.Get("cursor"),
 		Query:     query.Get("q"),
+		RoleID:    query.Get("roleId"),
+		Status:    query.Get("status"),
 		Sort:      query.Get("sort"),
 		Direction: query.Get("direction"),
 		Limit:     limit,

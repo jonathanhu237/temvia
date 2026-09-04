@@ -13,14 +13,16 @@ import (
 )
 
 const (
-	matrixSuperID    = "019535d9-3df7-79fb-b466-fa907fa17f90"
-	matrixUsersID    = "019535d9-3df7-79fb-b466-fa907fa17f91"
-	matrixRolesID    = "019535d9-3df7-79fb-b466-fa907fa17f92"
-	matrixTargetID   = "019535d9-3df7-79fb-b466-fa907fa17f93"
-	matrixSystemRole = "019535d9-3df7-79fb-b466-fa907fa17f94"
-	matrixUsersRole  = "019535d9-3df7-79fb-b466-fa907fa17f95"
-	matrixRolesRole  = "019535d9-3df7-79fb-b466-fa907fa17f96"
-	matrixInviteID   = "019535d9-3df7-79fb-b466-fa907fa17f97"
+	matrixSuperID           = "019535d9-3df7-79fb-b466-fa907fa17f90"
+	matrixUsersID           = "019535d9-3df7-79fb-b466-fa907fa17f91"
+	matrixRolesID           = "019535d9-3df7-79fb-b466-fa907fa17f92"
+	matrixTargetID          = "019535d9-3df7-79fb-b466-fa907fa17f93"
+	matrixSystemRole        = "019535d9-3df7-79fb-b466-fa907fa17f94"
+	matrixUsersRole         = "019535d9-3df7-79fb-b466-fa907fa17f95"
+	matrixRolesRole         = "019535d9-3df7-79fb-b466-fa907fa17f96"
+	matrixInviteID          = "019535d9-3df7-79fb-b466-fa907fa17f97"
+	matrixInvitesReadRole   = "019535d9-3df7-79fb-b466-fa907fa17f98"
+	matrixInvitesManageRole = "019535d9-3df7-79fb-b466-fa907fa17f99"
 )
 
 type matrixPrincipalAuth struct {
@@ -76,6 +78,7 @@ func (matrixRandom) Read(dst []byte) error {
 
 type matrixAccessStore struct {
 	roles                 []domain.Role
+	invitationRoleID      string
 	createRoleCalls       int
 	replaceRoleCalls      int
 	deleteRoleCalls       int
@@ -91,6 +94,14 @@ type matrixAccessStore struct {
 func (s *matrixAccessStore) ListRoles(context.Context) ([]domain.Role, error) {
 	s.listRolesCalls++
 	return cloneRoles(s.roles), nil
+}
+
+func (s *matrixAccessStore) ListRoleOptions(context.Context) ([]application.RoleOption, error) {
+	options := make([]application.RoleOption, 0, len(s.roles))
+	for _, role := range s.roles {
+		options = append(options, application.RoleOption{ID: role.ID, Name: role.Name})
+	}
+	return options, nil
 }
 
 func (s *matrixAccessStore) FindRole(_ context.Context, id string) (domain.Role, error) {
@@ -161,6 +172,28 @@ func (s *matrixAccessStore) ListInvitations(context.Context, string, int) (appli
 	return application.InvitationPage{Items: []domain.Invitation{{ID: matrixInviteID, Name: "Invitee", Email: "invitee@example.com", Locale: domain.LocaleEnglish, Roles: []domain.Role{role}, ExpiresAt: now.Add(time.Hour), CreatedAt: now, Revision: 1}}}, nil
 }
 
+func (s *matrixAccessStore) FindInvitation(_ context.Context, id string) (domain.Invitation, error) {
+	if id != matrixInviteID {
+		return domain.Invitation{}, application.ErrInvitationNotFound
+	}
+	roleID := s.invitationRoleID
+	if roleID == "" {
+		roleID = matrixUsersRole
+	}
+	var role domain.Role
+	for _, candidate := range s.roles {
+		if candidate.ID == roleID {
+			role = candidate
+			break
+		}
+	}
+	if role.ID == "" {
+		return domain.Invitation{}, application.ErrRoleNotFound
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	return domain.Invitation{ID: id, Name: "Invitee", Email: "invitee@example.com", Locale: domain.LocaleEnglish, Roles: []domain.Role{role}, ExpiresAt: now.Add(time.Hour), CreatedAt: now, Revision: 1}, nil
+}
+
 func (s *matrixAccessStore) ResendInvitation(_ context.Context, id string, _ []byte, _ []byte, ttl time.Duration) (domain.Invitation, error) {
 	s.resendInvitationCalls++
 	role := s.roles[1]
@@ -194,17 +227,23 @@ func matrixRole(id, name string, permission domain.PermissionKey) domain.Role {
 func newAccessHTTPMatrixFixture() (http.Handler, *matrixAccessStore) {
 	usersRole := matrixRole(matrixUsersRole, "Users reader", domain.PermissionUsersRead)
 	rolesRole := matrixRole(matrixRolesRole, "Roles reader", domain.PermissionRolesRead)
+	invitationsReadRole := matrixRole(matrixInvitesReadRole, "Invitations reader", domain.PermissionInvitationsRead)
+	invitationsManageRole := matrixRole(matrixInvitesManageRole, "Invitations manager", domain.PermissionInvitationsManage)
 	systemRole := domain.Role{ID: matrixSystemRole, Name: "Super Admin", SystemKey: "super_admin", Revision: 1}
-	store := &matrixAccessStore{roles: []domain.Role{systemRole, usersRole, rolesRole}}
+	store := &matrixAccessStore{roles: []domain.Role{systemRole, usersRole, rolesRole, invitationsReadRole, invitationsManageRole}}
 	super := domain.Principal{User: domain.User{ID: matrixSuperID, Name: "Super", Email: "super@example.com"}, Roles: []domain.Role{systemRole}}
 	users := domain.Principal{User: domain.User{ID: matrixUsersID, Name: "Users", Email: "users@example.com"}, Roles: []domain.Role{usersRole}}
 	roles := domain.Principal{User: domain.User{ID: matrixRolesID, Name: "Roles", Email: "roles@example.com"}, Roles: []domain.Role{rolesRole}}
+	invitationsReader := domain.Principal{User: domain.User{ID: matrixInvitesReadRole, Name: "Invitations reader", Email: "invitations-reader@example.com"}, Roles: []domain.Role{invitationsReadRole}}
+	invitationsManager := domain.Principal{User: domain.User{ID: matrixInvitesManageRole, Name: "Invitations manager", Email: "invitations-manager@example.com"}, Roles: []domain.Role{invitationsManageRole}}
 	principals := &matrixPrincipalStore{byUser: map[string]domain.Principal{
-		matrixSuperID: super,
-		matrixUsersID: users,
-		matrixRolesID: roles,
+		matrixSuperID:           super,
+		matrixUsersID:           users,
+		matrixRolesID:           roles,
+		matrixInvitesReadRole:   invitationsReader,
+		matrixInvitesManageRole: invitationsManager,
 	}}
-	auth := &matrixPrincipalAuth{bySession: map[string]domain.Principal{"super": super, "users": users, "roles": roles}}
+	auth := &matrixPrincipalAuth{bySession: map[string]domain.Principal{"super": super, "users": users, "roles": roles, "invitations-reader": invitationsReader, "invitations-manager": invitationsManager}}
 	access := application.NewAccessManagementWithInvitations(store, principals, domain.DefaultPermissionCatalog(), []byte(strings.Repeat("k", 32)), matrixRandom{}, time.Hour)
 	return NewHandlerWithAccess(&setupFake{status: application.SetupComplete}, auth, testConfig(), nil, access, nil), store
 }
@@ -244,7 +283,12 @@ func TestAccessHTTPPermissionMatrix(t *testing.T) {
 		{name: "roles reader can list roles", session: "roles", method: http.MethodGet, path: "/api/roles", wantStatus: http.StatusOK, touches: true},
 		{name: "users reader cannot list roles", session: "users", method: http.MethodGet, path: "/api/roles", wantStatus: http.StatusForbidden},
 		{name: "super can list roles", session: "super", method: http.MethodGet, path: "/api/roles", wantStatus: http.StatusOK, touches: true},
+		{name: "users reader can list role options", session: "users", method: http.MethodGet, path: "/api/access/role-options", wantStatus: http.StatusOK},
+		{name: "roles reader cannot list role options", session: "roles", method: http.MethodGet, path: "/api/access/role-options", wantStatus: http.StatusForbidden},
 		{name: "super can list invitations", session: "super", method: http.MethodGet, path: "/api/user-invitations", wantStatus: http.StatusOK, touches: true},
+		{name: "invitations reader can list invitations", session: "invitations-reader", method: http.MethodGet, path: "/api/user-invitations", wantStatus: http.StatusOK, touches: true},
+		{name: "invitations reader can list users through dependency", session: "invitations-reader", method: http.MethodGet, path: "/api/users", wantStatus: http.StatusOK, touches: true},
+		{name: "invitations reader cannot list roles without dependency", session: "invitations-reader", method: http.MethodGet, path: "/api/roles", wantStatus: http.StatusForbidden},
 		{name: "users reader cannot list invitations", session: "users", method: http.MethodGet, path: "/api/user-invitations", wantStatus: http.StatusForbidden},
 		{name: "roles reader cannot list invitations", session: "roles", method: http.MethodGet, path: "/api/user-invitations", wantStatus: http.StatusForbidden},
 		{name: "super can create role", session: "super", method: http.MethodPost, path: "/api/roles", body: `{"name":"Auditor","description":"Read access","permissions":["users.read"]}`, origin: true, wantStatus: http.StatusCreated, touches: true, writes: true},
@@ -256,11 +300,17 @@ func TestAccessHTTPPermissionMatrix(t *testing.T) {
 		{name: "super can replace user roles", session: "super", method: http.MethodPut, path: "/api/users/019535d9-3df7-79fb-b466-fa907fa17f93/roles", body: `{"roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"],"authVersion":1}`, origin: true, wantStatus: http.StatusOK, touches: true, writes: true},
 		{name: "users reader cannot replace user roles", session: "users", method: http.MethodPut, path: "/api/users/019535d9-3df7-79fb-b466-fa907fa17f93/roles", body: `{"roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"],"authVersion":1}`, origin: true, wantStatus: http.StatusForbidden},
 		{name: "super can create invitation", session: "super", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","locale":"en","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"]}`, origin: true, wantStatus: http.StatusCreated, touches: true, writes: true},
+		{name: "invitations manager can create invitation", session: "invitations-manager", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","locale":"en","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"]}`, origin: true, wantStatus: http.StatusCreated, touches: true, writes: true},
+		{name: "invitations reader cannot create invitation", session: "invitations-reader", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","locale":"en","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"]}`, origin: true, wantStatus: http.StatusForbidden},
 		{name: "roles reader cannot create invitation", session: "roles", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","locale":"en","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"]}`, origin: true, wantStatus: http.StatusForbidden},
 		{name: "super can resend invitation", session: "super", method: http.MethodPost, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97/resend", origin: true, wantStatus: http.StatusAccepted, touches: true, writes: true},
+		{name: "invitations manager can resend invitation", session: "invitations-manager", method: http.MethodPost, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97/resend", origin: true, wantStatus: http.StatusAccepted, touches: true, writes: true},
 		{name: "users reader cannot resend invitation", session: "users", method: http.MethodPost, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97/resend", origin: true, wantStatus: http.StatusForbidden},
+		{name: "invitations reader cannot resend invitation", session: "invitations-reader", method: http.MethodPost, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97/resend", origin: true, wantStatus: http.StatusForbidden},
 		{name: "super can revoke invitation", session: "super", method: http.MethodDelete, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97", origin: true, wantStatus: http.StatusNoContent, touches: true, writes: true},
+		{name: "invitations manager can revoke invitation", session: "invitations-manager", method: http.MethodDelete, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97", origin: true, wantStatus: http.StatusNoContent, touches: true, writes: true},
 		{name: "roles reader cannot revoke invitation", session: "roles", method: http.MethodDelete, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97", origin: true, wantStatus: http.StatusForbidden},
+		{name: "invitations reader cannot revoke invitation", session: "invitations-reader", method: http.MethodDelete, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97", origin: true, wantStatus: http.StatusForbidden},
 	}
 
 	for _, test := range cases {
@@ -309,6 +359,24 @@ func TestAccessHTTPMutationChecksOriginBeforeAuthorizationBody(t *testing.T) {
 	response := matrixRequest(handler, "super", http.MethodPost, "/api/roles", `{"name":"Auditor","description":"Read access","permissions":["users.read"]}`, false)
 	if response.Code != http.StatusForbidden || store.createRoleCalls != 0 {
 		t.Fatalf("missing Origin response = %d, create calls = %d", response.Code, store.createRoleCalls)
+	}
+}
+
+func TestInvitationManagerCannotAssignOrManageSuperAdminInvitation(t *testing.T) {
+	handler, store := newAccessHTTPMatrixFixture()
+	create := matrixRequest(handler, "invitations-manager", http.MethodPost, "/api/user-invitations", `{"name":"Invitee","email":"invitee@example.com","locale":"en","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f94"]}`, true)
+	if create.Code != http.StatusForbidden || !strings.Contains(create.Body.String(), `"code":"invitation_role_forbidden"`) || store.createInvitationCalls != 0 {
+		t.Fatalf("create privileged invitation status = %d, calls = %d; body=%s", create.Code, store.createInvitationCalls, create.Body.String())
+	}
+	store.invitationRoleID = matrixSystemRole
+	beforeResend, beforeRevoke := store.resendInvitationCalls, store.revokeInvitationCalls
+	resend := matrixRequest(handler, "invitations-manager", http.MethodPost, "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97/resend", "", true)
+	if resend.Code != http.StatusForbidden || !strings.Contains(resend.Body.String(), `"code":"invitation_not_manageable"`) || store.resendInvitationCalls != beforeResend {
+		t.Fatalf("resend privileged invitation status = %d, calls = %d; body=%s", resend.Code, store.resendInvitationCalls, resend.Body.String())
+	}
+	revoke := matrixRequest(handler, "invitations-manager", http.MethodDelete, "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97", "", true)
+	if revoke.Code != http.StatusForbidden || !strings.Contains(revoke.Body.String(), `"code":"invitation_not_manageable"`) || store.revokeInvitationCalls != beforeRevoke {
+		t.Fatalf("revoke privileged invitation status = %d, calls = %d; body=%s", revoke.Code, store.revokeInvitationCalls, revoke.Body.String())
 	}
 }
 

@@ -11,11 +11,12 @@ import (
 type PermissionKey string
 
 type PermissionDefinition struct {
-	Key         PermissionKey
-	Resource    string
-	Action      string
-	LabelKey    string
-	Description string
+	Key          PermissionKey
+	Resource     string
+	Action       string
+	LabelKey     string
+	Description  string
+	Dependencies []PermissionKey
 }
 
 type PermissionCatalog struct {
@@ -36,6 +37,23 @@ func NewPermissionCatalog(definitions ...PermissionDefinition) (PermissionCatalo
 		}
 		items[key] = definition
 	}
+	for _, definition := range items {
+		seen := make(map[PermissionKey]struct{}, len(definition.Dependencies))
+		for _, dependency := range definition.Dependencies {
+			if !hasPermission(items, dependency) || dependency == definition.Key {
+				return PermissionCatalog{}, fmt.Errorf("invalid dependency %q for permission %q", dependency, definition.Key)
+			}
+			if _, exists := seen[dependency]; exists {
+				return PermissionCatalog{}, fmt.Errorf("duplicate dependency %q for permission %q", dependency, definition.Key)
+			}
+			seen[dependency] = struct{}{}
+		}
+	}
+	for key := range items {
+		if _, err := permissionDependencies(items, key, nil); err != nil {
+			return PermissionCatalog{}, err
+		}
+	}
 	return PermissionCatalog{items: items}, nil
 }
 
@@ -43,13 +61,17 @@ func DefaultPermissionCatalog() PermissionCatalog {
 	catalog, _ := NewPermissionCatalog(
 		PermissionDefinition{Key: PermissionUsersRead, Resource: "users", Action: "read", LabelKey: "permissions.users.read", Description: "View users and their assigned roles."},
 		PermissionDefinition{Key: PermissionRolesRead, Resource: "roles", Action: "read", LabelKey: "permissions.roles.read", Description: "View roles and their grants."},
+		PermissionDefinition{Key: PermissionInvitationsRead, Resource: "invitations", Action: "read", LabelKey: "permissions.invitations.read", Description: "View invitations, their status, and assigned roles.", Dependencies: []PermissionKey{PermissionUsersRead}},
+		PermissionDefinition{Key: PermissionInvitationsManage, Resource: "invitations", Action: "manage", LabelKey: "permissions.invitations.manage", Description: "Create, resend, renew, and revoke invitations.", Dependencies: []PermissionKey{PermissionInvitationsRead, PermissionRolesRead}},
 	)
 	return catalog
 }
 
 const (
-	PermissionUsersRead PermissionKey = "users.read"
-	PermissionRolesRead PermissionKey = "roles.read"
+	PermissionUsersRead         PermissionKey = "users.read"
+	PermissionRolesRead         PermissionKey = "roles.read"
+	PermissionInvitationsRead   PermissionKey = "invitations.read"
+	PermissionInvitationsManage PermissionKey = "invitations.manage"
 )
 
 func (c PermissionCatalog) Has(key PermissionKey) bool { _, ok := c.items[key]; return ok }
@@ -72,6 +94,25 @@ func (c PermissionCatalog) Keys() []PermissionKey {
 	return keys
 }
 
+// Dependencies returns the transitive dependency set for a known permission.
+// The returned keys are sorted and do not include key itself.
+func (c PermissionCatalog) Dependencies(key PermissionKey) []PermissionKey {
+	if !c.Has(key) {
+		return nil
+	}
+	dependencies, err := permissionDependencies(c.items, key, nil)
+	if err != nil {
+		return nil
+	}
+	delete(dependencies, key)
+	result := make([]PermissionKey, 0, len(dependencies))
+	for dependency := range dependencies {
+		result = append(result, dependency)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
+}
+
 func (c PermissionCatalog) Validate(keys []PermissionKey) ([]PermissionKey, error) {
 	seen := make(map[PermissionKey]struct{}, len(keys))
 	result := make([]PermissionKey, 0, len(keys))
@@ -83,12 +124,53 @@ func (c PermissionCatalog) Validate(keys []PermissionKey) ([]PermissionKey, erro
 			continue
 		}
 		seen[key] = struct{}{}
-		result = append(result, key)
+		dependencies, err := permissionDependencies(c.items, key, nil)
+		if err != nil {
+			return nil, err
+		}
+		for dependency := range dependencies {
+			seen[dependency] = struct{}{}
+		}
 	}
-	if len(result) == 0 {
+	if len(seen) == 0 {
 		return nil, &ValidationErrors{Items: []FieldError{{Field: "permissions", Code: "empty_permissions"}}}
 	}
+	result = result[:0]
+	for key := range seen {
+		result = append(result, key)
+	}
 	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result, nil
+}
+
+func hasPermission(items map[PermissionKey]PermissionDefinition, key PermissionKey) bool {
+	_, ok := items[key]
+	return ok
+}
+
+func permissionDependencies(items map[PermissionKey]PermissionDefinition, key PermissionKey, visiting map[PermissionKey]bool) (map[PermissionKey]struct{}, error) {
+	definition, ok := items[key]
+	if !ok {
+		return nil, fmt.Errorf("unknown permission dependency %q", key)
+	}
+	if visiting == nil {
+		visiting = make(map[PermissionKey]bool)
+	}
+	if visiting[key] {
+		return nil, fmt.Errorf("cyclic permission dependency %q", key)
+	}
+	visiting[key] = true
+	result := map[PermissionKey]struct{}{key: {}}
+	for _, dependency := range definition.Dependencies {
+		dependencies, err := permissionDependencies(items, dependency, visiting)
+		if err != nil {
+			return nil, err
+		}
+		for item := range dependencies {
+			result[item] = struct{}{}
+		}
+	}
+	delete(visiting, key)
 	return result, nil
 }
 
