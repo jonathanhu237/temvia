@@ -4,7 +4,38 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-const Select = SelectPrimitive.Root
+type SelectRootProps = React.ComponentPropsWithoutRef<typeof SelectPrimitive.Root>
+
+function Select({ onOpenChange, ...props }: SelectRootProps) {
+  const standaloneOpenRef = React.useRef(false)
+
+  const handleOpenChange = React.useCallback((open: boolean) => {
+    if (typeof document !== 'undefined') {
+      if (open) {
+        // A dialog may already own the document scroll lock. Only relax the
+        // additional lock created by a standalone select on a page.
+        standaloneOpenRef.current = !document.body.hasAttribute('data-scroll-locked')
+        if (standaloneOpenRef.current) {
+          document.body.setAttribute('data-select-scroll-lock', '')
+        }
+      } else if (standaloneOpenRef.current) {
+        standaloneOpenRef.current = false
+        document.body.removeAttribute('data-select-scroll-lock')
+      }
+    }
+    onOpenChange?.(open)
+  }, [onOpenChange])
+
+  React.useEffect(() => () => {
+    if (standaloneOpenRef.current) {
+      document.body.removeAttribute('data-select-scroll-lock')
+    }
+  }, [])
+
+  return <SelectPrimitive.Root {...props} onOpenChange={handleOpenChange} />
+}
+
+Select.displayName = SelectPrimitive.Root.displayName
 
 const SelectGroup = SelectPrimitive.Group
 

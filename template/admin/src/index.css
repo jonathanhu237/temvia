@@ -122,6 +122,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Radix Select uses a modal scroll lock while its listbox is open. Keep the
+   document scrollbar stable when a standalone filter opens. Dialogs keep
+   their own modal lock and are intentionally left unchanged. */
+body[data-scroll-locked][data-select-scroll-lock] {
+  margin-right: 0 !important;
+  overflow: visible !important;
+  overscroll-behavior: auto !important;
+}
+
 button,
 a,
 input {
