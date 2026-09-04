@@ -102,7 +102,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
     {
       id: 'roles',
       accessorFn: (invitation) => invitation.roles.map((role) => role.name).join(', '),
-      header: () => <span>{t('assignedRoles')}</span>,
+      header: () => <span>{t('role')}</span>,
       cell: ({ row }) => <RoleBadges roles={row.original.roles} />,
       enableSorting: false,
     },

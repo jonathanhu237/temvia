@@ -16,7 +16,7 @@ import { AccessError } from './access-error'
 import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { PageNavigation, RoleBadges, formatDate, type AccessUser } from './access-components'
-import { roleOptionsOptions, usersOptions } from './queries'
+import { usersOptions } from './queries'
 
 export function UsersPage({ api, canManage }: { api: ApiClient; canManage: boolean }) {
   const { t, i18n } = useTranslation(['access', 'common'])
@@ -24,11 +24,9 @@ export function UsersPage({ api, canManage }: { api: ApiClient; canManage: boole
   const [userCursor, setUserCursor] = useState('')
   const [userHistory, setUserHistory] = useState<string[]>([])
   const [userSearch, setUserSearch] = useState('')
-  const [roleFilter, setRoleFilter] = useState('')
-  const [userSort, setUserSort] = useState<'name' | 'email' | 'createdAt'>('createdAt')
+  const [userSort, setUserSort] = useState<'name' | 'email' | 'roles' | 'createdAt'>('createdAt')
   const [userDirection, setUserDirection] = useState<'asc' | 'desc'>('desc')
-  const users = useQuery(usersOptions(api, { cursor: userCursor, q: userSearch, roleId: roleFilter, sort: userSort, direction: userDirection }))
-  const roleOptions = useQuery({ ...roleOptionsOptions(api), enabled: Boolean(api.getRoleOptions) })
+  const users = useQuery(usersOptions(api, { cursor: userCursor, q: userSearch, sort: userSort, direction: userDirection }))
   const roleAdministration = useQuery({
     queryKey: ['access', 'roles'],
     queryFn: ({ signal }) => api.getRoles ? api.getRoles(signal) : Promise.reject(new Error('missing getRoles')),
@@ -42,18 +40,16 @@ export function UsersPage({ api, canManage }: { api: ApiClient; canManage: boole
   const assignmentGenerationRef = useRef(0)
 
   const resetPaging = (value: string) => { setUserSearch(value); setUserCursor(''); setUserHistory([]) }
-  const setRole = (value: string) => { setRoleFilter(value === 'all' ? '' : value); setUserCursor(''); setUserHistory([]) }
   const handleSorting: OnChangeFn<SortingState> = (updater) => {
     const next = typeof updater === 'function' ? updater([{ id: userSort, desc: userDirection === 'desc' }]) : updater
     const first = next[0]
-    setUserSort((first?.id as 'name' | 'email' | 'createdAt' | undefined) ?? 'createdAt')
+    setUserSort((first?.id as 'name' | 'email' | 'roles' | 'createdAt' | undefined) ?? 'createdAt')
     setUserDirection(first?.desc ? 'desc' : 'asc')
     setUserCursor(''); setUserHistory([])
   }
   const retryUsers = () => void users.refetch()
   const retryRoles = () => void roleAdministration.refetch()
   const roleList = roleAdministration.data?.roles ?? []
-  const roleFilterOptions = roleOptions.data?.roles ?? []
   const activeAssignmentUser = assignmentUser ? users.data?.users.find((item) => item.id === assignmentUser.id) ?? assignmentUser : undefined
   const openAssignment = (user: AccessUser) => {
     const next = assignmentGenerationRef.current + 1
@@ -77,9 +73,8 @@ export function UsersPage({ api, canManage }: { api: ApiClient; canManage: boole
     {
       id: 'roles',
       accessorFn: (user) => user.roles.map((role) => role.name).join(', '),
-      header: () => <span>{t('assignedRoles')}</span>,
+      header: ({ column }) => <SortableHeader column={column}>{t('role')}</SortableHeader>,
       cell: ({ row }) => <RoleBadges roles={row.original.roles} />,
-      enableSorting: false,
     },
     {
       accessorKey: 'createdAt',
@@ -110,17 +105,11 @@ export function UsersPage({ api, canManage }: { api: ApiClient; canManage: boole
           onSearchChange={resetPaging}
           searchPlaceholder={t('searchUsers')}
           clearSearchLabel={t('clearSearch')}
-          emptyMessage={userSearch || roleFilter ? t('noSearchResults') : t('noUsers')}
+          emptyMessage={userSearch ? t('noSearchResults') : t('noUsers')}
           sorting={[{ id: userSort, desc: userDirection === 'desc' }]}
           onSortingChange={handleSorting}
           manualFiltering
           manualSorting
-          toolbar={
-            <Select value={roleFilter || 'all'} onValueChange={setRole}>
-              <SelectTrigger className="w-48" aria-label={t('filterByRole')}><SelectValue placeholder={t('allRoles')} /></SelectTrigger>
-              <SelectContent><SelectGroup><SelectItem value="all">{t('allRoles')}</SelectItem>{roleFilterOptions.map((role) => <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>)}</SelectGroup></SelectContent>
-            </Select>
-          }
         />
         {users.isFetching && !users.isPending ? <p role="status" className="mt-3 text-sm text-muted-foreground">{t('common:loading')}</p> : null}
         <PageNavigation hasPrevious={userHistory.length > 0} hasNext={Boolean(users.data.nextCursor)} loading={users.isFetching} onPrevious={() => { const previous = userHistory[userHistory.length - 1] ?? ''; setUserHistory((current) => current.slice(0, -1)); setUserCursor(previous) }} onNext={() => { if (!users.data.nextCursor) return; setUserHistory((current) => [...current, userCursor]); setUserCursor(users.data.nextCursor) }} t={(key) => t(key as never)} />

@@ -835,7 +835,10 @@ func storeListOptions(options application.AccessListOptions, invitations bool) a
 	if !invitations && options.Sort == "expiresAt" {
 		options.Sort = "createdAt"
 	}
-	if options.Sort != "name" && options.Sort != "email" && options.Sort != "createdAt" && options.Sort != "expiresAt" {
+	if options.Sort != "name" && options.Sort != "email" && options.Sort != "roles" && options.Sort != "createdAt" && options.Sort != "expiresAt" {
+		options.Sort = "createdAt"
+	}
+	if invitations && options.Sort == "roles" {
 		options.Sort = "createdAt"
 	}
 	return options
@@ -868,6 +871,8 @@ func accessOrder(alias, sortKey, direction string) string {
 		expression = "lower(" + alias + ".name)"
 	case "email":
 		expression = alias + ".email_canonical"
+	case "roles":
+		expression = assignedRoleOrderExpression(alias)
 	case "expiresAt":
 		expression = alias + ".expires_at"
 	default:
@@ -887,6 +892,8 @@ func cursorBoundary(alias string, cursor application.AccessCursor, sortKey, dire
 		expression = "lower(" + alias + ".name)"
 	case "email":
 		expression = alias + ".email_canonical"
+	case "roles":
+		expression = assignedRoleOrderExpression(alias)
 	case "createdAt":
 		expression = alias + ".created_at"
 	case "expiresAt":
@@ -912,6 +919,13 @@ func likePattern(value string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(value))
 }
 
+func assignedRoleOrderExpression(alias string) string {
+	return fmt.Sprintf(`COALESCE((SELECT string_agg(r_sort.name_canonical, ', ' ORDER BY (r_sort.system_key IS NULL), r_sort.name_canonical, r_sort.id)
+		FROM auth_user_roles AS ur_sort
+		JOIN auth_roles AS r_sort ON r_sort.id = ur_sort.role_id
+		WHERE ur_sort.user_id = %s.id), '')`, alias)
+}
+
 func encodeUserCursor(user domain.AccessUser, options application.AccessListOptions) (string, error) {
 	value := ""
 	switch options.Sort {
@@ -919,10 +933,32 @@ func encodeUserCursor(user domain.AccessUser, options application.AccessListOpti
 		value = strings.ToLower(user.User.Name)
 	case "email":
 		value = strings.ToLower(user.User.Email)
+	case "roles":
+		value = userRoleSortKey(user)
 	default:
 		value = user.User.CreatedAt.Format(time.RFC3339Nano)
 	}
 	return application.EncodeAccessCursor(application.AccessCursor{Version: 1, Query: options.Query, RoleID: options.RoleID, Status: options.Status, Sort: options.Sort, Direction: options.Direction, Value: value, ID: user.User.ID})
+}
+
+func userRoleSortKey(user domain.AccessUser) string {
+	roles := append([]domain.Role(nil), user.Roles...)
+	sort.Slice(roles, func(i, j int) bool {
+		if roles[i].IsSystem() != roles[j].IsSystem() {
+			return roles[i].IsSystem()
+		}
+		left := domain.CanonicalRoleName(roles[i].Name)
+		right := domain.CanonicalRoleName(roles[j].Name)
+		if left != right {
+			return left < right
+		}
+		return roles[i].ID < roles[j].ID
+	})
+	names := make([]string, 0, len(roles))
+	for _, role := range roles {
+		names = append(names, domain.CanonicalRoleName(role.Name))
+	}
+	return strings.Join(names, ", ")
 }
 
 func encodeInvitationCursor(invitation domain.Invitation, options application.AccessListOptions) (string, error) {

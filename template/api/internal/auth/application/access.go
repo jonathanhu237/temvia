@@ -636,6 +636,9 @@ func normalizeAccessListOptions(options AccessListOptions, invitations bool) (Ac
 		options.Direction = "desc"
 	}
 	allowed := map[string]struct{}{"name": {}, "email": {}, "createdAt": {}}
+	if !invitations {
+		allowed["roles"] = struct{}{}
+	}
 	if invitations {
 		allowed["expiresAt"] = struct{}{}
 	}

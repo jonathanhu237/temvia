@@ -71,6 +71,19 @@ func TestNormalizeAccessListOptionsNormalizesQueryAndValidatesCursorContext(t *t
 	}
 }
 
+func TestNormalizeAccessListOptionsAllowsRoleSortingOnlyForUsers(t *testing.T) {
+	options, err := normalizeAccessListOptions(AccessListOptions{Sort: "roles", Direction: "asc", Limit: 25}, false)
+	if err != nil {
+		t.Fatalf("normalizeAccessListOptions(users) error = %v", err)
+	}
+	if options.Sort != "roles" || options.Direction != "asc" {
+		t.Fatalf("normalizeAccessListOptions(users) = %#v, want role sorting", options)
+	}
+	if _, err := normalizeAccessListOptions(AccessListOptions{Sort: "roles", Direction: "asc", Limit: 25}, true); err == nil {
+		t.Fatal("normalizeAccessListOptions(invitations) accepted role sorting")
+	}
+}
+
 func TestNormalizeAccessListOptionsRejectsMalformedTimeCursor(t *testing.T) {
 	cursor, err := EncodeAccessCursor(AccessCursor{Version: 1, Query: "", Sort: "createdAt", Direction: "desc", Value: "not-a-time", ID: "019535d9-3df7-79fb-b466-fa907fa17f95"})
 	if err != nil {

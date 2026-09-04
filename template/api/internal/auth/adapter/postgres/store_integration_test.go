@@ -607,6 +607,10 @@ func TestStoreIntegrationAccessListQueryOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
 	}
+	roleSortRole, err := store.CreateRole(ctx, "Alpha reader", "", []domain.PermissionKey{domain.PermissionUsersRead})
+	if err != nil {
+		t.Fatalf("CreateRole(role sort) error = %v", err)
+	}
 
 	userRows := []struct {
 		id, name, email string
@@ -623,6 +627,9 @@ func TestStoreIntegrationAccessListQueryOptions(t *testing.T) {
 		if _, err := db.ExecContext(ctx, `INSERT INTO auth_user_roles (user_id, role_id) VALUES ($1::uuid, $2::uuid)`, row.id, role.ID); err != nil {
 			t.Fatalf("assign user %s: %v", row.id, err)
 		}
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO auth_user_roles (user_id, role_id) VALUES ($1::uuid, $2::uuid)`, userRows[2].id, roleSortRole.ID); err != nil {
+		t.Fatalf("assign role sort role: %v", err)
 	}
 
 	users, err := store.ListUsersWithOptions(ctx, application.AccessListOptions{Query: "  ADA ", Sort: "name", Direction: "asc", Limit: 1})
@@ -641,6 +648,20 @@ func TestStoreIntegrationAccessListQueryOptions(t *testing.T) {
 	}
 	if _, err := store.ListUsersWithOptions(ctx, application.AccessListOptions{Sort: "email", Direction: "asc", Limit: 1}); err != nil {
 		t.Fatalf("ListUsersWithOptions(email) error = %v", err)
+	}
+	users, err = store.ListUsersWithOptions(ctx, application.AccessListOptions{Sort: "roles", Direction: "asc", Limit: 1})
+	if err != nil {
+		t.Fatalf("ListUsersWithOptions(roles first) error = %v", err)
+	}
+	if len(users.Items) != 1 || users.Items[0].User.ID != userRows[2].id || users.NextCursor == "" {
+		t.Fatalf("ListUsersWithOptions(roles first) = %#v, want Alpha reader user and a cursor", users)
+	}
+	users, err = store.ListUsersWithOptions(ctx, application.AccessListOptions{Cursor: users.NextCursor, Sort: "roles", Direction: "asc", Limit: 1})
+	if err != nil {
+		t.Fatalf("ListUsersWithOptions(roles second) error = %v", err)
+	}
+	if len(users.Items) != 1 || users.Items[0].User.ID != userRows[0].id {
+		t.Fatalf("ListUsersWithOptions(roles second) = %#v, want first List reader user", users)
 	}
 
 	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)

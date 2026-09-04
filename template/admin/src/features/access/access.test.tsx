@@ -135,6 +135,22 @@ describe('access components', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
+  it('sorts users by role without offering a role filter', async () => {
+    const getUsers = vi.fn().mockResolvedValue({ users: [{ id: '019535d9-3df7-79fb-b466-fa907fa17f91', name: 'Ada', email: 'ada@example.com', createdAt: '2026-09-02T00:00:00Z', authVersion: 1, roles: [usersRole] }] })
+    const api = mockApi({ getUsers })
+    const user = userEvent.setup()
+    renderWithQueryClient(<UsersPage api={api} canManage={false} />)
+
+    const table = await screen.findByRole('table')
+    expect(screen.queryByRole('combobox', { name: 'Filter by role' })).not.toBeInTheDocument()
+
+    await user.click(within(table).getByRole('button', { name: 'Role' }))
+    await waitFor(() => expect(getUsers).toHaveBeenLastCalledWith(
+      { cursor: undefined, q: undefined, roleId: undefined, sort: 'roles', direction: 'asc' },
+      expect.anything(),
+    ))
+  })
+
   it('keeps invitations on their own page and confirms the original mail language', async () => {
     const resendInvitation = vi.fn().mockResolvedValue({ invitation: pendingInvitation })
     const api = mockApi({
