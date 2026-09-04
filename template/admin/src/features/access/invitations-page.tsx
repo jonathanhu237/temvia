@@ -107,11 +107,6 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
       enableSorting: false,
     },
     {
-      accessorKey: 'createdAt',
-      header: ({ column }) => <SortableHeader column={column}>{t('createdAt')}</SortableHeader>,
-      cell: ({ row }) => <time dateTime={row.original.createdAt}>{formatDate(row.original.createdAt, i18n.language)}</time>,
-    },
-    {
       id: 'expiresAt',
       accessorFn: (invitation) => invitation.expiresAt,
       header: ({ column }) => <SortableHeader column={column}>{t('status')}</SortableHeader>,

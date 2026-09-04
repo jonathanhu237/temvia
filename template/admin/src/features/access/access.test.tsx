@@ -150,6 +150,7 @@ describe('access components', () => {
     expect(within(table).getByText('Pending')).toBeVisible()
     expect(within(table).getByText(/Expires Jan 2, 2099/)).toBeVisible()
     expect(within(table).queryByRole('columnheader', { name: 'Email language' })).not.toBeInTheDocument()
+    expect(within(table).queryByRole('columnheader', { name: 'Created' })).not.toBeInTheDocument()
 
     await user.click(within(table).getByRole('button', { name: 'Resend' }))
     const confirmation = await screen.findByRole('alertdialog')
