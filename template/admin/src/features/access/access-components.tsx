@@ -85,19 +85,21 @@ export function BuiltInRoleIndicator({ label }: { label: string }) {
 }
 
 export function AssignmentCount({ count }: { count: number }) {
+  return <span>{count}</span>
+}
+
+export function AssignmentCountInfo() {
   const { t } = useTranslation('access')
+  const description = t('assignmentCountDescription')
   return (
-    <span className="inline-flex items-center gap-1">
-      {count}
-      <TooltipProvider><Tooltip>
-        <TooltipTrigger asChild>
-          <span tabIndex={0} role="img" aria-label={t('assignmentCountDescription')} title={t('assignmentCountDescription')} className="inline-flex rounded-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <Info aria-hidden="true" data-icon="inline-start" />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{t('assignmentCountDescription')}</TooltipContent>
-      </Tooltip></TooltipProvider>
-    </span>
+    <TooltipProvider><Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} role="img" aria-label={description} title={description} className="inline-flex rounded-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <Info aria-hidden="true" data-icon="inline-start" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{description}</TooltipContent>
+    </Tooltip></TooltipProvider>
   )
 }
 

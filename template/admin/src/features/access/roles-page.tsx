@@ -24,7 +24,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { Permission, Role } from '@/shared/api/contracts'
 import { AccessError } from './access-error'
-import { AssignmentCount, BuiltInRoleIndicator } from './access-components'
+import { AssignmentCount, AssignmentCountInfo, BuiltInRoleIndicator } from './access-components'
 import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { roleQueryKey, rolesOptions, rolesQueryKey } from './queries'
@@ -129,7 +129,7 @@ export function RolesPage({ api, canManage }: { api: ApiClient; canManage: boole
     {
       id: 'assignments',
       accessorFn: (role) => role.assignmentCount ?? 0,
-      header: ({ column }) => <SortableHeader column={column}>{t('assignmentCount')}</SortableHeader>,
+      header: ({ column }) => <div className="flex items-center gap-1"><SortableHeader column={column}>{t('assignmentCount')}</SortableHeader><AssignmentCountInfo /></div>,
       cell: ({ row }) => <AssignmentCount count={row.original.assignmentCount ?? 0} />,
     },
     {
