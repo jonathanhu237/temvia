@@ -3,6 +3,7 @@ import { ApiProblemError, ApiTransportError } from './client'
 import {
   fieldProblemFor,
   fieldMessageKey,
+  isForbidden,
   isRequestCancelled,
   isInvalidPasswordResetToken,
   isInvalidSetupToken,
@@ -52,6 +53,11 @@ describe('localized problem mapping', () => {
     expect(isRequestCancelled(new ApiTransportError('cancelled', { aborted: true }))).toBe(true)
     expect(isRequestCancelled(new ApiTransportError('network'))).toBe(false)
     expect(isRequestCancelled(new Error('cancelled'))).toBe(false)
+  })
+
+  it('identifies permission failures separately from other request errors', () => {
+    expect(isForbidden(new ApiProblemError({ type: '/problems/forbidden', title: 'forbidden', status: 403, code: 'forbidden' }))).toBe(true)
+    expect(isForbidden(new ApiProblemError({ type: '/problems/validation-failed', title: 'validation', status: 422, code: 'validation_failed' }))).toBe(false)
   })
 
   it.each([

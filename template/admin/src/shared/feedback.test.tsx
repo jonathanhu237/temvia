@@ -1,7 +1,8 @@
 import { render, waitFor } from '@testing-library/react'
 import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useRequestErrorToast } from './feedback'
+import { readFailureFeedback, useRequestErrorToast } from './feedback'
+import { ApiProblemError } from '@/shared/api/client'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
@@ -19,5 +20,16 @@ describe('request feedback', () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Request failed', { description: 'Refresh the page.' }))
     expect(toast.error).toHaveBeenCalledOnce()
+  })
+
+  it('uses an access-denied message for forbidden reads', () => {
+    const copy = readFailureFeedback(new ApiProblemError({ type: '/problems/forbidden', title: 'forbidden', status: 403, code: 'forbidden' }), {
+      unavailableTitle: 'Unavailable',
+      unavailableDescription: 'Refresh the page.',
+      forbiddenTitle: 'Access denied',
+      forbiddenDescription: 'You do not have access.',
+    })
+
+    expect(copy).toEqual({ title: 'Access denied', description: 'You do not have access.' })
   })
 })

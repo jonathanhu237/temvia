@@ -327,7 +327,7 @@ describe('access components', () => {
   })
 
   it('distinguishes forbidden failures and does not offer a misleading retry', () => {
-    render(<AccessError error={problem('/problems/forbidden', 403, 'forbidden')} onRetry={vi.fn()} />)
+    render(<AccessError error={problem('/problems/forbidden', 403, 'forbidden')} />)
 
     expect(screen.getByRole('heading', { name: 'Access denied' })).toBeVisible()
     expect(screen.getByText('Your account does not have permission to view this page.')).toBeVisible()
@@ -335,7 +335,7 @@ describe('access components', () => {
   })
 
   it('distinguishes conflicts without offering a recovery action', () => {
-    render(<AccessError error={problem('/problems/role-in-use', 409, 'role_in_use')} onReload={vi.fn()} />)
+    render(<AccessError error={problem('/problems/role-in-use', 409, 'role_in_use')} />)
 
     expect(screen.getByRole('heading', { name: 'This record changed' })).toBeVisible()
     expect(screen.getByText('This role is still assigned. Reassign users and invitations first.')).toBeVisible()
@@ -343,14 +343,13 @@ describe('access components', () => {
   })
 
   it('distinguishes validation failures and dependency failures', async () => {
-    const retry = vi.fn()
-    const view = render(<AccessError error={problem('/problems/validation-failed', 422, 'validation_failed')} onRetry={retry} />)
+    const view = render(<AccessError error={problem('/problems/validation-failed', 422, 'validation_failed')} />)
     expect(screen.getByRole('heading', { name: 'Review the access details' })).toBeVisible()
     expect(screen.getByText('Review the highlighted fields and try again.')).toBeVisible()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
 
     view.unmount()
-    render(<AccessError error={new ApiTransportError('network')} onRetry={retry} />)
+    render(<AccessError error={new ApiTransportError('network')} />)
     expect(screen.getByRole('heading', { name: 'Access data is unavailable' })).toBeVisible()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })

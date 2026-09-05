@@ -23,11 +23,12 @@ import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { Permission, PermissionCombination, Role } from '@/shared/api/contracts'
+import { isForbidden } from '@/shared/api/problems'
 import { AssignmentCount, AssignmentCountInfo, BuiltInRoleIndicator } from './access-components'
 import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { roleQueryKey, rolesOptions, rolesQueryKey } from './queries'
-import { notifyRequestError, notifySuccess, useRequestErrorToast } from '@/shared/feedback'
+import { notifyRequestError, notifySuccess, readFailureFeedback, useRequestErrorToast } from '@/shared/feedback'
 
 export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = false }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean }) {
   const { t } = useTranslation(['access', 'problems', 'common'])
@@ -47,7 +48,7 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     setEditorGeneration(next)
   }
   const roles = useMemo(() => query.data?.roles ?? [], [query.data?.roles])
-  useRequestErrorToast(query.error, query.isError, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
+  useRequestErrorToast(query.error, query.isError, t, readFailureFeedback(query.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
   const selectedRole = selected ? roles.find((role) => role.id === selected.id) ?? selected : undefined
   const filteredRoles = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase()
@@ -142,7 +143,7 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1></div>{canManage ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" data-icon="inline-start" />{t('createRole')}</Button> : null}</div>
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('roles')}</CardTitle></CardHeader>
-      <CardContent>{query.isError && !query.data ? <p role="status" className="text-sm text-muted-foreground">{t('common:refreshPage')}</p> : <DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} />}</CardContent>
+      <CardContent>{query.isError && !query.data ? <p role="status" className="text-sm text-muted-foreground">{isForbidden(query.error) ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} />}</CardContent>
     </Card>
     <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
       <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">

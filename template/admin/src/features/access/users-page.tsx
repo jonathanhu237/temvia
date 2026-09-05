@@ -11,11 +11,12 @@ import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field
 import { Input } from '@/components/ui/input'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { Role } from '@/shared/api/contracts'
+import { isForbidden } from '@/shared/api/problems'
 import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { PageNavigation, RoleBadges, canAssignRole, formatDate, type AccessUser } from './access-components'
 import { usersOptions } from './queries'
-import { notifyRequestError, notifySuccess, useRequestErrorToast } from '@/shared/feedback'
+import { notifyRequestError, notifySuccess, readFailureFeedback, useRequestErrorToast } from '@/shared/feedback'
 
 export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = false }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean }) {
   const { t, i18n } = useTranslation(['access', 'common'])
@@ -33,8 +34,8 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     enabled: canManage,
     staleTime: 10_000,
   })
-  useRequestErrorToast(users.error, users.isError, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
-  useRequestErrorToast(roleAdministration.error, roleAdministration.isError && canManage, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
+  useRequestErrorToast(users.error, users.isError, t, readFailureFeedback(users.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
+  useRequestErrorToast(roleAdministration.error, roleAdministration.isError && canManage, t, readFailureFeedback(roleAdministration.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
   const [assignmentOpen, setAssignmentOpen] = useState(false)
   const [assignmentUser, setAssignmentUser] = useState<AccessUser | undefined>()
   const [assignmentGeneration, setAssignmentGeneration] = useState(0)
@@ -101,7 +102,7 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
           onSearchChange={resetPaging}
           searchPlaceholder={t('searchUsers')}
           clearSearchLabel={t('clearSearch')}
-          emptyMessage={users.isError && !users.data ? t('common:refreshPage') : userSearch ? t('noSearchResults') : t('noUsers')}
+          emptyMessage={users.isError && !users.data ? isForbidden(users.error) ? t('forbiddenDescription') : t('common:refreshPage') : userSearch ? t('noSearchResults') : t('noUsers')}
           sorting={[{ id: userSort, desc: userDirection === 'desc' }]}
           onSortingChange={handleSorting}
           manualFiltering

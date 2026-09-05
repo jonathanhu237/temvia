@@ -81,6 +81,10 @@ export function isUnauthenticated(error: unknown): boolean {
   )
 }
 
+export function isForbidden(error: unknown): boolean {
+  return error instanceof ApiProblemError && (error.problem.status === 403 || error.problem.code === 'forbidden')
+}
+
 export function isRequestCancelled(error: unknown): boolean {
   return error instanceof ApiTransportError && error.aborted
 }

@@ -27,9 +27,6 @@ export function accessFailureKind(error: unknown): AccessFailureKind {
 
 type AccessErrorProps = {
   error: unknown
-  onRetry?: () => void
-  onReload?: () => void
-  reloadLabel?: string
   descriptionOverride?: string
 }
 

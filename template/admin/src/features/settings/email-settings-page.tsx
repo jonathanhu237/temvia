@@ -11,8 +11,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { EmailSettings } from '@/shared/api/contracts'
-import { translateProblemWithFields } from '@/shared/api/problems'
-import { notifyRequestError, notifySuccess, useRequestErrorToast } from '@/shared/feedback'
+import { isForbidden, translateProblemWithFields } from '@/shared/api/problems'
+import { notifyRequestError, notifySuccess, readFailureFeedback, useRequestErrorToast } from '@/shared/feedback'
 import { useAccessDraftStore, type EmailSettingsDraft } from '@/features/access/drafts'
 
 const emptyDraft: EmailSettingsDraft = {
@@ -29,7 +29,7 @@ export function EmailSettingsPage({ api, canWrite = true }: { api: ApiClient; ca
   const [testRecipientError, setTestRecipientError] = useState(false)
   const [localeError, setLocaleError] = useState(false)
   const query = useQuery({ queryKey: ['settings', 'email'], queryFn: ({ signal }) => api.getEmailSettings ? api.getEmailSettings(signal) : Promise.reject(new Error('missing getEmailSettings')), retry: false })
-  useRequestErrorToast(query.error, query.isError, t, { title: t('email.readUnavailableTitle'), description: t('email.readUnavailableDescription') })
+  useRequestErrorToast(query.error, query.isError, t, readFailureFeedback(query.error, { unavailableTitle: t('email.readUnavailableTitle'), unavailableDescription: t('email.readUnavailableDescription'), forbiddenTitle: t('access:forbiddenTitle'), forbiddenDescription: t('access:forbiddenDescription') }))
 
   useEffect(() => {
     if (!query.data || draft) return
@@ -90,7 +90,7 @@ export function EmailSettingsPage({ api, canWrite = true }: { api: ApiClient; ca
     <div><h1 id="settings-title" className="text-2xl font-semibold tracking-tight">{t('title')}</h1></div>
     <Card>
       <CardHeader><CardTitle className="flex items-center gap-2"><MailCheck aria-hidden="true" />{t('email.title')}</CardTitle></CardHeader>
-      <CardContent>{query.isError && !hasSettings ? <p role="status" className="text-sm text-muted-foreground">{t('common:refreshPage')}</p> : <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); if (!busy && !current.conflict) save.mutate() }} noValidate>
+      <CardContent>{query.isError && !hasSettings ? <p role="status" className="text-sm text-muted-foreground">{isForbidden(query.error) ? t('access:forbiddenDescription') : t('common:refreshPage')}</p> : <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); if (!busy && !current.conflict) save.mutate() }} noValidate>
         <FieldGroup>
           <div className="grid gap-4 sm:grid-cols-[1fr_8rem]"><Field><FieldLabel htmlFor="smtp-host">{t('email.host')}</FieldLabel><Input id="smtp-host" value={current.host} onChange={(event) => update({ host: event.target.value })} disabled={disabled} /></Field><Field><FieldLabel htmlFor="smtp-port">{t('email.port')}</FieldLabel><Input id="smtp-port" type="number" min={1} max={65535} value={current.port} onChange={(event) => update({ port: Number(event.target.value) })} disabled={disabled} /></Field></div>
           <Field><FieldLabel htmlFor="smtp-security">{t('email.security')}</FieldLabel><Select value={current.security} onValueChange={(value) => update({ security: value as EmailSettingsDraft['security'] })} disabled={disabled}><SelectTrigger id="smtp-security"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">{t('email.securityNone')}</SelectItem><SelectItem value="starttls">{t('email.securityStartTLS')}</SelectItem><SelectItem value="tls">{t('email.securityTLS')}</SelectItem></SelectContent></Select></Field>

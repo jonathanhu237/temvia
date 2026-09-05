@@ -21,7 +21,7 @@ export const Route = createFileRoute('/_authenticated')({
       throw error
     }
   },
-  errorComponent: ({ error, reset }) => <SessionError error={error} reset={reset} />,
+  errorComponent: ({ error }) => <SessionError error={error} />,
   component: AuthenticatedRoute,
 })
 

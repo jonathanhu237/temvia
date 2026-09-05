@@ -21,11 +21,12 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import type { ApiClient } from '@/shared/api/client'
 import type { Invitation } from '@/shared/api/contracts'
+import { isForbidden } from '@/shared/api/problems'
 import { DataTable, SortableHeader } from './data-table'
 import { InvitationForm } from './users-page'
 import { PageNavigation, RoleBadges, canAssignRole, formatDate } from './access-components'
 import { invitationsOptions, roleOptionsOptions } from './queries'
-import { notifyRequestError, notifySuccess, useRequestErrorToast } from '@/shared/feedback'
+import { notifyRequestError, notifySuccess, readFailureFeedback, useRequestErrorToast } from '@/shared/feedback'
 
 type InvitationAction = 'resend' | 'renew' | 'revoke'
 type InvitationSort = 'name' | 'email' | 'createdAt' | 'expiresAt'
@@ -52,9 +53,9 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
     enabled: canManage,
     staleTime: 10_000,
   })
-  useRequestErrorToast(invitations.error, invitations.isError, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
-  useRequestErrorToast(roleOptions.error, roleOptions.isError && canReadRoles, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
-  useRequestErrorToast(roleAdministration.error, roleAdministration.isError && canManage, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
+  useRequestErrorToast(invitations.error, invitations.isError, t, readFailureFeedback(invitations.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
+  useRequestErrorToast(roleOptions.error, roleOptions.isError && canReadRoles, t, readFailureFeedback(roleOptions.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
+  useRequestErrorToast(roleAdministration.error, roleAdministration.isError && canManage, t, readFailureFeedback(roleAdministration.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
   const resend = useMutation({
     retry: false,
     mutationFn: async ({ invitation, kind }: { invitation: Invitation; kind: 'resend' | 'renew' }) => {
@@ -148,7 +149,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
           onSearchChange={resetPaging}
           searchPlaceholder={t('searchInvitations')}
           clearSearchLabel={t('clearSearch')}
-          emptyMessage={invitations.isError && !invitations.data ? t('common:refreshPage') : search || roleFilter || statusFilter ? t('noSearchResults') : t('noInvitations')}
+          emptyMessage={invitations.isError && !invitations.data ? isForbidden(invitations.error) ? t('forbiddenDescription') : t('common:refreshPage') : search || roleFilter || statusFilter ? t('noSearchResults') : t('noInvitations')}
           sorting={[{ id: sort, desc: direction === 'desc' }]}
           onSortingChange={handleSorting}
           manualFiltering

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
-import { isRequestCancelled, translateProblemWithFields } from '@/shared/api/problems'
+import { isForbidden, isRequestCancelled, translateProblemWithFields } from '@/shared/api/problems'
 
 type Translator = unknown
 
@@ -11,6 +11,19 @@ const announcedRequestErrors = new WeakSet<object>()
 export type RequestFeedbackOptions = {
   title?: string
   description?: string
+}
+
+export type ReadFailureFeedbackOptions = {
+  unavailableTitle: string
+  unavailableDescription: string
+  forbiddenTitle: string
+  forbiddenDescription: string
+}
+
+export function readFailureFeedback(error: unknown, options: ReadFailureFeedbackOptions): RequestFeedbackOptions {
+  return isForbidden(error)
+    ? { title: options.forbiddenTitle, description: options.forbiddenDescription }
+    : { title: options.unavailableTitle, description: options.unavailableDescription }
 }
 
 /** Show one request failure without exposing raw server or transport details. */
