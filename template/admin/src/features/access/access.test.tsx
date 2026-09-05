@@ -335,11 +335,15 @@ describe('access components', () => {
   })
 
   it('announces route-level access denial without a retry prompt', async () => {
-    render(<AccessDenied />)
+    const view = render(<AccessDenied />)
 
     expect(screen.getByRole('heading', { name: 'Access denied' })).toBeVisible()
     expect(screen.getByText('Your account does not have permission to view this page.')).toBeVisible()
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Access denied', { description: 'Your account does not have permission to view this page.' }))
+
+    view.unmount()
+    render(<AccessDenied />)
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(2))
   })
 
   it('distinguishes conflicts without offering a recovery action', () => {
