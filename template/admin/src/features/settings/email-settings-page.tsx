@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, MailCheck, Save, Send, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { EmailSettings } from '@/shared/api/contracts'
+import { translateProblem } from '@/shared/api/problems'
 import { AccessError } from '@/features/access/access-error'
 import { useAccessDraftStore, type EmailSettingsDraft } from '@/features/access/drafts'
 
@@ -49,8 +51,14 @@ export function EmailSettingsPage({ api, defaultRecipient, canWrite = true }: { 
       if (!current.defaultLocale) throw new Error('default locale required')
       return api.testEmailSettings({ host: current.host, port: current.port, security: current.security, username: current.username, password: current.password || undefined, clearPassword: current.clearPassword, fromAddress: current.fromAddress, fromName: current.fromName, defaultLocale: current.defaultLocale, revision: current.revision })
     },
-    onSuccess: () => setError(undefined),
-    onError: setError,
+    onSuccess: () => {
+      setError(undefined)
+      toast.success(t('email.testSuccess'))
+    },
+    onError: (value) => {
+      setError(value)
+      toast.error(t('email.testFailed'), { description: translateProblem(value, t) })
+    },
   })
   const reloadLatest = async () => {
     const result = await query.refetch()
@@ -78,7 +86,7 @@ export function EmailSettingsPage({ api, defaultRecipient, canWrite = true }: { 
           <Field><FieldLabel htmlFor="smtp-default-locale">{t('email.defaultLocale')}</FieldLabel><Select value={current.defaultLocale ?? ''} onValueChange={(value) => update({ defaultLocale: value as 'en' | 'zh-CN' })} disabled={disabled}><SelectTrigger id="smtp-default-locale"><SelectValue placeholder={t('email.chooseLocale')} /></SelectTrigger><SelectContent><SelectItem value="zh-CN">{t('common:chinese')}</SelectItem><SelectItem value="en">{t('common:english')}</SelectItem></SelectContent></Select></Field>
           <p className="text-sm text-muted-foreground">{t('email.testRecipientHint', { recipient: defaultRecipient })}</p>
         </FieldGroup>
-        <div className="flex flex-wrap justify-end gap-2">{canWrite ? <><Button type="button" variant="outline" disabled={disabled} onClick={() => { if (!current.defaultLocale) { setError(new Error('default locale required')); return }; test.mutate() }}><Send aria-hidden="true" data-icon="inline-start" />{test.isPending ? t('email.testing') : t('email.sendTest')}</Button><Button type="submit" disabled={disabled || !current.defaultLocale}><Save aria-hidden="true" data-icon="inline-start" />{save.isPending ? t('common:saving') : t('common:save')}</Button></> : null}</div>
+        <div className="flex flex-wrap justify-end gap-2">{canWrite ? <><Button type="button" variant="outline" disabled={disabled} onClick={() => { if (!current.defaultLocale) { const value = new Error('default locale required'); setError(value); toast.error(t('email.testFailed'), { description: t('email.chooseLocale') }); return }; test.mutate() }}><Send aria-hidden="true" data-icon="inline-start" />{test.isPending ? t('email.testing') : t('email.sendTest')}</Button><Button type="submit" disabled={disabled || !current.defaultLocale}><Save aria-hidden="true" data-icon="inline-start" />{save.isPending ? t('common:saving') : t('common:save')}</Button></> : null}</div>
       </form></CardContent>
     </Card>
   </section>
