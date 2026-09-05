@@ -86,11 +86,12 @@ export function EmailSettingsPage({ api, canWrite = true }: { api: ApiClient; ca
   const busy = save.isPending || test.isPending
   const disabled = busy || !canWrite || current.conflict
   const hasSettings = Boolean(query.data || draft)
+  const forbidden = query.isError && isForbidden(query.error)
   return <section className="flex max-w-3xl flex-col gap-5" aria-labelledby="settings-title">
     <div><h1 id="settings-title" className="text-2xl font-semibold tracking-tight">{t('title')}</h1></div>
     <Card>
       <CardHeader><CardTitle className="flex items-center gap-2"><MailCheck aria-hidden="true" />{t('email.title')}</CardTitle></CardHeader>
-      <CardContent>{query.isError && !hasSettings ? <p role="status" className="text-sm text-muted-foreground">{isForbidden(query.error) ? t('access:forbiddenDescription') : t('common:refreshPage')}</p> : <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); if (!busy && !current.conflict) save.mutate() }} noValidate>
+      <CardContent>{query.isError && (forbidden || !hasSettings) ? <p role="status" className="text-sm text-muted-foreground">{forbidden ? t('access:forbiddenDescription') : t('common:refreshPage')}</p> : <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); if (!busy && !current.conflict) save.mutate() }} noValidate>
         <FieldGroup>
           <div className="grid gap-4 sm:grid-cols-[1fr_8rem]"><Field><FieldLabel htmlFor="smtp-host">{t('email.host')}</FieldLabel><Input id="smtp-host" value={current.host} onChange={(event) => update({ host: event.target.value })} disabled={disabled} /></Field><Field><FieldLabel htmlFor="smtp-port">{t('email.port')}</FieldLabel><Input id="smtp-port" type="number" min={1} max={65535} value={current.port} onChange={(event) => update({ port: Number(event.target.value) })} disabled={disabled} /></Field></div>
           <Field><FieldLabel htmlFor="smtp-security">{t('email.security')}</FieldLabel><Select value={current.security} onValueChange={(value) => update({ security: value as EmailSettingsDraft['security'] })} disabled={disabled}><SelectTrigger id="smtp-security"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">{t('email.securityNone')}</SelectItem><SelectItem value="starttls">{t('email.securityStartTLS')}</SelectItem><SelectItem value="tls">{t('email.securityTLS')}</SelectItem></SelectContent></Select></Field>

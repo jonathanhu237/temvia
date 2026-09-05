@@ -84,8 +84,9 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
     setDirection(first?.desc ? 'desc' : 'asc')
     setCursor(''); setHistory([])
   }
-  const roleList = useMemo(() => roleAdministration.data?.roles ?? [], [roleAdministration.data?.roles])
-  const roleFilterOptions = roleOptions.data?.roles ?? []
+  const roleList = useMemo(() => roleAdministration.isError && isForbidden(roleAdministration.error) ? [] : roleAdministration.data?.roles ?? [], [roleAdministration.data?.roles, roleAdministration.error, roleAdministration.isError])
+  const roleFilterOptions = roleOptions.isError && isForbidden(roleOptions.error) ? [] : roleOptions.data?.roles ?? []
+  const invitationsForbidden = invitations.isError && isForbidden(invitations.error)
   const assignableRoleIDs = useMemo(() => new Set(roleList.filter((role) => canAssignRole(role, actorPermissions, actorSuperAdmin)).map((role) => role.id)), [actorPermissions, actorSuperAdmin, roleList])
   const expired = (invitation: Invitation) => new Date(invitation.expiresAt).getTime() <= Date.now()
 
@@ -142,6 +143,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('invitations')}</CardTitle></CardHeader>
       <CardContent>
+        {invitations.isError && (invitationsForbidden || !invitations.data) ? <p role="status" className="text-sm text-muted-foreground">{invitationsForbidden ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <>
         <DataTable
           columns={columns}
           data={invitations.data?.invitations ?? []}
@@ -149,7 +151,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
           onSearchChange={resetPaging}
           searchPlaceholder={t('searchInvitations')}
           clearSearchLabel={t('clearSearch')}
-          emptyMessage={invitations.isError && !invitations.data ? isForbidden(invitations.error) ? t('forbiddenDescription') : t('common:refreshPage') : search || roleFilter || statusFilter ? t('noSearchResults') : t('noInvitations')}
+          emptyMessage={search || roleFilter || statusFilter ? t('noSearchResults') : t('noInvitations')}
           sorting={[{ id: sort, desc: direction === 'desc' }]}
           onSortingChange={handleSorting}
           manualFiltering
@@ -158,6 +160,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
         />
         {invitations.isFetching && !invitations.isPending ? <p role="status" className="mt-3 text-sm text-muted-foreground">{t('common:loading')}</p> : null}
         <PageNavigation hasPrevious={history.length > 0} hasNext={Boolean(invitations.data?.nextCursor)} loading={invitations.isFetching} onPrevious={() => { const previous = history[history.length - 1] ?? ''; setHistory((current) => current.slice(0, -1)); setCursor(previous) }} onNext={() => { if (!invitations.data?.nextCursor) return; setHistory((current) => [...current, cursor]); setCursor(invitations.data.nextCursor) }} t={(key) => t(key as never)} />
+        </>}
       </CardContent>
     </Card>
     <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>

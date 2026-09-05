@@ -143,7 +143,7 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1></div>{canManage ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" data-icon="inline-start" />{t('createRole')}</Button> : null}</div>
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('roles')}</CardTitle></CardHeader>
-      <CardContent>{query.isError && !query.data ? <p role="status" className="text-sm text-muted-foreground">{isForbidden(query.error) ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} />}</CardContent>
+      <CardContent>{query.isError && (isForbidden(query.error) || !query.data) ? <p role="status" className="text-sm text-muted-foreground">{isForbidden(query.error) ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} />}</CardContent>
     </Card>
     <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
       <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">

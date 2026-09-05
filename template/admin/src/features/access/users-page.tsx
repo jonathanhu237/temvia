@@ -50,6 +50,7 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     setUserCursor(''); setUserHistory([])
   }
   const roleList = roleAdministration.data?.roles ?? []
+  const usersForbidden = users.isError && isForbidden(users.error)
   const activeAssignmentUser = assignmentUser ? users.data?.users.find((item) => item.id === assignmentUser.id) ?? assignmentUser : undefined
   const openAssignment = (user: AccessUser) => {
     const next = assignmentGenerationRef.current + 1
@@ -95,6 +96,7 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('users')}</CardTitle></CardHeader>
       <CardContent>
+        {users.isError && (usersForbidden || !users.data) ? <p role="status" className="text-sm text-muted-foreground">{usersForbidden ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <>
         <DataTable
           columns={userColumns}
           data={users.data?.users ?? []}
@@ -102,7 +104,7 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
           onSearchChange={resetPaging}
           searchPlaceholder={t('searchUsers')}
           clearSearchLabel={t('clearSearch')}
-          emptyMessage={users.isError && !users.data ? isForbidden(users.error) ? t('forbiddenDescription') : t('common:refreshPage') : userSearch ? t('noSearchResults') : t('noUsers')}
+          emptyMessage={userSearch ? t('noSearchResults') : t('noUsers')}
           sorting={[{ id: userSort, desc: userDirection === 'desc' }]}
           onSortingChange={handleSorting}
           manualFiltering
@@ -110,9 +112,10 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
         />
         {users.isFetching && !users.isPending ? <p role="status" className="mt-3 text-sm text-muted-foreground">{t('common:loading')}</p> : null}
         <PageNavigation hasPrevious={userHistory.length > 0} hasNext={Boolean(users.data?.nextCursor)} loading={users.isFetching} onPrevious={() => { const previous = userHistory[userHistory.length - 1] ?? ''; setUserHistory((current) => current.slice(0, -1)); setUserCursor(previous) }} onNext={() => { if (!users.data?.nextCursor) return; setUserHistory((current) => [...current, userCursor]); setUserCursor(users.data.nextCursor) }} t={(key) => t(key as never)} />
+        </>}
       </CardContent>
     </Card>
-    <UserAssignmentDialog key={activeAssignmentUser?.id ?? 'none'} open={assignmentOpen} user={activeAssignmentUser} roles={roleList} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin} api={api} canManage={canManage} assignmentGeneration={assignmentGeneration} onClose={() => setAssignmentOpen(false)} onDone={(_userID, generation) => { if (generation !== assignmentGenerationRef.current) return; setAssignmentOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }); void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] }) }} />
+    {!usersForbidden ? <UserAssignmentDialog key={activeAssignmentUser?.id ?? 'none'} open={assignmentOpen} user={activeAssignmentUser} roles={roleList} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin} api={api} canManage={canManage} assignmentGeneration={assignmentGeneration} onClose={() => setAssignmentOpen(false)} onDone={(_userID, generation) => { if (generation !== assignmentGenerationRef.current) return; setAssignmentOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }); void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] }) }} /> : null}
   </section>
 }
 
