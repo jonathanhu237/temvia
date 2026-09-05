@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ApiProblemError, ApiProtocolError, ApiTransportError } from '@/shared/api/client'
 import { translateProblem } from '@/shared/api/problems'
+import { useRequestErrorToast } from '@/shared/feedback'
 
 export type AccessFailureKind = 'forbidden' | 'conflict' | 'validation' | 'dependency'
 
@@ -50,5 +51,10 @@ export function AccessError({ error, descriptionOverride }: AccessErrorProps) {
 }
 
 export function AccessDenied() {
-  return <AccessError error={new ApiProblemError({ type: '/problems/forbidden', title: 'forbidden', status: 403, code: 'forbidden' })} />
+  const { t } = useTranslation(['access', 'problems'])
+  const error = forbiddenAccessError
+  useRequestErrorToast(error, true, t, { title: t('forbiddenTitle'), description: t('forbiddenDescription') })
+  return <section role="status" aria-labelledby="access-denied-title" className="flex flex-col gap-2"><h2 id="access-denied-title" className="text-lg font-semibold">{t('forbiddenTitle')}</h2><p className="text-sm text-muted-foreground">{t('forbiddenDescription')}</p></section>
 }
+
+const forbiddenAccessError = new ApiProblemError({ type: '/problems/forbidden', title: 'forbidden', status: 403, code: 'forbidden' })

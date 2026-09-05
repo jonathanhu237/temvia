@@ -121,6 +121,7 @@ export function UserAssignmentDialog({ api, user, roles, actorPermissions, actor
   const queryClient = useQueryClient()
   const assignment = useAccessDraftStore((state) => user ? state.assignments[user.id] : undefined)
   const setAssignment = useAccessDraftStore((state) => state.setAssignment)
+  const conflictAnnounced = useRef<string | undefined>(undefined)
   const initialRoles = useMemo(() => user?.roles.map((role) => role.id).slice().sort() ?? [], [user])
   useEffect(() => {
     if (!open) return
@@ -130,7 +131,12 @@ export function UserAssignmentDialog({ api, user, roles, actorPermissions, actor
   useEffect(() => {
     if (!user || !assignment || assignment.authVersion === user.authVersion || assignment.conflict) return
     setAssignment(user.id, { ...assignment, conflict: true })
-  }, [assignment, setAssignment, user])
+    const signature = `${user.id}:${assignment.authVersion}:${user.authVersion}`
+    if (conflictAnnounced.current !== signature) {
+      conflictAnnounced.current = signature
+      notifyRequestError(new ApiProblemError({ type: '/problems/stale-revision', title: 'stale revision', status: 409, code: 'stale_revision' }), t, { title: t('conflictTitle'), description: t('draftConflictDescription') })
+    }
+  }, [assignment, setAssignment, t, user])
   const current = assignment ?? { userID: user?.id ?? '', authVersion: user?.authVersion ?? 0, roleIDs: initialRoles, submitting: false, conflict: false, validationError: false }
   type Submission = { ownerID?: string; userID: string; submissionID: string }
   const updateDraft = (patch: Partial<typeof current>, submission?: Submission): boolean => {

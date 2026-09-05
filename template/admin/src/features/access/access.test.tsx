@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RolesPage } from './roles-page'
 import { UsersPage } from './users-page'
 import { InvitationsPage } from './invitations-page'
-import { AccessError } from './access-error'
+import { AccessDenied, AccessError } from './access-error'
 import { clearAccessDrafts } from './drafts'
 import { ApiProblemError, ApiTransportError, type ApiClient } from '@/shared/api/client'
 import type { Invitation, Permission, Role } from '@/shared/api/contracts'
@@ -332,6 +332,14 @@ describe('access components', () => {
     expect(screen.getByRole('heading', { name: 'Access denied' })).toBeVisible()
     expect(screen.getByText('Your account does not have permission to view this page.')).toBeVisible()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('announces route-level access denial without a retry prompt', async () => {
+    render(<AccessDenied />)
+
+    expect(screen.getByRole('heading', { name: 'Access denied' })).toBeVisible()
+    expect(screen.getByText('Your account does not have permission to view this page.')).toBeVisible()
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Access denied', { description: 'Your account does not have permission to view this page.' }))
   })
 
   it('distinguishes conflicts without offering a recovery action', () => {

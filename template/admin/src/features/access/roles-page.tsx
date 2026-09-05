@@ -187,6 +187,7 @@ function RoleEditor({ api, role, permissions, combinations, actorPermissions, ac
   const roleEdit = useAccessDraftStore((state) => role ? state.roleEdits[role.id] : undefined)
   const setRoleCreate = useAccessDraftStore((state) => state.setRoleCreate)
   const setRoleEdit = useAccessDraftStore((state) => state.setRoleEdit)
+  const conflictAnnounced = useRef<string | undefined>(undefined)
   const draft = role ? roleEdit : roleCreate
   const initial = useMemo(() => role
     ? { id: role.id, revision: role.revision, name: role.name, description: role.description, permissions: role.permissions.slice(), explicitPermissions: role.permissions.slice() }
@@ -204,8 +205,13 @@ function RoleEditor({ api, role, permissions, combinations, actorPermissions, ac
     }
     if (roleEdit.revision !== role.revision && !roleEdit.conflict) {
       setRoleEdit(role.id, { ...roleEdit, conflict: true })
+      const signature = `${role.id}:${roleEdit.revision}:${role.revision}`
+      if (conflictAnnounced.current !== signature) {
+        conflictAnnounced.current = signature
+        notifyRequestError(new ApiProblemError({ type: '/problems/stale-revision', title: 'stale revision', status: 409, code: 'stale_revision' }), t, { title: t('conflictTitle'), description: t('draftConflictDescription') })
+      }
     }
-  }, [initial, open, role, roleCreate, roleEdit, setRoleCreate, setRoleEdit])
+  }, [initial, open, role, roleCreate, roleEdit, setRoleCreate, setRoleEdit, t])
 
   const current = draft ?? { ...initial, submitting: false, conflict: false }
   type Submission = { ownerID?: string; submissionID: string }
