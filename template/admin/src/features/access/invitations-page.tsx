@@ -140,7 +140,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
   if (canManage && roleAdministration.isError) return <AccessError error={roleAdministration.error} onRetry={retryRoles} />
 
   return <section className="flex flex-col gap-5" aria-labelledby="invitations-title">
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="invitations-title" className="text-2xl font-semibold tracking-tight">{t('invitationsTitle')}</h1><p className="text-sm text-muted-foreground">{t('invitationsDescription')}</p></div>{canManage ? <Button type="button" onClick={() => { setNotice(undefined); setInviteOpen(true) }}><UserPlus aria-hidden="true" data-icon="inline-start" />{t('inviteUser')}</Button> : null}</div>
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="invitations-title" className="text-2xl font-semibold tracking-tight">{t('invitationsTitle')}</h1></div>{canManage ? <Button type="button" onClick={() => { setNotice(undefined); setInviteOpen(true) }}><UserPlus aria-hidden="true" data-icon="inline-start" />{t('inviteUser')}</Button> : null}</div>
     {notice !== undefined ? <AccessError error={notice} /> : null}
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('invitations')}</CardTitle></CardHeader>

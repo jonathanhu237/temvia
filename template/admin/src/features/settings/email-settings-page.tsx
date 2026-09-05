@@ -3,7 +3,7 @@ import { KeyRound, MailCheck, Save, Send, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -65,10 +65,10 @@ export function EmailSettingsPage({ api, defaultRecipient, canWrite = true }: { 
   const busy = save.isPending || test.isPending
   const disabled = busy || !canWrite
   return <section className="flex max-w-3xl flex-col gap-5" aria-labelledby="settings-title">
-    <div><h1 id="settings-title" className="text-2xl font-semibold tracking-tight">{t('title')}</h1><p className="text-sm text-muted-foreground">{t('description')}</p></div>
+    <div><h1 id="settings-title" className="text-2xl font-semibold tracking-tight">{t('title')}</h1></div>
     {error !== undefined ? <AccessError error={error} onReload={isStaleSettingsError(error) ? () => void reloadLatest() : undefined} reloadLabel={t('access:reloadLatest')} /> : null}
     <Card>
-      <CardHeader><CardTitle className="flex items-center gap-2"><MailCheck aria-hidden="true" />{t('email.title')}</CardTitle><CardDescription>{t('email.description')}</CardDescription></CardHeader>
+      <CardHeader><CardTitle className="flex items-center gap-2"><MailCheck aria-hidden="true" />{t('email.title')}</CardTitle></CardHeader>
       <CardContent><form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); if (!busy) save.mutate() }} noValidate>
         <FieldGroup>
           <div className="grid gap-4 sm:grid-cols-[1fr_8rem]"><Field><FieldLabel htmlFor="smtp-host">{t('email.host')}</FieldLabel><Input id="smtp-host" value={current.host} onChange={(event) => update({ host: event.target.value })} disabled={disabled} /></Field><Field><FieldLabel htmlFor="smtp-port">{t('email.port')}</FieldLabel><Input id="smtp-port" type="number" min={1} max={65535} value={current.port} onChange={(event) => update({ port: Number(event.target.value) })} disabled={disabled} /></Field></div>

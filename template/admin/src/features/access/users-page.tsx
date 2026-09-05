@@ -93,7 +93,7 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
   if (canManage && roleAdministration.isError) return <AccessError error={roleAdministration.error} onRetry={retryRoles} />
 
   return <section className="flex flex-col gap-5" aria-labelledby="users-title">
-    <div className="flex flex-col gap-1"><h1 id="users-title" className="text-2xl font-semibold tracking-tight">{t('usersTitle')}</h1><p className="text-sm text-muted-foreground">{t('usersDescription')}</p></div>
+    <div><h1 id="users-title" className="text-2xl font-semibold tracking-tight">{t('usersTitle')}</h1></div>
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('users')}</CardTitle></CardHeader>
       <CardContent>
@@ -280,7 +280,7 @@ export function InvitationForm({ api, roles, open, onDone, assignableRoleIDs }: 
     },
   })
   return <>
-    <DialogHeader><DialogTitle>{t('inviteUser')}</DialogTitle><DialogDescription>{t('invitationFormDescription')}</DialogDescription></DialogHeader>
+    <DialogHeader><DialogTitle>{t('inviteUser')}</DialogTitle></DialogHeader>
     {error !== undefined ? <AccessError error={error} /> : null}
     <form className="flex flex-col gap-5" noValidate onSubmit={(event) => { event.preventDefault(); if (!current.submitting && !mutation.isPending) mutation.mutate(beginSubmission()) }}>
       <FieldGroup>

@@ -16,7 +16,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -158,7 +158,7 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
   if (query.isError) return <AccessError error={query.error} onRetry={() => void query.refetch()} />
 
   return <section className="flex flex-col gap-5" aria-labelledby="roles-title">
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1><p className="text-sm text-muted-foreground">{t('rolesDescription')}</p></div>{canManage ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" data-icon="inline-start" />{t('createRole')}</Button> : null}</div>
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1></div>{canManage ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" data-icon="inline-start" />{t('createRole')}</Button> : null}</div>
     {notice !== undefined ? <AccessError error={notice} onReload={() => void reloadRoles()} /> : null}
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('roles')}</CardTitle></CardHeader>
@@ -193,7 +193,7 @@ function RoleDetail({ role, permissions, canManage, onEdit }: { role: Role; perm
     return result
   }, {})).sort(([left], [right]) => left.localeCompare(right))
   return <>
-    <DialogHeader><DialogTitle>{role.name}</DialogTitle><DialogDescription>{role.system ? t('builtInRoleDescription') : t('customRoleDescription')}</DialogDescription></DialogHeader>
+    <DialogHeader><DialogTitle>{role.name}</DialogTitle></DialogHeader>
     <div className="flex flex-col gap-5"><p className="text-sm text-muted-foreground">{role.description || '—'}</p><div><h3 className="mb-2 text-sm font-medium">{t('permissions')} ({role.permissions.length})</h3>{groups.length > 0 ? <div className="flex flex-col gap-4">{groups.map(([resource, items]) => <section key={resource} className="rounded-md bg-muted/30 p-3"><h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{localizedResource(resource, translate)}</h4><ul className="mt-2 flex flex-col gap-2">{items.map((permission) => <li key={permission.key} className="flex flex-col"><span className="text-sm font-medium">{localizedPermission(permission.key, translate)}</span><span className="text-xs text-muted-foreground">{localizedPermissionDescription(permission.key, translate, permission.description)}</span></li>)}</ul></section>)}</div> : <p className="text-sm text-muted-foreground">{t('noPermissions')}</p>}</div><p className="text-sm text-muted-foreground">{t('assignmentCountDetail', { count: role.assignmentCount ?? 0 })}</p></div>
     <DialogFooter><DialogClose asChild><Button type="button" variant="outline">{t('common:close')}</Button></DialogClose>{canManage && !role.system ? <Button type="button" onClick={onEdit}><Pencil aria-hidden="true" data-icon="inline-start" />{t('edit')}</Button> : null}</DialogFooter>
   </>
@@ -307,7 +307,6 @@ function RoleEditor({ api, role, permissions, combinations, actorPermissions, ac
   return <>
     <DialogHeader>
       <DialogTitle>{role ? t('editRole') : t('createRole')}</DialogTitle>
-      <DialogDescription>{t('rolesDescription')}</DialogDescription>
     </DialogHeader>
     {error !== undefined ? <AccessError error={error} /> : null}
     {current.conflict ? <AccessError error={new ApiProblemError({ type: '/problems/stale-revision', title: 'stale revision', status: 409, code: 'stale_revision' })} descriptionOverride={t('draftConflictDescription')} reloadLabel={t('reloadLatest')} onReload={() => void onReload()} /> : null}
