@@ -40,7 +40,7 @@ describe('email settings page', () => {
     clearAccessDrafts()
   })
 
-  it('requires an explicit language on the first save and sends tests to the administrator', async () => {
+  it('requires an explicit language on the first save and lets the administrator choose the test recipient', async () => {
     const saveEmailSettings = vi.fn()
     const testEmailSettings = vi.fn().mockResolvedValue(undefined)
     const api = mockApi({
@@ -49,13 +49,12 @@ describe('email settings page', () => {
       testEmailSettings,
     })
     const user = userEvent.setup()
-    renderWithQueryClient(<EmailSettingsPage api={api} defaultRecipient="admin@example.com" />)
+    renderWithQueryClient(<EmailSettingsPage api={api} />)
 
     expect(await screen.findByRole('heading', { name: 'System settings' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     expect(screen.getByText('Choose a language')).toBeVisible()
-    expect(screen.getByText('The test email will be queued for admin@example.com; final delivery depends on the recipient server.')).toBeVisible()
-    expect(screen.queryByLabelText('Recipient')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Recipient email')).not.toBeInTheDocument()
 
     await user.type(screen.getByLabelText('SMTP host'), 'mailpit')
     await user.type(screen.getByLabelText('From address'), 'no-reply@example.com')
@@ -65,8 +64,12 @@ describe('email settings page', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
 
     await user.click(screen.getByRole('button', { name: 'Send test email' }))
-    await waitFor(() => expect(testEmailSettings).toHaveBeenCalledWith(expect.objectContaining({ host: 'mailpit', defaultLocale: 'en', revision: 0 })))
+    const dialog = await screen.findByRole('dialog', { name: 'Send test email' })
+    await user.type(within(dialog).getByLabelText('Recipient email'), 'real@example.com')
+    await user.click(within(dialog).getByRole('button', { name: 'Send test email' }))
+    await waitFor(() => expect(testEmailSettings).toHaveBeenCalledWith(expect.objectContaining({ host: 'mailpit', defaultLocale: 'en', revision: 0, recipient: 'real@example.com' })))
     expect(toast.success).toHaveBeenCalledWith('Test email queued. Final delivery depends on the recipient server.')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(saveEmailSettings).not.toHaveBeenCalled()
   })
 
@@ -77,7 +80,7 @@ describe('email settings page', () => {
       testEmailSettings,
     })
     const user = userEvent.setup()
-    renderWithQueryClient(<EmailSettingsPage api={api} defaultRecipient="admin@example.com" />)
+    renderWithQueryClient(<EmailSettingsPage api={api} />)
 
     await screen.findByRole('heading', { name: 'System settings' })
     await user.type(screen.getByLabelText('SMTP host'), 'smtp.example.com')
@@ -86,15 +89,39 @@ describe('email settings page', () => {
     await user.click(screen.getByRole('combobox', { name: 'Default email language' }))
     await user.click(await screen.findByRole('option', { name: 'English' }))
     await user.click(screen.getByRole('button', { name: 'Send test email' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Send test email' })
+    await user.type(within(dialog).getByLabelText('Recipient email'), 'real@example.com')
+    await user.click(within(dialog).getByRole('button', { name: 'Send test email' }))
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Test email failed.', { description: 'Email service is not configured. Contact an administrator.' }))
+  })
+
+  it('requires a valid recipient before sending a test', async () => {
+    const testEmailSettings = vi.fn().mockResolvedValue(undefined)
+    const api = mockApi({
+      getEmailSettings: vi.fn().mockResolvedValue({ configured: false, passwordSet: false, revision: 0 }),
+      testEmailSettings,
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<EmailSettingsPage api={api} />)
+
+    await screen.findByRole('heading', { name: 'System settings' })
+    await user.click(screen.getByRole('combobox', { name: 'Default email language' }))
+    await user.click(await screen.findByRole('option', { name: 'English' }))
+    await user.click(screen.getByRole('button', { name: 'Send test email' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Send test email' })
+    await user.type(within(dialog).getByLabelText('Recipient email'), 'not-an-email')
+    await user.click(within(dialog).getByRole('button', { name: 'Send test email' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Enter a valid email address.')
+    expect(testEmailSettings).not.toHaveBeenCalled()
   })
 
   it('keeps fields and mutation controls unavailable to settings readers', async () => {
     const api = mockApi({
       getEmailSettings: vi.fn().mockResolvedValue({ configured: true, host: 'smtp.example.com', port: 587, security: 'starttls', username: 'mailer', passwordSet: true, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 3 }),
     })
-    renderWithQueryClient(<EmailSettingsPage api={api} defaultRecipient="admin@example.com" canWrite={false} />)
+    renderWithQueryClient(<EmailSettingsPage api={api} canWrite={false} />)
 
     const heading = await screen.findByRole('heading', { name: 'System settings' })
     expect(heading).toBeVisible()
@@ -111,7 +138,7 @@ describe('email settings page', () => {
       .mockResolvedValueOnce({ configured: true, host: 'smtp.example.com', port: 587, security: 'starttls', username: '', passwordSet: false, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 1 })
     const api = mockApi({ getEmailSettings, saveEmailSettings })
     const user = userEvent.setup()
-    renderWithQueryClient(<EmailSettingsPage api={api} defaultRecipient="admin@example.com" />)
+    renderWithQueryClient(<EmailSettingsPage api={api} />)
 
     await screen.findByRole('heading', { name: 'System settings' })
     await user.click(screen.getByRole('combobox', { name: 'Default email language' }))

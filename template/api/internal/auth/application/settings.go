@@ -242,8 +242,9 @@ func (s *SettingsManagement) TestEmailSettings(ctx context.Context, input EmailS
 	if err := validateEmailSettingsInput(input, s.production); err != nil {
 		return err
 	}
-	parsedRecipient, err := mail.ParseAddress(strings.TrimSpace(recipient))
-	if err != nil || parsedRecipient.Address != strings.TrimSpace(recipient) {
+	recipient = strings.TrimSpace(recipient)
+	parsedRecipient, err := mail.ParseAddress(recipient)
+	if err != nil || parsedRecipient.Address != recipient || strings.ContainsAny(recipient, "\r\n") {
 		return &domain.ValidationErrors{Items: []domain.FieldError{{Field: "recipient", Code: "invalid_email"}}}
 	}
 	password := ""

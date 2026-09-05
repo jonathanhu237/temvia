@@ -70,6 +70,17 @@ describe('Fetch API boundary', () => {
 		await expect(api.completePasswordReset({ token: `v1.${'A'.repeat(22)}.${'B'.repeat(43)}`, password: 'Aa1!xxxx' })).resolves.toBeUndefined()
 	})
 
+	it('includes the selected recipient when testing email settings', async () => {
+		let requestBody: unknown
+		server.use(http.post('/api/settings/email/test', async ({ request: incoming }) => {
+			requestBody = await incoming.json()
+			return HttpResponse.json({ status: 'accepted' }, { status: 202 })
+		}))
+
+		await expect(api.testEmailSettings?.({ host: 'smtp.example.com', port: 587, security: 'starttls', username: 'mailer', fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 4, recipient: 'real@example.com' })).resolves.toBeUndefined()
+		expect(requestBody).toEqual(expect.objectContaining({ recipient: 'real@example.com', revision: 4 }))
+	})
+
 	it('encodes access-list search, role, status, and sort options in the query string', async () => {
 		let usersURL = ''
 		let invitationsURL = ''

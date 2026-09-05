@@ -223,11 +223,26 @@ func TestSettingsTestUsesUnsavedSnapshotWithoutPersistence(t *testing.T) {
 		return mailer, nil
 	}, nil)
 	input := EmailSettingsInput{Host: "mailpit", Port: 1025, Security: "none", FromAddress: "no-reply@example.com", FromName: "Temvia", DefaultLocale: "zh-CN"}
-	if err := service.TestEmailSettings(context.Background(), input, "admin@example.com"); err != nil {
+	if err := service.TestEmailSettings(context.Background(), input, "real@example.com"); err != nil {
 		t.Fatal(err)
 	}
-	if store.saveCalls != 0 || len(mailer.messages) != 1 || mailer.messages[0].Locale != domain.LocaleChinese || !strings.Contains(mailer.messages[0].Text, "测试") {
+	if store.saveCalls != 0 || len(mailer.messages) != 1 || mailer.messages[0].To != "real@example.com" || mailer.messages[0].Locale != domain.LocaleChinese || !strings.Contains(mailer.messages[0].Text, "测试") {
 		t.Fatalf("test mail side effects = saves:%d messages:%#v", store.saveCalls, mailer.messages)
+	}
+}
+
+func TestSettingsTestValidatesAndNormalizesRecipient(t *testing.T) {
+	mailer := &settingsMailerFake{}
+	service := NewSettingsManagement(nil, nil, func(SMTPSettings) (Mailer, error) { return mailer, nil }, nil)
+	input := EmailSettingsInput{Host: "mailpit", Port: 1025, Security: "none", FromAddress: "no-reply@example.com", FromName: "Temvia", DefaultLocale: "en"}
+	if err := service.TestEmailSettings(context.Background(), input, "not-an-email"); err == nil {
+		t.Fatal("invalid recipient accepted")
+	}
+	if err := service.TestEmailSettings(context.Background(), input, "real@example.com\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	if len(mailer.messages) != 1 || mailer.messages[0].To != "real@example.com" {
+		t.Fatalf("normalized recipient = %#v", mailer.messages)
 	}
 }
 

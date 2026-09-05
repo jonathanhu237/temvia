@@ -62,7 +62,7 @@ export const requiredTemplateFiles = [
   'api/internal/auth/adapter/mail/smtp.go', 'api/internal/auth/adapter/mail/smtp_test.go',
   'api/internal/auth/adapter/httpapi/problem.go', 'api/internal/auth/adapter/httpapi/json.go',
   'api/internal/auth/adapter/httpapi/routes.go', 'api/internal/auth/adapter/httpapi/response.go',
-  'api/internal/auth/adapter/httpapi/httpapi_test.go', 'api/internal/auth/adapter/httpapi/access_http_test.go',
+  'api/internal/auth/adapter/httpapi/httpapi_test.go', 'api/internal/auth/adapter/httpapi/access_http_test.go', 'api/internal/auth/adapter/httpapi/settings_http_test.go',
   ...adminTemplateFiles.map((path) => `admin/${path}`),
 ];
 

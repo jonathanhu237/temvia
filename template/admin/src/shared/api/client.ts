@@ -81,7 +81,7 @@ export interface ApiClient {
 	completePasswordReset(input: { token: string; password: string }, signal?: AbortSignal): Promise<void>
 	getEmailSettings?(signal?: AbortSignal): Promise<EmailSettings>
 	saveEmailSettings?(input: { host: string; port: number; security: 'none' | 'starttls' | 'tls'; username: string; password?: string; clearPassword?: boolean; fromAddress: string; fromName: string; defaultLocale: 'en' | 'zh-CN'; revision: number }, signal?: AbortSignal): Promise<EmailSettings>
-	testEmailSettings?(input: { host: string; port: number; security: 'none' | 'starttls' | 'tls'; username: string; password?: string; clearPassword?: boolean; fromAddress: string; fromName: string; defaultLocale: 'en' | 'zh-CN'; revision?: number }, signal?: AbortSignal): Promise<void>
+	testEmailSettings?(input: { host: string; port: number; security: 'none' | 'starttls' | 'tls'; username: string; password?: string; clearPassword?: boolean; fromAddress: string; fromName: string; defaultLocale: 'en' | 'zh-CN'; revision?: number; recipient: string }, signal?: AbortSignal): Promise<void>
 	getOperationalWarnings?(signal?: AbortSignal): Promise<{ warnings: Array<{ key: string; severity: string }> }>
 }
 

@@ -9,5 +9,5 @@ function SettingsRoute() {
   const { api } = Route.useRouteContext()
   const { user } = useLoaderData({ from: '/_authenticated' })
   if (!user.superAdmin && !user.permissions?.includes('settings.read')) return <AccessDenied />
-  return <EmailSettingsPage api={api} defaultRecipient={user.email} canWrite={Boolean(user.superAdmin || user.permissions?.includes('settings.write'))} />
+  return <EmailSettingsPage api={api} canWrite={Boolean(user.superAdmin || user.permissions?.includes('settings.write'))} />
 }

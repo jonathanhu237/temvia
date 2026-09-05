@@ -863,12 +863,13 @@ func (h *Handler) testEmailSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		emailSettingsRequest
+		Recipient string `json:"recipient"`
 	}
-	if err := decodeJSONObject(r, &input, map[string]struct{}{"host": {}, "port": {}, "security": {}, "username": {}, "password": {}, "clearPassword": {}, "fromAddress": {}, "fromName": {}, "defaultLocale": {}, "revision": {}}); err != nil {
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"host": {}, "port": {}, "security": {}, "username": {}, "password": {}, "clearPassword": {}, "fromAddress": {}, "fromName": {}, "defaultLocale": {}, "revision": {}, "recipient": {}}); err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	err = h.settings.TestEmailSettings(r.Context(), application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, Revision: input.RevisionValue()}, principal.User.Email)
+	err = h.settings.TestEmailSettings(r.Context(), application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, Revision: input.RevisionValue()}, input.Recipient)
 	if err != nil {
 		writeApplicationError(w, err)
 		return

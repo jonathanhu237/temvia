@@ -127,7 +127,7 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
     'api/internal/auth/adapter/mail/smtp.go', 'api/internal/auth/adapter/mail/smtp_test.go',
     'api/internal/auth/adapter/httpapi/problem.go', 'api/internal/auth/adapter/httpapi/json.go',
     'api/internal/auth/adapter/httpapi/routes.go', 'api/internal/auth/adapter/httpapi/response.go',
-    'api/internal/auth/adapter/httpapi/httpapi_test.go', 'api/internal/auth/adapter/httpapi/access_http_test.go',
+    'api/internal/auth/adapter/httpapi/httpapi_test.go', 'api/internal/auth/adapter/httpapi/access_http_test.go', 'api/internal/auth/adapter/httpapi/settings_http_test.go',
     'admin/.dockerignore', 'admin/.gitignore', 'admin/.oxlintrc.json',
     'admin/Caddyfile', 'admin/Dockerfile', 'admin/README.md', 'admin/UPSTREAM.md',
     'admin/components.json', 'admin/package.json', 'admin/index.html',
