@@ -48,6 +48,7 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     setEditorGeneration(next)
   }
   const roles = useMemo(() => query.data?.roles ?? [], [query.data?.roles])
+  const rolesForbidden = query.isError && isForbidden(query.error)
   useRequestErrorToast(query.error, query.isError, t, readFailureFeedback(query.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
   const selectedRole = selected ? roles.find((role) => role.id === selected.id) ?? selected : undefined
   const filteredRoles = useMemo(() => {
@@ -140,22 +141,22 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
 
   if (query.isPending) return <p role="status">{t('common:loading')}</p>
   return <section className="flex flex-col gap-5" aria-labelledby="roles-title">
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1></div>{canManage ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" data-icon="inline-start" />{t('createRole')}</Button> : null}</div>
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1></div>{canManage && !rolesForbidden ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" data-icon="inline-start" />{t('createRole')}</Button> : null}</div>
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('roles')}</CardTitle></CardHeader>
-      <CardContent>{query.isError && (isForbidden(query.error) || !query.data) ? <p role="status" className="text-sm text-muted-foreground">{isForbidden(query.error) ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} />}</CardContent>
+      <CardContent>{query.isError && (rolesForbidden || !query.data) ? <p role="status" className="text-sm text-muted-foreground">{rolesForbidden ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} />}</CardContent>
     </Card>
-    <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+    <Dialog open={detailOpen && !rolesForbidden} onOpenChange={setDetailOpen}>
       <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         {selectedRole ? <RoleDetail role={selectedRole} permissions={query.data?.permissions ?? []} canManage={canManage} onEdit={() => openEdit(selectedRole)} /> : null}
       </DialogContent>
     </Dialog>
-    <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
+    <Dialog open={editorOpen && !rolesForbidden} onOpenChange={setEditorOpen}>
       <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         <RoleEditor key={selectedRole?.id ?? 'new'} api={api} role={selectedRole} permissions={query.data?.permissions ?? []} combinations={query.data?.combinations ?? []} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin || actorPermissions === undefined} open={editorOpen} editorGeneration={editorGeneration} onDone={(role, generation) => { if (generation !== editorGenerationRef.current) return; setSelected(role); setEditorOpen(false); void queryClient.invalidateQueries({ queryKey: rolesQueryKey }); void queryClient.invalidateQueries({ queryKey: roleQueryKey(role.id) }) }} />
       </DialogContent>
     </Dialog>
-    <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open) setDeleteTarget(undefined) }}>
+    <AlertDialog open={Boolean(deleteTarget) && !rolesForbidden} onOpenChange={(open) => { if (!open) setDeleteTarget(undefined) }}>
       <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{t('deleteRole')}</AlertDialogTitle><AlertDialogDescription>{t('deleteRoleConfirm', { name: deleteTarget?.name ?? '' })}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>{t('common:cancel')}</AlertDialogCancel><AlertDialogAction disabled={deleteMutation.isPending || (deleteTarget?.assignmentCount ?? 0) > 0} onClick={() => { if (deleteTarget && (deleteTarget.assignmentCount ?? 0) === 0) deleteMutation.mutate(deleteTarget) }}>{t('delete')}</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
     </AlertDialog>
   </section>

@@ -102,7 +102,7 @@ export function EmailSettingsPage({ api, canWrite = true }: { api: ApiClient; ca
         <div className="flex flex-wrap justify-end gap-2">{canWrite ? <><Button type="button" variant="outline" disabled={disabled} onClick={() => { if (!current.defaultLocale) { setLocaleError(true); return }; setTestRecipient(''); setTestRecipientError(false); setTestDialogOpen(true) }}><Send aria-hidden="true" data-icon="inline-start" />{t('email.sendTest')}</Button><Button type="submit" disabled={disabled || !current.defaultLocale}><Save aria-hidden="true" data-icon="inline-start" />{save.isPending ? t('common:saving') : t('common:save')}</Button></> : null}</div>
       </form>}</CardContent>
     </Card>
-    <Dialog open={testDialogOpen} onOpenChange={(open) => { if (test.isPending) return; setTestDialogOpen(open); if (!open) setTestRecipientError(false) }}>
+    <Dialog open={testDialogOpen && !forbidden} onOpenChange={(open) => { if (test.isPending) return; setTestDialogOpen(open); if (!open) setTestRecipientError(false) }}>
       <DialogContent closeLabel={t('common:close')} className="sm:max-w-md">
         <DialogHeader><DialogTitle>{t('email.testTitle')}</DialogTitle></DialogHeader>
         <form className="flex flex-col gap-6" noValidate onSubmit={(event) => {

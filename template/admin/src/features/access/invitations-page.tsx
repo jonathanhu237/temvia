@@ -53,6 +53,9 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
     enabled: canManage,
     staleTime: 10_000,
   })
+  const invitationsForbidden = invitations.isError && isForbidden(invitations.error)
+  const roleOptionsForbidden = roleOptions.isError && isForbidden(roleOptions.error)
+  const roleAdministrationForbidden = canManage && roleAdministration.isError && isForbidden(roleAdministration.error)
   useRequestErrorToast(invitations.error, invitations.isError, t, readFailureFeedback(invitations.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
   useRequestErrorToast(roleOptions.error, roleOptions.isError && canReadRoles, t, readFailureFeedback(roleOptions.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
   useRequestErrorToast(roleAdministration.error, roleAdministration.isError && canManage, t, readFailureFeedback(roleAdministration.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
@@ -84,9 +87,8 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
     setDirection(first?.desc ? 'desc' : 'asc')
     setCursor(''); setHistory([])
   }
-  const roleList = useMemo(() => roleAdministration.isError && isForbidden(roleAdministration.error) ? [] : roleAdministration.data?.roles ?? [], [roleAdministration.data?.roles, roleAdministration.error, roleAdministration.isError])
-  const roleFilterOptions = roleOptions.isError && isForbidden(roleOptions.error) ? [] : roleOptions.data?.roles ?? []
-  const invitationsForbidden = invitations.isError && isForbidden(invitations.error)
+  const roleList = useMemo(() => roleAdministrationForbidden ? [] : roleAdministration.data?.roles ?? [], [roleAdministration.data?.roles, roleAdministrationForbidden])
+  const roleFilterOptions = roleOptionsForbidden ? [] : roleOptions.data?.roles ?? []
   const assignableRoleIDs = useMemo(() => new Set(roleList.filter((role) => canAssignRole(role, actorPermissions, actorSuperAdmin)).map((role) => role.id)), [actorPermissions, actorSuperAdmin, roleList])
   const expired = (invitation: Invitation) => new Date(invitation.expiresAt).getTime() <= Date.now()
 
@@ -139,7 +141,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
 
   if (invitations.isPending || (canManage && roleAdministration.isPending)) return <p role="status">{t('common:loading')}</p>
   return <section className="flex flex-col gap-5" aria-labelledby="invitations-title">
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="invitations-title" className="text-2xl font-semibold tracking-tight">{t('invitationsTitle')}</h1></div>{canManage ? <Button type="button" onClick={() => setInviteOpen(true)}><UserPlus aria-hidden="true" data-icon="inline-start" />{t('inviteUser')}</Button> : null}</div>
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="invitations-title" className="text-2xl font-semibold tracking-tight">{t('invitationsTitle')}</h1></div>{canManage && !roleAdministrationForbidden ? <Button type="button" onClick={() => setInviteOpen(true)}><UserPlus aria-hidden="true" data-icon="inline-start" />{t('inviteUser')}</Button> : null}</div>
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('invitations')}</CardTitle></CardHeader>
       <CardContent>
@@ -156,17 +158,17 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
           onSortingChange={handleSorting}
           manualFiltering
           manualSorting
-          toolbar={<div className="flex flex-wrap items-center gap-2">{canReadRoles ? <Select value={roleFilter || 'all'} onValueChange={(value) => setFilter(setRoleFilter, value)}><SelectTrigger className="w-44" aria-label={t('filterByRole')}><SelectValue placeholder={t('allRoles')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allRoles')}</SelectItem>{roleFilterOptions.map((role) => <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>)}</SelectGroup></SelectContent></Select> : null}<Select value={statusFilter || 'all'} onValueChange={(value) => { setStatusFilter(value === 'all' ? '' : value as 'pending' | 'expired'); setCursor(''); setHistory([]) }}><SelectTrigger className="w-36" aria-label={t('filterByStatus')}><SelectValue placeholder={t('allStatuses')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allStatuses')}</SelectItem><SelectItem value="pending">{t('pending')}</SelectItem><SelectItem value="expired">{t('expired')}</SelectItem></SelectGroup></SelectContent></Select></div>}
+          toolbar={<div className="flex flex-wrap items-center gap-2">{canReadRoles && !roleOptionsForbidden ? <Select value={roleFilter || 'all'} onValueChange={(value) => setFilter(setRoleFilter, value)}><SelectTrigger className="w-44" aria-label={t('filterByRole')}><SelectValue placeholder={t('allRoles')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allRoles')}</SelectItem>{roleFilterOptions.map((role) => <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>)}</SelectGroup></SelectContent></Select> : null}<Select value={statusFilter || 'all'} onValueChange={(value) => { setStatusFilter(value === 'all' ? '' : value as 'pending' | 'expired'); setCursor(''); setHistory([]) }}><SelectTrigger className="w-36" aria-label={t('filterByStatus')}><SelectValue placeholder={t('allStatuses')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allStatuses')}</SelectItem><SelectItem value="pending">{t('pending')}</SelectItem><SelectItem value="expired">{t('expired')}</SelectItem></SelectGroup></SelectContent></Select></div>}
         />
         {invitations.isFetching && !invitations.isPending ? <p role="status" className="mt-3 text-sm text-muted-foreground">{t('common:loading')}</p> : null}
         <PageNavigation hasPrevious={history.length > 0} hasNext={Boolean(invitations.data?.nextCursor)} loading={invitations.isFetching} onPrevious={() => { const previous = history[history.length - 1] ?? ''; setHistory((current) => current.slice(0, -1)); setCursor(previous) }} onNext={() => { if (!invitations.data?.nextCursor) return; setHistory((current) => [...current, cursor]); setCursor(invitations.data.nextCursor) }} t={(key) => t(key as never)} />
         </>}
       </CardContent>
     </Card>
-    <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+    <Dialog open={inviteOpen && !roleAdministrationForbidden} onOpenChange={setInviteOpen}>
       <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-lg"><InvitationForm open={inviteOpen} api={api} roles={roleList} assignableRoleIDs={assignableRoleIDs} onDone={() => { setInviteOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'invitations'] }) }} /></DialogContent>
     </Dialog>
-    <AlertDialog open={Boolean(action)} onOpenChange={(open) => { if (!open) setAction(undefined) }}>
+    <AlertDialog open={Boolean(action) && !invitationsForbidden} onOpenChange={(open) => { if (!open) setAction(undefined) }}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{action?.kind === 'revoke' ? t('revoke') : action?.kind === 'renew' ? t('renewInvitation') : t('resend')}</AlertDialogTitle>

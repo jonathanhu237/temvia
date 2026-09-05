@@ -49,8 +49,9 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     setUserDirection(first?.desc ? 'desc' : 'asc')
     setUserCursor(''); setUserHistory([])
   }
-  const roleList = roleAdministration.data?.roles ?? []
   const usersForbidden = users.isError && isForbidden(users.error)
+  const roleAdministrationForbidden = canManage && roleAdministration.isError && isForbidden(roleAdministration.error)
+  const roleList = roleAdministrationForbidden ? [] : roleAdministration.data?.roles ?? []
   const activeAssignmentUser = assignmentUser ? users.data?.users.find((item) => item.id === assignmentUser.id) ?? assignmentUser : undefined
   const openAssignment = (user: AccessUser) => {
     const next = assignmentGenerationRef.current + 1
@@ -86,9 +87,9 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
       id: 'actions',
       enableSorting: false,
       header: () => <span>{t('actions')}</span>,
-      cell: ({ row }) => canManage ? <Button type="button" variant="ghost" size="sm" onClick={() => openAssignment(row.original)}><Pencil aria-hidden="true" data-icon="inline-start" />{t('assignRoles')}</Button> : null,
+      cell: ({ row }) => canManage && !roleAdministrationForbidden ? <Button type="button" variant="ghost" size="sm" onClick={() => openAssignment(row.original)}><Pencil aria-hidden="true" data-icon="inline-start" />{t('assignRoles')}</Button> : null,
     },
-  ], [canManage, i18n.language, t])
+  ], [canManage, i18n.language, roleAdministrationForbidden, t])
 
   if (users.isPending || (canManage && roleAdministration.isPending)) return <p role="status">{t('common:loading')}</p>
   return <section className="flex flex-col gap-5" aria-labelledby="users-title">
@@ -115,7 +116,7 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
         </>}
       </CardContent>
     </Card>
-    {!usersForbidden ? <UserAssignmentDialog key={activeAssignmentUser?.id ?? 'none'} open={assignmentOpen} user={activeAssignmentUser} roles={roleList} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin} api={api} canManage={canManage} assignmentGeneration={assignmentGeneration} onClose={() => setAssignmentOpen(false)} onDone={(_userID, generation) => { if (generation !== assignmentGenerationRef.current) return; setAssignmentOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }); void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] }) }} /> : null}
+    {!usersForbidden && !roleAdministrationForbidden ? <UserAssignmentDialog key={activeAssignmentUser?.id ?? 'none'} open={assignmentOpen} user={activeAssignmentUser} roles={roleList} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin} api={api} canManage={canManage} assignmentGeneration={assignmentGeneration} onClose={() => setAssignmentOpen(false)} onDone={(_userID, generation) => { if (generation !== assignmentGenerationRef.current) return; setAssignmentOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }); void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] }) }} /> : null}
   </section>
 }
 
