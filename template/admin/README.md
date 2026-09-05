@@ -52,13 +52,15 @@ unknown email. Reset links use a `#token=` fragment; bootstrap captures and
 clears it with `history.replaceState` before React renders, keeping the token
 in module memory only. `/reset-password` asks for the new password twice,
 shows one invalid/expired-link state, and sends the user back to `/login` after
-success without automatically authenticating them. Both routes pass the active
-locale (`en` or `zh-CN`) to the API.
+success without automatically authenticating them. Mail language is selected
+by shared System settings and is separate from each administrator's interface
+language.
 
 The API's PostgreSQL outbox sends the reset link and a separate password-changed
 notification asynchronously over SMTP. SMTP outages do not block the form;
-the API retries durable jobs. See the root README for Mailpit and production
-SMTP configuration. The Caddy runtime also sends `Referrer-Policy: no-referrer`
+the API retries durable jobs. Configure the shared SMTP connection and default
+mail language from System settings; see the root README for Mailpit and
+production guidance. The Caddy runtime also sends `Referrer-Policy: no-referrer`
 as defense in depth for fragment credentials.
 
 ## Access management

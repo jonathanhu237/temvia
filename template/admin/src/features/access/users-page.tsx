@@ -9,16 +9,15 @@ import { DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHead
 import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { Role } from '@/shared/api/contracts'
 import { AccessError } from './access-error'
 import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
-import { PageNavigation, RoleBadges, formatDate, type AccessUser } from './access-components'
+import { PageNavigation, RoleBadges, canAssignRole, formatDate, type AccessUser } from './access-components'
 import { usersOptions } from './queries'
 
-export function UsersPage({ api, canManage }: { api: ApiClient; canManage: boolean }) {
+export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = false }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean }) {
   const { t, i18n } = useTranslation(['access', 'common'])
   const queryClient = useQueryClient()
   const [userCursor, setUserCursor] = useState('')
@@ -115,7 +114,7 @@ export function UsersPage({ api, canManage }: { api: ApiClient; canManage: boole
         <PageNavigation hasPrevious={userHistory.length > 0} hasNext={Boolean(users.data.nextCursor)} loading={users.isFetching} onPrevious={() => { const previous = userHistory[userHistory.length - 1] ?? ''; setUserHistory((current) => current.slice(0, -1)); setUserCursor(previous) }} onNext={() => { if (!users.data.nextCursor) return; setUserHistory((current) => [...current, userCursor]); setUserCursor(users.data.nextCursor) }} t={(key) => t(key as never)} />
       </CardContent>
     </Card>
-    <UserAssignmentDialog key={activeAssignmentUser?.id ?? 'none'} open={assignmentOpen} user={activeAssignmentUser} roles={roleList} api={api} canManage={canManage} assignmentGeneration={assignmentGeneration} onClose={() => setAssignmentOpen(false)} onDone={(_userID, generation) => { if (generation !== assignmentGenerationRef.current) return; setAssignmentOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }); void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] }) }} onReload={async () => {
+    <UserAssignmentDialog key={activeAssignmentUser?.id ?? 'none'} open={assignmentOpen} user={activeAssignmentUser} roles={roleList} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin} api={api} canManage={canManage} assignmentGeneration={assignmentGeneration} onClose={() => setAssignmentOpen(false)} onDone={(_userID, generation) => { if (generation !== assignmentGenerationRef.current) return; setAssignmentOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }); void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] }) }} onReload={async () => {
       if (!activeAssignmentUser) return
       const result = await users.refetch()
       const refreshed = result.data?.users.find((item) => item.id === activeAssignmentUser.id)
@@ -127,7 +126,7 @@ export function UsersPage({ api, canManage }: { api: ApiClient; canManage: boole
   </section>
 }
 
-export function UserAssignmentDialog({ api, user, roles, canManage = true, open, assignmentGeneration, onClose, onDone, onReload }: { api: ApiClient; user?: AccessUser; roles: Role[]; canManage?: boolean; open: boolean; assignmentGeneration: number; onClose: () => void; onDone: (userID: string, generation: number) => void; onReload: () => Promise<void> }) {
+export function UserAssignmentDialog({ api, user, roles, actorPermissions, actorSuperAdmin = false, canManage = true, open, assignmentGeneration, onClose, onDone, onReload }: { api: ApiClient; user?: AccessUser; roles: Role[]; actorPermissions?: string[]; actorSuperAdmin?: boolean; canManage?: boolean; open: boolean; assignmentGeneration: number; onClose: () => void; onDone: (userID: string, generation: number) => void; onReload: () => Promise<void> }) {
   const { t } = useTranslation(['access', 'problems', 'common'])
   const queryClient = useQueryClient()
   const assignment = useAccessDraftStore((state) => user ? state.assignments[user.id] : undefined)
@@ -205,8 +204,8 @@ export function UserAssignmentDialog({ api, user, roles, canManage = true, open,
       {error !== undefined ? <AccessError error={error} /> : null}
       {current.conflict ? <AccessError error={new ApiProblemError({ type: '/problems/stale-revision', title: 'stale revision', status: 409, code: 'stale_revision' })} descriptionOverride={t('draftConflictDescription')} reloadLabel={t('reloadLatest')} onReload={() => void onReload()} /> : null}
       <fieldset className="flex flex-col gap-2" aria-describedby={current.validationError ? 'assignment-roles-error' : undefined}>
-        <legend className="text-sm font-medium">{t('assignedRoles')}</legend>
-        {roles.map((role) => <label key={role.id} className="flex items-center gap-3 rounded-md border p-3 text-sm"><Checkbox checked={current.roleIDs.includes(role.id)} onCheckedChange={(value) => update({ roleIDs: value === true ? [...current.roleIDs, role.id] : current.roleIDs.filter((id) => id !== role.id), validationError: false, invalidRoleSelection: false })} aria-label={role.name} disabled={current.submitting || mutation.isPending} />{role.name}</label>)}
+        <legend className="text-sm font-medium">{t('role')}</legend>
+        {roles.map((role) => { const allowed = actorPermissions === undefined ? true : canAssignRole(role, actorPermissions, actorSuperAdmin); return <label key={role.id} className="flex items-center gap-3 rounded-md border p-3 text-sm"><Checkbox checked={current.roleIDs.includes(role.id)} onCheckedChange={(value) => update({ roleIDs: value === true ? [...current.roleIDs, role.id] : current.roleIDs.filter((id) => id !== role.id), validationError: false, invalidRoleSelection: false })} aria-label={role.name} disabled={!allowed || current.submitting || mutation.isPending} />{role.name}{!allowed ? <span className="ml-auto text-xs text-muted-foreground">{t('unavailable')}</span> : null}</label> })}
         {current.validationError ? <FieldError id="assignment-roles-error">{current.invalidRoleSelection ? t('invalidRoleSelection') : t('requiredRole')}</FieldError> : null}
       </fieldset>
       <DialogFooter><Button type="button" variant="ghost" onClick={resetDraft}>{t('common:reset')}</Button><DialogClose asChild><Button type="button" variant="outline">{t('common:cancel')}</Button></DialogClose><Button type="button" disabled={current.submitting || mutation.isPending || current.roleIDs.length === 0 || !hasChanges} onClick={() => { if (!current.submitting && !mutation.isPending) mutation.mutate(beginSubmission()) }}><Save aria-hidden="true" />{current.submitting || mutation.isPending ? t('saving') : t('saveAssignments')}</Button></DialogFooter>
@@ -226,16 +225,15 @@ function isStaleRevision(error: unknown): boolean {
 }
 
 export function InvitationForm({ api, roles, open, onDone, assignableRoleIDs }: { api: ApiClient; roles: Role[]; open: boolean; onDone: () => void; assignableRoleIDs?: Set<string> }) {
-  const { t, i18n } = useTranslation(['access', 'problems', 'common'])
+  const { t } = useTranslation(['access', 'problems', 'common'])
   const queryClient = useQueryClient()
   const invitation = useAccessDraftStore((state) => state.invitation)
   const setInvitation = useAccessDraftStore((state) => state.setInvitation)
   const [error, setError] = useState<unknown>()
-  const currentLocale: 'en' | 'zh-CN' = i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
   useEffect(() => {
-    if (open && !invitation) setInvitation({ name: '', email: '', locale: currentLocale, roleIDs: [], submitting: false })
-  }, [currentLocale, invitation, open, setInvitation])
-  const current = invitation ?? { name: '', email: '', locale: currentLocale, roleIDs: [], submitting: false }
+    if (open && !invitation) setInvitation({ name: '', email: '', roleIDs: [], submitting: false })
+  }, [invitation, open, setInvitation])
+  const current = invitation ?? { name: '', email: '', roleIDs: [], submitting: false }
   type Submission = { ownerID?: string; submissionID: string }
   const updateDraft = (patch: Partial<typeof current>, submission?: Submission): boolean => {
     const state = useAccessDraftStore.getState()
@@ -245,7 +243,7 @@ export function InvitationForm({ api, roles, open, onDone, assignableRoleIDs }: 
     return true
   }
   const update = (patch: Partial<typeof current>) => { setError(undefined); updateDraft(patch) }
-  const resetDraft = () => { setError(undefined); setInvitation({ name: '', email: '', locale: currentLocale, roleIDs: [], submitting: false }) }
+  const resetDraft = () => { setError(undefined); setInvitation({ name: '', email: '', roleIDs: [], submitting: false }) }
   const beginSubmission = (): Submission => {
     const state = useAccessDraftStore.getState()
     const submission = { ownerID: state.ownerID, submissionID: nextDraftSubmissionID() }
@@ -265,7 +263,7 @@ export function InvitationForm({ api, roles, open, onDone, assignableRoleIDs }: 
       if (draft.roleIDs.some((roleID) => !availableRoleIDs.has(roleID))) { updateDraft({ validationError: 'invalidRoles' }, submission); throw new Error('validation') }
       if (!updateDraft({ submitting: true, validationError: undefined }, submission)) throw new Error('stale draft')
       if (!api.createInvitation) throw new Error('missing createInvitation')
-      return api.createInvitation({ name: draft.name, email: draft.email, locale: draft.locale, roleIds: draft.roleIDs })
+      return api.createInvitation({ name: draft.name, email: draft.email, roleIds: draft.roleIDs })
     },
     onSuccess: (_saved, submission) => {
       const state = useAccessDraftStore.getState()
@@ -288,9 +286,8 @@ export function InvitationForm({ api, roles, open, onDone, assignableRoleIDs }: 
       <FieldGroup>
         <Field data-invalid={current.validationError === 'name'}><FieldLabel htmlFor="invite-name">{t('inviteName')}</FieldLabel><Input id="invite-name" value={current.name} onChange={(event) => update({ name: event.target.value, validationError: undefined })} aria-invalid={current.validationError === 'name'} autoComplete="name" disabled={current.submitting || mutation.isPending} />{current.validationError === 'name' ? <FieldError>{t('problems:fields.invalidName')}</FieldError> : null}</Field>
         <Field data-invalid={current.validationError === 'email'}><FieldLabel htmlFor="invite-email">{t('inviteEmail')}</FieldLabel><Input id="invite-email" value={current.email} onChange={(event) => update({ email: event.target.value, validationError: undefined })} aria-invalid={current.validationError === 'email'} type="email" autoComplete="email" disabled={current.submitting || mutation.isPending} />{current.validationError === 'email' ? <FieldError>{t('problems:fields.invalidEmail')}</FieldError> : null}</Field>
-        <Field><FieldLabel htmlFor="invite-locale">{t('inviteLocale')}</FieldLabel><Select value={current.locale} onValueChange={(value) => update({ locale: value as 'en' | 'zh-CN' })} disabled={current.submitting || mutation.isPending}><SelectTrigger id="invite-locale"><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="en">{t('common:english')}</SelectItem><SelectItem value="zh-CN">{t('common:chinese')}</SelectItem></SelectGroup></SelectContent></Select></Field>
         <fieldset className="flex flex-col gap-2" aria-describedby={current.validationError === 'roles' || current.validationError === 'invalidRoles' ? 'invite-roles-error' : undefined}>
-          <legend className="text-sm font-medium">{t('assignedRoles')}</legend>
+          <legend className="text-sm font-medium">{t('role')}</legend>
           {roles.map((role) => {
             const allowed = !assignableRoleIDs || assignableRoleIDs.has(role.id)
             return (

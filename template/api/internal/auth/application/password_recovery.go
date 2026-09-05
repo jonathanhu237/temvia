@@ -11,31 +11,30 @@ import (
 const passwordResetSelectorBytes = domain.PasswordResetSelectorBytes
 
 type PasswordResetRequestInput struct {
-	Email  string
-	Locale string
+	Email string
 }
 
 type PasswordResetCompleteInput struct {
 	Token    string
 	Password string
-	Locale   string
 }
 
 type PasswordRecovery struct {
-	store       PasswordResetStore
-	limiter     PasswordResetLimiter
-	hasher      PasswordHasher
-	random      RandomSource
-	tokenKey    []byte
-	linkTTL     time.Duration
-	noticeTTL   time.Duration
-	minResponse time.Duration
-	now         func() time.Time
-	sleep       func(time.Duration)
+	store        PasswordResetStore
+	limiter      PasswordResetLimiter
+	hasher       PasswordHasher
+	random       RandomSource
+	tokenKey     []byte
+	linkTTL      time.Duration
+	noticeTTL    time.Duration
+	minResponse  time.Duration
+	now          func() time.Time
+	sleep        func(time.Duration)
+	mailSettings MailSettingsProvider
 }
 
-func NewPasswordRecovery(store PasswordResetStore, limiter PasswordResetLimiter, hasher PasswordHasher, random RandomSource, tokenKey []byte, linkTTL, noticeTTL, minResponse time.Duration) *PasswordRecovery {
-	return &PasswordRecovery{
+func NewPasswordRecovery(store PasswordResetStore, limiter PasswordResetLimiter, hasher PasswordHasher, random RandomSource, tokenKey []byte, linkTTL, noticeTTL, minResponse time.Duration, mailSettings ...MailSettingsProvider) *PasswordRecovery {
+	recovery := &PasswordRecovery{
 		store:       store,
 		limiter:     limiter,
 		hasher:      hasher,
@@ -47,6 +46,10 @@ func NewPasswordRecovery(store PasswordResetStore, limiter PasswordResetLimiter,
 		now:         time.Now,
 		sleep:       time.Sleep,
 	}
+	if len(mailSettings) > 0 {
+		recovery.mailSettings = mailSettings[0]
+	}
+	return recovery
 }
 
 // NewPasswordRecoveryWithClock makes the response-timing behavior deterministic
@@ -68,7 +71,7 @@ func (r *PasswordRecovery) Request(ctx context.Context, input PasswordResetReque
 	if err != nil {
 		return err
 	}
-	locale, err := parseLocale(input.Locale)
+	locale, err := r.mailLocale(ctx)
 	if err != nil {
 		return err
 	}
@@ -105,7 +108,7 @@ func (r *PasswordRecovery) Complete(ctx context.Context, input PasswordResetComp
 	if !ok {
 		return ErrInvalidPasswordResetToken
 	}
-	locale, err := parseLocale(input.Locale)
+	locale, err := r.mailLocale(ctx)
 	if err != nil {
 		return err
 	}
@@ -145,6 +148,16 @@ func (r *PasswordRecovery) Complete(ctx context.Context, input PasswordResetComp
 	return nil
 }
 
+func (r *PasswordRecovery) mailLocale(ctx context.Context) (domain.Locale, error) {
+	if r.mailSettings != nil {
+		if err := r.mailSettings.EnsureMailConfigured(ctx); err != nil {
+			return "", err
+		}
+		return r.mailSettings.DefaultMailLocale(ctx)
+	}
+	return domain.LocaleEnglish, nil
+}
+
 func (r *PasswordRecovery) waitMinimum(started time.Time) {
 	if r.minResponse <= 0 || r.sleep == nil {
 		return
@@ -153,14 +166,6 @@ func (r *PasswordRecovery) waitMinimum(started time.Time) {
 	if remaining > 0 {
 		r.sleep(remaining)
 	}
-}
-
-func parseLocale(value string) (domain.Locale, error) {
-	locale := domain.Locale(value)
-	if locale.Valid() {
-		return locale, nil
-	}
-	return "", &domain.ValidationErrors{Items: []domain.FieldError{{Field: "locale", Code: "invalid_locale"}}}
 }
 
 func isPasswordResetTokenError(err error) bool {

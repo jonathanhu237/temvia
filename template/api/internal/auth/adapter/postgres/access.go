@@ -204,11 +204,31 @@ func (s *Store) FindRole(ctx context.Context, id string) (domain.Role, error) {
 }
 
 func (s *Store) CreateRole(ctx context.Context, name, description string, permissions []domain.PermissionKey) (domain.Role, error) {
+	return s.createRole(ctx, "", name, description, permissions)
+}
+
+func (s *Store) CreateRoleWithinScope(ctx context.Context, actorID, name, description string, permissions []domain.PermissionKey) (domain.Role, error) {
+	return s.createRole(ctx, actorID, name, description, permissions)
+}
+
+func (s *Store) createRole(ctx context.Context, actorID, name, description string, permissions []domain.PermissionKey) (domain.Role, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Role{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if actorID != "" {
+		actorSuper, actorPermissions, scopeErr := lockActorForRoleMutation(ctx, tx, actorID)
+		if scopeErr != nil {
+			return domain.Role{}, scopeErr
+		}
+		if !actorSuper && (!actorPermissions[domain.PermissionRolesRead] || !actorPermissions[domain.PermissionRolesWrite]) {
+			return domain.Role{}, application.ErrForbidden
+		}
+		if !actorSuper && !permissionSetContains(actorPermissions, permissions) {
+			return domain.Role{}, application.ErrPermissionScope
+		}
+	}
 	var role domain.Role
 	canonical := domain.CanonicalRoleName(name)
 	err = tx.QueryRowContext(ctx, `
@@ -242,14 +262,34 @@ func insertRolePermissions(ctx context.Context, tx *sql.Tx, roleID string, permi
 }
 
 func (s *Store) ReplaceRole(ctx context.Context, id string, revision int64, name, description string, permissions []domain.PermissionKey) (domain.Role, error) {
+	return s.replaceRole(ctx, "", id, revision, name, description, permissions)
+}
+
+func (s *Store) ReplaceRoleWithinScope(ctx context.Context, actorID, id string, revision int64, name, description string, permissions []domain.PermissionKey) (domain.Role, error) {
+	return s.replaceRole(ctx, actorID, id, revision, name, description, permissions)
+}
+
+func (s *Store) replaceRole(ctx context.Context, actorID, id string, revision int64, name, description string, permissions []domain.PermissionKey) (domain.Role, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Role{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	var actorSuper bool
+	var actorPermissions map[domain.PermissionKey]bool
+	if actorID != "" {
+		actorSuper, actorPermissions, err = lockActorForRoleMutation(ctx, tx, actorID, id)
+		if err != nil {
+			return domain.Role{}, err
+		}
+	}
 	var systemKey sql.NullString
 	var oldRevision int64
-	if err := tx.QueryRowContext(ctx, `SELECT system_key, revision FROM auth_roles WHERE id = $1::uuid FOR UPDATE`, id).Scan(&systemKey, &oldRevision); err != nil {
+	roleQuery := `SELECT system_key, revision FROM auth_roles WHERE id = $1::uuid`
+	if actorID == "" {
+		roleQuery += " FOR UPDATE"
+	}
+	if err := tx.QueryRowContext(ctx, roleQuery, id).Scan(&systemKey, &oldRevision); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Role{}, application.ErrRoleNotFound
 		}
@@ -279,6 +319,14 @@ func (s *Store) ReplaceRole(ctx context.Context, id string, revision int64, name
 		return domain.Role{}, err
 	}
 	rows.Close()
+	if actorID != "" {
+		if !actorSuper && (!actorPermissions[domain.PermissionRolesRead] || !actorPermissions[domain.PermissionRolesWrite]) {
+			return domain.Role{}, application.ErrForbidden
+		}
+		if !actorSuper && (!permissionSetContains(actorPermissions, oldPermissions) || !permissionSetContains(actorPermissions, permissions)) {
+			return domain.Role{}, application.ErrPermissionScope
+		}
+	}
 	changed := !samePermissionSet(oldPermissions, permissions)
 	canonical := domain.CanonicalRoleName(name)
 	var role domain.Role
@@ -320,13 +368,33 @@ func permissionStrings(keys []domain.PermissionKey) []string {
 }
 
 func (s *Store) DeleteRole(ctx context.Context, id string) error {
+	return s.deleteRole(ctx, "", id)
+}
+
+func (s *Store) DeleteRoleWithinScope(ctx context.Context, actorID, id string) error {
+	return s.deleteRole(ctx, actorID, id)
+}
+
+func (s *Store) deleteRole(ctx context.Context, actorID, id string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	var actorSuper bool
+	var actorPermissions map[domain.PermissionKey]bool
+	if actorID != "" {
+		actorSuper, actorPermissions, err = lockActorForRoleMutation(ctx, tx, actorID, id)
+		if err != nil {
+			return err
+		}
+	}
 	var systemKey sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT system_key FROM auth_roles WHERE id = $1::uuid FOR UPDATE`, id).Scan(&systemKey); err != nil {
+	roleQuery := `SELECT system_key FROM auth_roles WHERE id = $1::uuid`
+	if actorID == "" {
+		roleQuery += " FOR UPDATE"
+	}
+	if err := tx.QueryRowContext(ctx, roleQuery, id).Scan(&systemKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return application.ErrRoleNotFound
 		}
@@ -334,6 +402,18 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 	}
 	if systemKey.Valid {
 		return application.ErrImmutableRole
+	}
+	if actorID != "" {
+		if !actorSuper && (!actorPermissions[domain.PermissionRolesRead] || !actorPermissions[domain.PermissionRolesWrite]) {
+			return application.ErrForbidden
+		}
+		_, permissions, permissionErr := rolePermissionsTx(ctx, tx, id)
+		if permissionErr != nil {
+			return permissionErr
+		}
+		if !actorSuper && !permissionSetContains(actorPermissions, permissions) {
+			return application.ErrPermissionScope
+		}
 	}
 	var references int
 	if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM auth_user_roles WHERE role_id = $1::uuid) + (SELECT count(*) FROM auth_invitation_roles WHERE role_id = $1::uuid)`, id).Scan(&references); err != nil {
@@ -469,6 +549,17 @@ func scanUsers(ctx context.Context, db interface {
 }
 
 func (s *Store) ReplaceUserRoles(ctx context.Context, userID string, authVersion int64, roleIDs []string) (domain.AccessUser, error) {
+	return s.replaceUserRoles(ctx, "", userID, authVersion, roleIDs)
+}
+
+// ReplaceUserRolesWithinScope is the transaction-aware assignment path used by
+// the application service. It rechecks the actor's current authority and the
+// permissions of every changed role while all relevant rows are locked.
+func (s *Store) ReplaceUserRolesWithinScope(ctx context.Context, actorID, userID string, authVersion int64, roleIDs []string) (domain.AccessUser, error) {
+	return s.replaceUserRoles(ctx, actorID, userID, authVersion, roleIDs)
+}
+
+func (s *Store) replaceUserRoles(ctx context.Context, actorID, userID string, authVersion int64, roleIDs []string) (domain.AccessUser, error) {
 	if len(roleIDs) == 0 {
 		return domain.AccessUser{}, application.ErrInvalidRoleSet
 	}
@@ -488,13 +579,23 @@ func (s *Store) ReplaceUserRoles(ctx context.Context, userID string, authVersion
 	if err := tx.QueryRowContext(ctx, `SELECT id::text FROM auth_roles WHERE system_key = 'super_admin'`).Scan(&superRoleID); err != nil {
 		return domain.AccessUser{}, err
 	}
+
 	// Role updates, invitation acceptance, and assignment replacement all lock
-	// role rows in one deterministic UUID order before locking an owning user or
-	// invitation row. Include the built-in role even when it is not in the new
-	// set because this transaction may remove it from the current assignment.
+	// role rows in one deterministic UUID order before locking owning users.
+	// Include the current actor and target assignments so a removal is checked
+	// against the role permissions that are actually being detached.
 	lockedRoleIDs := make([]string, 0, len(roleIDs)+1)
 	lockedRoleIDs = append(lockedRoleIDs, roleIDs...)
 	lockedRoleIDs = append(lockedRoleIDs, superRoleID)
+	if actorID != "" {
+		for _, id := range []string{actorID, userID} {
+			ids, listErr := roleIDsForUserTx(ctx, tx, id)
+			if listErr != nil {
+				return domain.AccessUser{}, listErr
+			}
+			lockedRoleIDs = append(lockedRoleIDs, ids...)
+		}
+	}
 	sort.Strings(lockedRoleIDs)
 	for index, roleID := range lockedRoleIDs {
 		if index > 0 && roleID == lockedRoleIDs[index-1] {
@@ -508,6 +609,11 @@ func (s *Store) ReplaceUserRoles(ctx context.Context, userID string, authVersion
 			return domain.AccessUser{}, err
 		}
 	}
+	if actorID != "" {
+		if err := lockUsersTx(ctx, tx, actorID, userID); err != nil {
+			return domain.AccessUser{}, err
+		}
+	}
 	var currentVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT auth_version FROM auth_users WHERE id = $1::uuid FOR UPDATE`, userID).Scan(&currentVersion); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -518,14 +624,42 @@ func (s *Store) ReplaceUserRoles(ctx context.Context, userID string, authVersion
 	if currentVersion != authVersion {
 		return domain.AccessUser{}, application.ErrStaleRevision
 	}
-	var currentSuper bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM auth_user_roles WHERE user_id = $1::uuid AND role_id = $2::uuid)`, userID, superRoleID).Scan(&currentSuper); err != nil {
+
+	var oldRoles []string
+	oldRoles, err = roleIDsForUserTx(ctx, tx, userID)
+	if err != nil {
 		return domain.AccessUser{}, err
 	}
-	newHasSuper := false
-	for _, roleID := range roleIDs {
-		if roleID == superRoleID {
-			newHasSuper = true
+	sort.Strings(oldRoles)
+	newRoles := append([]string(nil), roleIDs...)
+	sort.Strings(newRoles)
+	changed := strings.Join(oldRoles, "\x00") != strings.Join(newRoles, "\x00")
+
+	currentSuper := containsString(oldRoles, superRoleID)
+	newHasSuper := containsString(roleIDs, superRoleID)
+	if actorID != "" {
+		actorSuper, actorPermissions, actorErr := effectivePermissionsTx(ctx, tx, actorID, superRoleID)
+		if actorErr != nil {
+			return domain.AccessUser{}, actorErr
+		}
+		if !actorSuper && (!actorPermissions[domain.PermissionUsersWrite] || !actorPermissions[domain.PermissionRolesRead]) {
+			return domain.AccessUser{}, application.ErrForbidden
+		}
+		if !actorSuper {
+			for _, roleID := range changedRoleIDs(oldRoles, newRoles) {
+				systemKey, permissions, roleErr := rolePermissionsTx(ctx, tx, roleID)
+				if roleErr != nil {
+					return domain.AccessUser{}, roleErr
+				}
+				if systemKey != "" {
+					return domain.AccessUser{}, application.ErrPermissionScope
+				}
+				for _, permission := range permissions {
+					if !actorPermissions[permission] {
+						return domain.AccessUser{}, application.ErrPermissionScope
+					}
+				}
+			}
 		}
 	}
 	if currentSuper && !newHasSuper {
@@ -537,28 +671,6 @@ func (s *Store) ReplaceUserRoles(ctx context.Context, userID string, authVersion
 			return domain.AccessUser{}, application.ErrLastSuperAdmin
 		}
 	}
-	var oldRoles []string
-	rows, err := tx.QueryContext(ctx, `SELECT role_id::text FROM auth_user_roles WHERE user_id = $1::uuid`, userID)
-	if err != nil {
-		return domain.AccessUser{}, err
-	}
-	for rows.Next() {
-		var roleID string
-		if err := rows.Scan(&roleID); err != nil {
-			rows.Close()
-			return domain.AccessUser{}, err
-		}
-		oldRoles = append(oldRoles, roleID)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return domain.AccessUser{}, err
-	}
-	rows.Close()
-	sort.Strings(oldRoles)
-	newRoles := append([]string(nil), roleIDs...)
-	sort.Strings(newRoles)
-	changed := strings.Join(oldRoles, "\x00") != strings.Join(newRoles, "\x00")
 	if _, err := tx.ExecContext(ctx, `DELETE FROM auth_user_roles WHERE user_id = $1::uuid`, userID); err != nil {
 		return domain.AccessUser{}, err
 	}
@@ -576,7 +688,7 @@ func (s *Store) ReplaceUserRoles(ctx context.Context, userID string, authVersion
 	if err := tx.QueryRowContext(ctx, `SELECT id::text, name, email, created_at, auth_version FROM auth_users WHERE id = $1::uuid`, userID).Scan(&user.User.ID, &user.User.Name, &user.User.Email, &user.User.CreatedAt, &user.AuthVersion); err != nil {
 		return domain.AccessUser{}, err
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT r.id::text, COALESCE(r.system_key, ''), r.name, r.description, r.revision, COALESCE(rp.permission_key, '') FROM auth_user_roles ur JOIN auth_roles r ON r.id = ur.role_id LEFT JOIN auth_role_permissions rp ON rp.role_id = r.id WHERE ur.user_id = $1::uuid ORDER BY (r.system_key IS NULL), r.name_canonical, r.id, rp.permission_key`, userID)
+	rows, err := tx.QueryContext(ctx, `SELECT r.id::text, COALESCE(r.system_key, ''), r.name, r.description, r.revision, COALESCE(rp.permission_key, '') FROM auth_user_roles ur JOIN auth_roles r ON r.id = ur.role_id LEFT JOIN auth_role_permissions rp ON rp.role_id = r.id WHERE ur.user_id = $1::uuid ORDER BY (r.system_key IS NULL), r.name_canonical, r.id, rp.permission_key`, userID)
 	if err != nil {
 		return domain.AccessUser{}, err
 	}
@@ -606,7 +718,157 @@ func (s *Store) ReplaceUserRoles(ctx context.Context, userID string, authVersion
 	return user, nil
 }
 
+func roleIDsForUserTx(ctx context.Context, tx *sql.Tx, userID string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT role_id::text FROM auth_user_roles WHERE user_id = $1::uuid`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []string
+	for rows.Next() {
+		var roleID string
+		if err := rows.Scan(&roleID); err != nil {
+			return nil, err
+		}
+		result = append(result, roleID)
+	}
+	return result, rows.Err()
+}
+
+func lockUsersTx(ctx context.Context, tx *sql.Tx, userIDs ...string) error {
+	ordered := append([]string(nil), userIDs...)
+	sort.Strings(ordered)
+	for index, userID := range ordered {
+		if index > 0 && userID == ordered[index-1] {
+			continue
+		}
+		var lockedID string
+		if err := tx.QueryRowContext(ctx, `SELECT id::text FROM auth_users WHERE id = $1::uuid FOR UPDATE`, userID).Scan(&lockedID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return application.ErrUserNotFound
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func lockActorForRoleMutation(ctx context.Context, tx *sql.Tx, actorID string, additionalRoleIDs ...string) (bool, map[domain.PermissionKey]bool, error) {
+	var superRoleID string
+	if err := tx.QueryRowContext(ctx, `SELECT id::text FROM auth_roles WHERE system_key = 'super_admin'`).Scan(&superRoleID); err != nil {
+		return false, nil, err
+	}
+	roleIDs, err := roleIDsForUserTx(ctx, tx, actorID)
+	if err != nil {
+		return false, nil, err
+	}
+	roleIDs = append(roleIDs, additionalRoleIDs...)
+	roleIDs = append(roleIDs, superRoleID)
+	if err := lockRoles(ctx, tx, roleIDs); err != nil {
+		return false, nil, err
+	}
+	if err := lockUsersTx(ctx, tx, actorID); err != nil {
+		return false, nil, err
+	}
+	return effectivePermissionsTx(ctx, tx, actorID, superRoleID)
+}
+
+func permissionSetContains(granted map[domain.PermissionKey]bool, required []domain.PermissionKey) bool {
+	for _, permission := range required {
+		if !granted[permission] {
+			return false
+		}
+	}
+	return true
+}
+
+func effectivePermissionsTx(ctx context.Context, tx *sql.Tx, userID, superRoleID string) (bool, map[domain.PermissionKey]bool, error) {
+	var superAdmin bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM auth_user_roles WHERE user_id = $1::uuid AND role_id = $2::uuid)`, userID, superRoleID).Scan(&superAdmin); err != nil {
+		return false, nil, err
+	}
+	permissions := make(map[domain.PermissionKey]bool)
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT rp.permission_key FROM auth_user_roles ur JOIN auth_role_permissions rp ON rp.role_id = ur.role_id WHERE ur.user_id = $1::uuid`, userID)
+	if err != nil {
+		return false, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var permission string
+		if err := rows.Scan(&permission); err != nil {
+			return false, nil, err
+		}
+		permissions[domain.PermissionKey(permission)] = true
+	}
+	return superAdmin, permissions, rows.Err()
+}
+
+func rolePermissionsTx(ctx context.Context, tx *sql.Tx, roleID string) (string, []domain.PermissionKey, error) {
+	var systemKey sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT system_key FROM auth_roles WHERE id = $1::uuid`, roleID).Scan(&systemKey); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil, application.ErrRoleNotFound
+		}
+		return "", nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT permission_key FROM auth_role_permissions WHERE role_id = $1::uuid`, roleID)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rows.Close()
+	var permissions []domain.PermissionKey
+	for rows.Next() {
+		var permission string
+		if err := rows.Scan(&permission); err != nil {
+			return "", nil, err
+		}
+		permissions = append(permissions, domain.PermissionKey(permission))
+	}
+	return systemKey.String, permissions, rows.Err()
+}
+
+func changedRoleIDs(oldRoles, newRoles []string) []string {
+	oldSet := make(map[string]struct{}, len(oldRoles))
+	newSet := make(map[string]struct{}, len(newRoles))
+	for _, roleID := range oldRoles {
+		oldSet[roleID] = struct{}{}
+	}
+	for _, roleID := range newRoles {
+		newSet[roleID] = struct{}{}
+	}
+	changed := make([]string, 0, len(oldSet)+len(newSet))
+	for roleID := range oldSet {
+		if _, exists := newSet[roleID]; !exists {
+			changed = append(changed, roleID)
+		}
+	}
+	for roleID := range newSet {
+		if _, exists := oldSet[roleID]; !exists {
+			changed = append(changed, roleID)
+		}
+	}
+	sort.Strings(changed)
+	return changed
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Store) CreateInvitation(ctx context.Context, createdBy, name, email string, locale domain.Locale, roleIDs []string, selector, digest []byte, ttl time.Duration) (domain.Invitation, error) {
+	return s.createInvitation(ctx, "", createdBy, name, email, locale, roleIDs, selector, digest, ttl)
+}
+
+func (s *Store) CreateInvitationWithinScope(ctx context.Context, actorID, name, email string, locale domain.Locale, roleIDs []string, selector, digest []byte, ttl time.Duration) (domain.Invitation, error) {
+	return s.createInvitation(ctx, actorID, actorID, name, email, locale, roleIDs, selector, digest, ttl)
+}
+
+func (s *Store) createInvitation(ctx context.Context, actorID, createdBy, name, email string, locale domain.Locale, roleIDs []string, selector, digest []byte, ttl time.Duration) (domain.Invitation, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Invitation{}, err
@@ -633,7 +895,26 @@ func (s *Store) CreateInvitation(ctx context.Context, createdBy, name, email str
 	if pending {
 		return domain.Invitation{}, application.ErrInvitationPending
 	}
-	if err := lockRoles(ctx, tx, roleIDs); err != nil {
+	if actorID != "" {
+		actorSuper, actorPermissions, scopeErr := lockActorForRoleMutation(ctx, tx, actorID, roleIDs...)
+		if scopeErr != nil {
+			return domain.Invitation{}, scopeErr
+		}
+		if !actorSuper && (!actorPermissions[domain.PermissionInvitationsWrite] || !actorPermissions[domain.PermissionRolesRead]) {
+			return domain.Invitation{}, application.ErrForbidden
+		}
+		if !actorSuper {
+			for _, roleID := range roleIDs {
+				systemKey, permissions, roleErr := rolePermissionsTx(ctx, tx, roleID)
+				if roleErr != nil {
+					return domain.Invitation{}, roleErr
+				}
+				if systemKey != "" || !permissionSetContains(actorPermissions, permissions) {
+					return domain.Invitation{}, application.ErrInvitationRoleForbidden
+				}
+			}
+		}
+	} else if err := lockRoles(ctx, tx, roleIDs); err != nil {
 		return domain.Invitation{}, err
 	}
 	var invitation domain.Invitation
@@ -999,26 +1280,40 @@ func (s *Store) populateInvitationRoles(ctx context.Context, invitation domain.I
 	return invitation, rows.Err()
 }
 
-func (s *Store) ResendInvitation(ctx context.Context, id string, selector, digest []byte, ttl time.Duration) (domain.Invitation, error) {
+func (s *Store) ResendInvitation(ctx context.Context, id string, locale domain.Locale, selector, digest []byte, ttl time.Duration) (domain.Invitation, error) {
+	return s.resendInvitation(ctx, "", id, locale, selector, digest, ttl)
+}
+
+func (s *Store) ResendInvitationWithinScope(ctx context.Context, actorID, id string, locale domain.Locale, selector, digest []byte, ttl time.Duration) (domain.Invitation, error) {
+	return s.resendInvitation(ctx, actorID, id, locale, selector, digest, ttl)
+}
+
+func (s *Store) resendInvitation(ctx context.Context, actorID, id string, locale domain.Locale, selector, digest []byte, ttl time.Duration) (domain.Invitation, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Invitation{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var invitation domain.Invitation
-	if err := tx.QueryRowContext(ctx, `SELECT id::text, name, email, locale, expires_at, created_at, revision, created_by::text FROM auth_user_invitations WHERE id = $1::uuid FOR UPDATE`, id).Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.Invitation{}, application.ErrInvitationNotFound
-		}
+	invitation, roleIDs, actorSuper, actorPermissions, err := lockInvitationMutationScope(ctx, tx, actorID, id)
+	if err != nil {
 		return domain.Invitation{}, err
+	}
+	if actorID != "" && !actorSuper {
+		if !actorPermissions[domain.PermissionInvitationsWrite] || !actorPermissions[domain.PermissionRolesRead] {
+			return domain.Invitation{}, application.ErrForbidden
+		}
+		if err := authorizeInvitationRoleIDsTx(ctx, tx, actorPermissions, roleIDs); err != nil {
+			return domain.Invitation{}, err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), lease_token = NULL, lease_expires_at = NULL, last_error_code = 'superseded' WHERE invitation_id = $1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, id); err != nil {
 		return domain.Invitation{}, err
 	}
-	if err := tx.QueryRowContext(ctx, `UPDATE auth_user_invitations SET selector = $2, verifier_digest = $3, expires_at = clock_timestamp() + ($4 * INTERVAL '1 second'), revision = revision + 1, updated_at = clock_timestamp() WHERE id = $1::uuid RETURNING expires_at, updated_at, revision`, id, selector, digest, ttl.Seconds()).Scan(&invitation.ExpiresAt, &invitation.UpdatedAt, &invitation.Revision); err != nil {
+	if err := tx.QueryRowContext(ctx, `UPDATE auth_user_invitations SET selector = $2, verifier_digest = $3, locale = $4, expires_at = clock_timestamp() + ($5 * INTERVAL '1 second'), revision = revision + 1, updated_at = clock_timestamp() WHERE id = $1::uuid RETURNING expires_at, updated_at, revision`, id, selector, digest, string(locale), ttl.Seconds()).Scan(&invitation.ExpiresAt, &invitation.UpdatedAt, &invitation.Revision); err != nil {
 		return domain.Invitation{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_mail_outbox (kind, invitation_id, reset_selector, locale, expires_at, created_at) VALUES ('user_invitation', $1::uuid, $2, $3, $4, clock_timestamp())`, id, selector, string(invitation.Locale), invitation.ExpiresAt); err != nil {
+	invitation.Locale = locale
+	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_mail_outbox (kind, invitation_id, reset_selector, locale, expires_at, created_at) VALUES ('user_invitation', $1::uuid, $2, $3, $4, clock_timestamp())`, id, selector, string(locale), invitation.ExpiresAt); err != nil {
 		return domain.Invitation{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1028,11 +1323,31 @@ func (s *Store) ResendInvitation(ctx context.Context, id string, selector, diges
 }
 
 func (s *Store) RevokeInvitation(ctx context.Context, id string) error {
+	return s.revokeInvitation(ctx, "", id)
+}
+
+func (s *Store) RevokeInvitationWithinScope(ctx context.Context, actorID, id string) error {
+	return s.revokeInvitation(ctx, actorID, id)
+}
+
+func (s *Store) revokeInvitation(ctx context.Context, actorID, id string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	_, roleIDs, actorSuper, actorPermissions, err := lockInvitationMutationScope(ctx, tx, actorID, id)
+	if err != nil {
+		return err
+	}
+	if actorID != "" && !actorSuper {
+		if !actorPermissions[domain.PermissionInvitationsWrite] || !actorPermissions[domain.PermissionRolesRead] {
+			return application.ErrForbidden
+		}
+		if err := authorizeInvitationRoleIDsTx(ctx, tx, actorPermissions, roleIDs); err != nil {
+			return err
+		}
+	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM auth_user_invitations WHERE id = $1::uuid`, id)
 	if err != nil {
 		return err
@@ -1045,6 +1360,80 @@ func (s *Store) RevokeInvitation(ctx context.Context, id string) error {
 		return application.ErrInvitationNotFound
 	}
 	return tx.Commit()
+}
+
+// lockInvitationMutationScope establishes the same lock order used by role
+// and assignment mutations: the email advisory lock, selected role rows, the
+// actor's role and user rows, then the invitation row. Re-reading the
+// invitation after the locks makes the authorization decision reflect the
+// state that will be changed by this transaction.
+func lockInvitationMutationScope(ctx context.Context, tx *sql.Tx, actorID, invitationID string) (domain.Invitation, []string, bool, map[domain.PermissionKey]bool, error) {
+	var emailCanonical string
+	if err := tx.QueryRowContext(ctx, `SELECT email_canonical FROM auth_user_invitations WHERE id = $1::uuid`, invitationID).Scan(&emailCanonical); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Invitation{}, nil, false, nil, application.ErrInvitationNotFound
+		}
+		return domain.Invitation{}, nil, false, nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, emailCanonical); err != nil {
+		return domain.Invitation{}, nil, false, nil, err
+	}
+	roleIDs, err := invitationRoleIDsTx(ctx, tx, invitationID)
+	if err != nil {
+		return domain.Invitation{}, nil, false, nil, err
+	}
+	var actorSuper bool
+	var actorPermissions map[domain.PermissionKey]bool
+	if actorID != "" {
+		actorSuper, actorPermissions, err = lockActorForRoleMutation(ctx, tx, actorID, roleIDs...)
+	} else {
+		err = lockRoles(ctx, tx, roleIDs)
+	}
+	if err != nil {
+		return domain.Invitation{}, nil, false, nil, err
+	}
+	var invitation domain.Invitation
+	if err := tx.QueryRowContext(ctx, `SELECT id::text, name, email, locale, expires_at, created_at, revision, created_by::text FROM auth_user_invitations WHERE id = $1::uuid FOR UPDATE`, invitationID).Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Invitation{}, nil, false, nil, application.ErrInvitationNotFound
+		}
+		return domain.Invitation{}, nil, false, nil, err
+	}
+	roleIDs, err = invitationRoleIDsTx(ctx, tx, invitationID)
+	if err != nil {
+		return domain.Invitation{}, nil, false, nil, err
+	}
+	return invitation, roleIDs, actorSuper, actorPermissions, nil
+}
+
+func invitationRoleIDsTx(ctx context.Context, tx *sql.Tx, invitationID string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT role_id::text FROM auth_invitation_roles WHERE invitation_id = $1::uuid`, invitationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var roleIDs []string
+	for rows.Next() {
+		var roleID string
+		if err := rows.Scan(&roleID); err != nil {
+			return nil, err
+		}
+		roleIDs = append(roleIDs, roleID)
+	}
+	return roleIDs, rows.Err()
+}
+
+func authorizeInvitationRoleIDsTx(ctx context.Context, tx *sql.Tx, actorPermissions map[domain.PermissionKey]bool, roleIDs []string) error {
+	for _, roleID := range roleIDs {
+		systemKey, permissions, err := rolePermissionsTx(ctx, tx, roleID)
+		if err != nil {
+			return err
+		}
+		if systemKey != "" || !permissionSetContains(actorPermissions, permissions) {
+			return application.ErrInvitationNotManageable
+		}
+	}
+	return nil
 }
 
 func (s *Store) PreflightInvitation(ctx context.Context, selector, digest []byte) error {

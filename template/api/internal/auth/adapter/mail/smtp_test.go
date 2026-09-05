@@ -7,22 +7,21 @@ import (
 	"time"
 
 	"example.com/temvia/api/internal/auth/application"
-	"example.com/temvia/api/internal/config"
 )
 
 func TestNewSMTPMailerSupportsConfiguredTransportModes(t *testing.T) {
 	for _, mode := range []string{"none", "starttls", "tls"} {
 		t.Run(mode, func(t *testing.T) {
-			mailer, err := NewSMTPMailer(config.Config{
-				SMTPHost: "127.0.0.1", SMTPPort: "2525", SMTPSecurity: mode,
-				SMTPFromAddress: "no-reply@example.com", SMTPFromName: "Temvia", SMTPTimeout: time.Second,
-			})
+			mailer, err := NewSMTPMailerFromSettingsWithTimeout(application.SMTPSettings{
+				Host: "127.0.0.1", Port: 2525, Security: mode,
+				FromAddress: "no-reply@example.com", FromName: "Temvia",
+			}, time.Second)
 			if err != nil || mailer == nil {
-				t.Fatalf("NewSMTPMailer(%q) = %#v, %v", mode, mailer, err)
+				t.Fatalf("NewSMTPMailerFromSettings(%q) = %#v, %v", mode, mailer, err)
 			}
 		})
 	}
-	if _, err := NewSMTPMailer(config.Config{SMTPHost: "127.0.0.1", SMTPPort: "2525", SMTPSecurity: "invalid", SMTPTimeout: time.Second}); err == nil {
+	if _, err := NewSMTPMailerFromSettingsWithTimeout(application.SMTPSettings{Host: "127.0.0.1", Port: 2525, Security: "invalid"}, time.Second); err == nil {
 		t.Fatal("invalid SMTP transport mode accepted")
 	}
 }

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, House, LogOut, Mail, ShieldCheck, UserRound, Users } from 'lucide-react'
+import { ChevronDown, House, LogOut, Mail, Settings, ShieldCheck, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
@@ -39,6 +39,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
   const hasUsersAccess = Boolean(user.superAdmin || user.permissions?.includes('users.read'))
   const hasInvitationsAccess = Boolean(user.superAdmin || user.permissions?.includes('invitations.read'))
   const hasRolesAccess = Boolean(user.superAdmin || user.permissions?.includes('roles.read'))
+  const hasSettingsAccess = Boolean(user.superAdmin || user.permissions?.includes('settings.read'))
   const hasAccessMenu = hasUsersAccess || hasInvitationsAccess || hasRolesAccess
   const accessMenuActive = location.pathname.startsWith('/users') || location.pathname.startsWith('/invitations') || location.pathname.startsWith('/roles')
   const [accessMenuOpen, setAccessMenuOpen] = useState(true)
@@ -94,12 +95,13 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
                     </SidebarMenuSub> : null}
                   </SidebarMenuItem>
                 ) : null}
+                {hasSettingsAccess ? <SidebarMenuItem><SidebarMenuButton asChild isActive={location.pathname.startsWith('/settings')} tooltip={t('settings')}><Link to="/settings" aria-current={location.pathname.startsWith('/settings') ? 'page' : undefined}><Settings aria-hidden="true" data-icon="inline-start" /><span>{t('settings')}</span></Link></SidebarMenuButton></SidebarMenuItem> : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <DropdownMenu>
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent" aria-label={`${user.name}, ${t('menu')}`}>
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-sidebar-accent text-xs font-semibold text-sidebar-accent-foreground">
@@ -130,7 +132,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger aria-label={t('menu')} />
             <div className="h-4 w-px bg-border" aria-hidden="true" />
-            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : t('home')}</p>
+            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : location.pathname.startsWith('/settings') ? t('settings') : t('home')}</p>
           </div>
           <PreferencesButtons className="shrink-0" />
         </header>

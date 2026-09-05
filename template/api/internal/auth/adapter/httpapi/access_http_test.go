@@ -178,7 +178,7 @@ func (s *matrixAccessStore) FindInvitation(_ context.Context, id string) (domain
 	}
 	roleID := s.invitationRoleID
 	if roleID == "" {
-		roleID = matrixUsersRole
+		roleID = matrixRolesRole
 	}
 	var role domain.Role
 	for _, candidate := range s.roles {
@@ -194,11 +194,11 @@ func (s *matrixAccessStore) FindInvitation(_ context.Context, id string) (domain
 	return domain.Invitation{ID: id, Name: "Invitee", Email: "invitee@example.com", Locale: domain.LocaleEnglish, Roles: []domain.Role{role}, ExpiresAt: now.Add(time.Hour), CreatedAt: now, Revision: 1}, nil
 }
 
-func (s *matrixAccessStore) ResendInvitation(_ context.Context, id string, _ []byte, _ []byte, ttl time.Duration) (domain.Invitation, error) {
+func (s *matrixAccessStore) ResendInvitation(_ context.Context, id string, locale domain.Locale, _ []byte, _ []byte, ttl time.Duration) (domain.Invitation, error) {
 	s.resendInvitationCalls++
 	role := s.roles[1]
 	now := time.Unix(1_700_000_000, 0).UTC()
-	return domain.Invitation{ID: id, Name: "Invitee", Email: "invitee@example.com", Locale: domain.LocaleEnglish, Roles: []domain.Role{role}, ExpiresAt: now.Add(ttl), CreatedAt: now, Revision: 2}, nil
+	return domain.Invitation{ID: id, Name: "Invitee", Email: "invitee@example.com", Locale: locale, Roles: []domain.Role{role}, ExpiresAt: now.Add(ttl), CreatedAt: now, Revision: 2}, nil
 }
 
 func (s *matrixAccessStore) RevokeInvitation(context.Context, string) error {
@@ -221,14 +221,18 @@ func cloneRoles(roles []domain.Role) []domain.Role {
 }
 
 func matrixRole(id, name string, permission domain.PermissionKey) domain.Role {
-	return domain.Role{ID: id, Name: name, Permissions: []domain.PermissionKey{permission}, Revision: 1}
+	return matrixRoleWithPermissions(id, name, permission)
+}
+
+func matrixRoleWithPermissions(id, name string, permissions ...domain.PermissionKey) domain.Role {
+	return domain.Role{ID: id, Name: name, Permissions: append([]domain.PermissionKey(nil), permissions...), Revision: 1}
 }
 
 func newAccessHTTPMatrixFixture() (http.Handler, *matrixAccessStore) {
 	usersRole := matrixRole(matrixUsersRole, "Users reader", domain.PermissionUsersRead)
 	rolesRole := matrixRole(matrixRolesRole, "Roles reader", domain.PermissionRolesRead)
 	invitationsReadRole := matrixRole(matrixInvitesReadRole, "Invitations reader", domain.PermissionInvitationsRead)
-	invitationsManageRole := matrixRole(matrixInvitesManageRole, "Invitations manager", domain.PermissionInvitationsManage)
+	invitationsManageRole := matrixRoleWithPermissions(matrixInvitesManageRole, "Invitations manager", domain.PermissionInvitationsRead, domain.PermissionInvitationsWrite, domain.PermissionRolesRead)
 	systemRole := domain.Role{ID: matrixSystemRole, Name: "Super Admin", SystemKey: "super_admin", Revision: 1}
 	store := &matrixAccessStore{roles: []domain.Role{systemRole, usersRole, rolesRole, invitationsReadRole, invitationsManageRole}}
 	super := domain.Principal{User: domain.User{ID: matrixSuperID, Name: "Super", Email: "super@example.com"}, Roles: []domain.Role{systemRole}}
@@ -283,11 +287,11 @@ func TestAccessHTTPPermissionMatrix(t *testing.T) {
 		{name: "roles reader can list roles", session: "roles", method: http.MethodGet, path: "/api/roles", wantStatus: http.StatusOK, touches: true},
 		{name: "users reader cannot list roles", session: "users", method: http.MethodGet, path: "/api/roles", wantStatus: http.StatusForbidden},
 		{name: "super can list roles", session: "super", method: http.MethodGet, path: "/api/roles", wantStatus: http.StatusOK, touches: true},
-		{name: "users reader can list role options", session: "users", method: http.MethodGet, path: "/api/access/role-options", wantStatus: http.StatusOK},
-		{name: "roles reader cannot list role options", session: "roles", method: http.MethodGet, path: "/api/access/role-options", wantStatus: http.StatusForbidden},
+		{name: "roles reader can list role options", session: "roles", method: http.MethodGet, path: "/api/access/role-options", wantStatus: http.StatusOK},
+		{name: "users reader cannot list role options", session: "users", method: http.MethodGet, path: "/api/access/role-options", wantStatus: http.StatusForbidden},
 		{name: "super can list invitations", session: "super", method: http.MethodGet, path: "/api/user-invitations", wantStatus: http.StatusOK, touches: true},
 		{name: "invitations reader can list invitations", session: "invitations-reader", method: http.MethodGet, path: "/api/user-invitations", wantStatus: http.StatusOK, touches: true},
-		{name: "invitations reader can list users through dependency", session: "invitations-reader", method: http.MethodGet, path: "/api/users", wantStatus: http.StatusOK, touches: true},
+		{name: "invitations reader cannot list users without dependency", session: "invitations-reader", method: http.MethodGet, path: "/api/users", wantStatus: http.StatusForbidden},
 		{name: "invitations reader cannot list roles without dependency", session: "invitations-reader", method: http.MethodGet, path: "/api/roles", wantStatus: http.StatusForbidden},
 		{name: "users reader cannot list invitations", session: "users", method: http.MethodGet, path: "/api/user-invitations", wantStatus: http.StatusForbidden},
 		{name: "roles reader cannot list invitations", session: "roles", method: http.MethodGet, path: "/api/user-invitations", wantStatus: http.StatusForbidden},
@@ -299,10 +303,10 @@ func TestAccessHTTPPermissionMatrix(t *testing.T) {
 		{name: "roles reader cannot delete role", session: "roles", method: http.MethodDelete, path: "/api/roles/019535d9-3df7-79fb-b466-fa907fa17f95", origin: true, wantStatus: http.StatusForbidden},
 		{name: "super can replace user roles", session: "super", method: http.MethodPut, path: "/api/users/019535d9-3df7-79fb-b466-fa907fa17f93/roles", body: `{"roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"],"authVersion":1}`, origin: true, wantStatus: http.StatusOK, touches: true, writes: true},
 		{name: "users reader cannot replace user roles", session: "users", method: http.MethodPut, path: "/api/users/019535d9-3df7-79fb-b466-fa907fa17f93/roles", body: `{"roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"],"authVersion":1}`, origin: true, wantStatus: http.StatusForbidden},
-		{name: "super can create invitation", session: "super", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","locale":"en","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"]}`, origin: true, wantStatus: http.StatusCreated, touches: true, writes: true},
-		{name: "invitations manager can create invitation", session: "invitations-manager", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","locale":"en","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"]}`, origin: true, wantStatus: http.StatusCreated, touches: true, writes: true},
-		{name: "invitations reader cannot create invitation", session: "invitations-reader", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","locale":"en","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"]}`, origin: true, wantStatus: http.StatusForbidden},
-		{name: "roles reader cannot create invitation", session: "roles", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","locale":"en","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f95"]}`, origin: true, wantStatus: http.StatusForbidden},
+		{name: "super can create invitation", session: "super", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f96"]}`, origin: true, wantStatus: http.StatusCreated, touches: true, writes: true},
+		{name: "invitations manager can create invitation", session: "invitations-manager", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f96"]}`, origin: true, wantStatus: http.StatusCreated, touches: true, writes: true},
+		{name: "invitations reader cannot create invitation", session: "invitations-reader", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f96"]}`, origin: true, wantStatus: http.StatusForbidden},
+		{name: "roles reader cannot create invitation", session: "roles", method: http.MethodPost, path: "/api/user-invitations", body: `{"name":"Invitee","email":"invitee@example.com","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f96"]}`, origin: true, wantStatus: http.StatusForbidden},
 		{name: "super can resend invitation", session: "super", method: http.MethodPost, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97/resend", origin: true, wantStatus: http.StatusAccepted, touches: true, writes: true},
 		{name: "invitations manager can resend invitation", session: "invitations-manager", method: http.MethodPost, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97/resend", origin: true, wantStatus: http.StatusAccepted, touches: true, writes: true},
 		{name: "users reader cannot resend invitation", session: "users", method: http.MethodPost, path: "/api/user-invitations/019535d9-3df7-79fb-b466-fa907fa17f97/resend", origin: true, wantStatus: http.StatusForbidden},
@@ -364,7 +368,7 @@ func TestAccessHTTPMutationChecksOriginBeforeAuthorizationBody(t *testing.T) {
 
 func TestInvitationManagerCannotAssignOrManageSuperAdminInvitation(t *testing.T) {
 	handler, store := newAccessHTTPMatrixFixture()
-	create := matrixRequest(handler, "invitations-manager", http.MethodPost, "/api/user-invitations", `{"name":"Invitee","email":"invitee@example.com","locale":"en","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f94"]}`, true)
+	create := matrixRequest(handler, "invitations-manager", http.MethodPost, "/api/user-invitations", `{"name":"Invitee","email":"invitee@example.com","roleIds":["019535d9-3df7-79fb-b466-fa907fa17f94"]}`, true)
 	if create.Code != http.StatusForbidden || !strings.Contains(create.Body.String(), `"code":"invitation_role_forbidden"`) || store.createInvitationCalls != 0 {
 		t.Fatalf("create privileged invitation status = %d, calls = %d; body=%s", create.Code, store.createInvitationCalls, create.Body.String())
 	}

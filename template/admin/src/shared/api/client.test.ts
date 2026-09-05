@@ -65,9 +65,9 @@ describe('Fetch API boundary', () => {
 			}),
 		)
 
-		await expect(api.requestPasswordReset({ email: 'ada@example.com', locale: 'en' })).resolves.toBeUndefined()
-		expect(requestBody).toEqual({ email: 'ada@example.com', locale: 'en' })
-		await expect(api.completePasswordReset({ token: `v1.${'A'.repeat(22)}.${'B'.repeat(43)}`, password: 'Aa1!xxxx', locale: 'zh-CN' })).resolves.toBeUndefined()
+		await expect(api.requestPasswordReset({ email: 'ada@example.com' })).resolves.toBeUndefined()
+		expect(requestBody).toEqual({ email: 'ada@example.com' })
+		await expect(api.completePasswordReset({ token: `v1.${'A'.repeat(22)}.${'B'.repeat(43)}`, password: 'Aa1!xxxx' })).resolves.toBeUndefined()
 	})
 
 	it('encodes access-list search, role, status, and sort options in the query string', async () => {

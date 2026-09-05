@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"example.com/temvia/api/internal/auth/application"
 	"example.com/temvia/api/internal/auth/domain"
 )
 
@@ -46,8 +47,9 @@ type principalEnvelope struct {
 }
 
 type roleListResponse struct {
-	Roles       []roleResponseBody       `json:"roles"`
-	Permissions []permissionResponseBody `json:"permissions"`
+	Roles        []roleResponseBody        `json:"roles"`
+	Permissions  []permissionResponseBody  `json:"permissions"`
+	Combinations []combinationResponseBody `json:"combinations"`
 }
 
 type permissionResponseBody struct {
@@ -57,6 +59,14 @@ type permissionResponseBody struct {
 	LabelKey     string   `json:"labelKey"`
 	Description  string   `json:"description"`
 	Dependencies []string `json:"dependencies,omitempty"`
+}
+
+type combinationResponseBody struct {
+	Key         string   `json:"key"`
+	LabelKey    string   `json:"labelKey"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+	Trigger     []string `json:"trigger"`
 }
 
 type roleOptionResponseBody struct {
@@ -100,6 +110,32 @@ type invitationResponseBody struct {
 type invitationsResponse struct {
 	Invitations []invitationResponseBody `json:"invitations"`
 	NextCursor  string                   `json:"nextCursor,omitempty"`
+}
+
+type emailSettingsResponse struct {
+	Configured    bool   `json:"configured"`
+	Host          string `json:"host,omitempty"`
+	Port          int    `json:"port,omitempty"`
+	Security      string `json:"security,omitempty"`
+	Username      string `json:"username,omitempty"`
+	PasswordSet   bool   `json:"passwordSet"`
+	FromAddress   string `json:"fromAddress,omitempty"`
+	FromName      string `json:"fromName,omitempty"`
+	DefaultLocale string `json:"defaultLocale,omitempty"`
+	Revision      int64  `json:"revision"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
+}
+
+type emailSettingsEnvelope struct {
+	Email emailSettingsResponse `json:"email"`
+}
+
+func emailSettingsResponseBody(view application.EmailSettingsView) emailSettingsResponse {
+	body := emailSettingsResponse{Configured: view.Configured, Host: view.Host, Port: view.Port, Security: view.Security, Username: view.Username, PasswordSet: view.PasswordSet, FromAddress: view.FromAddress, FromName: view.FromName, DefaultLocale: string(view.DefaultLocale), Revision: view.Revision}
+	if !view.UpdatedAt.IsZero() {
+		body.UpdatedAt = view.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return body
 }
 
 func principalResponse(principal domain.Principal) principalEnvelope {

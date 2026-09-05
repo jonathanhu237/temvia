@@ -123,3 +123,11 @@ func (e *MailDeliveryError) Error() string {
 type RandomSource interface {
 	Read([]byte) error
 }
+
+// MailSettingsProvider supplies the current cross-device email configuration.
+// It is intentionally narrow so invitations and password recovery can use the
+// same default locale without depending on the settings HTTP adapter.
+type MailSettingsProvider interface {
+	DefaultMailLocale(context.Context) (domain.Locale, error)
+	EnsureMailConfigured(context.Context) error
+}

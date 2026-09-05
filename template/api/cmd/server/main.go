@@ -35,27 +35,44 @@ func newHandler() http.Handler {
 	return mux
 }
 
+func firstRecovery(recovery []httpapi.PasswordRecoveryService) httpapi.PasswordRecoveryService {
+	if len(recovery) == 0 {
+		return nil
+	}
+	return recovery[0]
+}
+
 func newApplicationHandler(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery ...httpapi.PasswordRecoveryService) http.Handler {
+	return newApplicationHandlerWithSettings(cfg, setup, auth, hasher, sessions, limiter, random, firstRecovery(recovery), nil)
+}
+
+func newApplicationHandlerWithSettings(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery httpapi.PasswordRecoveryService, settingsService *application.SettingsManagement) http.Handler {
 	setupService := application.NewSetup(setup, hasher, random, cfg.SetupLinkTTL)
 	catalog := domain.DefaultPermissionCatalog()
 	authService := application.NewAuthentication(auth, hasher, sessions, limiter, random, catalog)
 	mux := http.NewServeMux()
 	mux.Handle("GET /health", healthHandler())
-	var recoveryService httpapi.PasswordRecoveryService
-	if len(recovery) > 0 {
-		recoveryService = recovery[0]
-	}
 	if store, ok := auth.(application.AccessStore); ok {
 		if principals, principalOK := auth.(application.PrincipalStore); principalOK {
-			access := application.NewAccessManagementWithInvitations(store, principals, catalog, cfg.InvitationTokenKey, random, cfg.InvitationLinkTTL)
+			var access *application.AccessManagement
+			if settingsService != nil {
+				access = application.NewAccessManagementWithInvitations(store, principals, catalog, cfg.InvitationTokenKey, random, cfg.InvitationLinkTTL, settingsService)
+			} else {
+				access = application.NewAccessManagementWithInvitations(store, principals, catalog, cfg.InvitationTokenKey, random, cfg.InvitationLinkTTL)
+			}
 			accept := application.NewInvitationAcceptance(store, hasher, cfg.InvitationTokenKey)
-			authHandler := httpapi.NewHandlerWithAccess(setupService, authService, cfg, recoveryService, access, accept)
+			var authHandler http.Handler
+			if settingsService != nil {
+				authHandler = httpapi.NewHandlerWithAccess(setupService, authService, cfg, recovery, access, accept, settingsService)
+			} else {
+				authHandler = httpapi.NewHandlerWithAccess(setupService, authService, cfg, recovery, access, accept)
+			}
 			mux.Handle("/api", authHandler)
 			mux.Handle("/api/", authHandler)
 			return mux
 		}
 	}
-	authHandler := httpapi.NewHandler(setupService, authService, cfg, recovery...)
+	authHandler := httpapi.NewHandler(setupService, authService, cfg, recovery)
 	mux.Handle("/api", authHandler)
 	mux.Handle("/api/", authHandler)
 	return mux
@@ -93,9 +110,20 @@ func main() {
 	} else if required {
 		log.Printf("initial setup link (expires in %s): %s/setup#token=%s", cfg.SetupLinkTTL, cfg.PublicURL, token)
 	}
-	smtpMailer, err := mailadapter.NewSMTPMailer(cfg)
-	if err != nil {
-		log.Fatalf("SMTP configuration failed: %v", err)
+	var secretBox application.SecretBox
+	if len(cfg.EmailSettingsEncryptionKey) > 0 {
+		secretBox, err = application.NewAESGCMSecretBox(cfg.EmailSettingsEncryptionKey)
+		if err != nil {
+			log.Fatalf("email settings encryption configuration failed: %v", err)
+		}
+	}
+	runtimeMailer := application.NewReloadableMailer()
+	settingsService := application.NewSettingsManagement(postgresStore, secretBox, func(settings application.SMTPSettings) (application.Mailer, error) {
+		return mailadapter.NewSMTPMailerFromSettingsWithTimeout(settings, cfg.SMTPTimeout)
+	}, runtimeMailer)
+	settingsService.SetProductionMode(cfg.Environment == "production")
+	if err := settingsService.LoadRuntime(startupContext); err != nil {
+		log.Fatalf("email settings initialization failed: %v", err)
 	}
 	recovery := application.NewPasswordRecovery(
 		postgresStore,
@@ -106,10 +134,11 @@ func main() {
 		cfg.PasswordResetLinkTTL,
 		cfg.MailOutboxNotificationTTL,
 		cfg.PasswordResetResponseMin,
+		settingsService,
 	)
 	dispatcher := application.NewMailDispatcher(
 		postgresStore,
-		smtpMailer,
+		runtimeMailer,
 		random,
 		cfg.PasswordResetTokenKey,
 		cfg.PublicURL,
@@ -119,7 +148,7 @@ func main() {
 		cfg.MailOutboxRetryMax,
 		cfg.InvitationTokenKey,
 	)
-	handler := newApplicationHandler(cfg, postgresStore, postgresStore, hasher, redisStore, redisStore, random, recovery)
+	handler := newApplicationHandlerWithSettings(cfg, postgresStore, postgresStore, hasher, redisStore, redisStore, random, recovery, settingsService)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,

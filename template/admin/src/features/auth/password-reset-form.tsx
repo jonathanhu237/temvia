@@ -8,12 +8,11 @@ import { Button } from '@/components/ui/button'
 import { FieldGroup } from '@/components/ui/field'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import { fieldProblemFor, isInvalidPasswordResetToken, translatePasswordResetProblem } from '@/shared/api/problems'
-import { type Locale } from '@/shared/i18n/resources'
 import { normalizePasswordResetValues, passwordResetFormSchema, type PasswordResetFormValues } from './schemas'
 import { PasswordField } from './form-fields'
 
 export function PasswordResetForm({ api, token, onSuccess, onInvalidAuthority }: { api: ApiClient; token: string; onSuccess: () => void; onInvalidAuthority: () => void }) {
-  const { t, i18n } = useTranslation(['auth', 'problems'])
+  const { t } = useTranslation(['auth', 'problems'])
   const [formError, setFormError] = useState<unknown>()
   const form = useForm<PasswordResetFormValues>({
     resolver: zodResolver(passwordResetFormSchema),
@@ -23,11 +22,7 @@ export function PasswordResetForm({ api, token, onSuccess, onInvalidAuthority }:
   })
   const mutation = useMutation({
     retry: false,
-    mutationFn: (values: PasswordResetFormValues) => api.completePasswordReset({
-      token,
-      ...normalizePasswordResetValues(values),
-      locale: currentLocale(i18n.language),
-    }),
+    mutationFn: (values: PasswordResetFormValues) => api.completePasswordReset({ token, ...normalizePasswordResetValues(values) }),
     onSuccess,
   })
 
@@ -66,8 +61,4 @@ export function PasswordResetForm({ api, token, onSuccess, onInvalidAuthority }:
       </Button>
     </form>
   )
-}
-
-function currentLocale(language: string): Locale {
-  return language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
 }

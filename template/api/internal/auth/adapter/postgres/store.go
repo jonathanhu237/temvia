@@ -14,7 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-const ExpectedMigrationVersion int64 = 3
+const ExpectedMigrationVersion int64 = 4
 
 var ErrSchemaNotReady = errors.New("database schema is not ready")
 

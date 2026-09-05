@@ -22,14 +22,14 @@ import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
-import type { Permission, Role } from '@/shared/api/contracts'
+import type { Permission, PermissionCombination, Role } from '@/shared/api/contracts'
 import { AccessError } from './access-error'
 import { AssignmentCount, AssignmentCountInfo, BuiltInRoleIndicator } from './access-components'
 import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { roleQueryKey, rolesOptions, rolesQueryKey } from './queries'
 
-export function RolesPage({ api, canManage }: { api: ApiClient; canManage: boolean }) {
+export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = false }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean }) {
   const { t } = useTranslation(['access', 'problems', 'common'])
   const queryClient = useQueryClient()
   const query = useQuery(rolesOptions(api))
@@ -171,7 +171,7 @@ export function RolesPage({ api, canManage }: { api: ApiClient; canManage: boole
     </Dialog>
     <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
       <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
-        <RoleEditor key={selectedRole?.id ?? 'new'} api={api} role={selectedRole} permissions={query.data?.permissions ?? []} open={editorOpen} editorGeneration={editorGeneration} onDone={(role, generation) => { if (generation !== editorGenerationRef.current) return; setSelected(role); setEditorOpen(false); void queryClient.invalidateQueries({ queryKey: rolesQueryKey }); void queryClient.invalidateQueries({ queryKey: roleQueryKey(role.id) }) }} onReload={reloadRoles} />
+        <RoleEditor key={selectedRole?.id ?? 'new'} api={api} role={selectedRole} permissions={query.data?.permissions ?? []} combinations={query.data?.combinations ?? []} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin || actorPermissions === undefined} open={editorOpen} editorGeneration={editorGeneration} onDone={(role, generation) => { if (generation !== editorGenerationRef.current) return; setSelected(role); setEditorOpen(false); void queryClient.invalidateQueries({ queryKey: rolesQueryKey }); void queryClient.invalidateQueries({ queryKey: roleQueryKey(role.id) }) }} onReload={reloadRoles} />
       </DialogContent>
     </Dialog>
     <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open) setDeleteTarget(undefined) }}>
@@ -199,7 +199,7 @@ function RoleDetail({ role, permissions, canManage, onEdit }: { role: Role; perm
   </>
 }
 
-function RoleEditor({ api, role, permissions, open, editorGeneration, onDone, onReload }: { api: ApiClient; role?: Role; permissions: Permission[]; open: boolean; editorGeneration: number; onDone: (role: Role, generation: number) => void; onReload: () => Promise<void> }) {
+function RoleEditor({ api, role, permissions, combinations, actorPermissions, actorSuperAdmin, open, editorGeneration, onDone, onReload }: { api: ApiClient; role?: Role; permissions: Permission[]; combinations: PermissionCombination[]; actorPermissions?: string[]; actorSuperAdmin: boolean; open: boolean; editorGeneration: number; onDone: (role: Role, generation: number) => void; onReload: () => Promise<void> }) {
   const { t } = useTranslation(['access', 'problems', 'common'])
   const queryClient = useQueryClient()
   const roleCreate = useAccessDraftStore((state) => state.roleCreate)
@@ -255,14 +255,14 @@ function RoleEditor({ api, role, permissions, open, editorGeneration, onDone, on
     if (role) setRoleEdit(role.id, next)
     else setRoleCreate(next)
   }
-  const permissionGroups = Object.entries(permissions.reduce<Record<string, Permission[]>>((groups, permission) => {
+	const permissionGroups = Object.entries(permissions.reduce<Record<string, Permission[]>>((groups, permission) => {
     const group = groups[permission.resource] ?? []
     group.push(permission)
     groups[permission.resource] = group
     return groups
-  }, {})).sort(([left], [right]) => left.localeCompare(right))
-  const requiredDependencies = requiredPermissionDependencies(current.explicitPermissions ?? current.permissions, permissions)
-  const translate = (key: string) => t(key as never)
+	}, {})).sort(([left], [right]) => left.localeCompare(right))
+	const translate = (key: string) => t(key as never)
+	const actorGrantable = new Set(actorPermissions ?? [])
   const mutation = useMutation({
     retry: false,
     mutationFn: async (submission: Submission) => {
@@ -324,20 +324,31 @@ function RoleEditor({ api, role, permissions, open, editorGeneration, onDone, on
         </Field>
         <fieldset className="flex flex-col gap-4" aria-describedby={current.validationError === 'permissions' || current.validationError === 'invalidPermissions' ? 'role-permissions-error' : undefined}>
           <legend className="text-sm font-medium">{t('permissions')}</legend>
-          {permissionGroups.map(([resource, items]) => <fieldset key={resource} className="flex flex-col gap-2 rounded-md bg-muted/30 p-3">
+			{permissionGroups.map(([resource, items]) => <fieldset key={resource} className="flex flex-col gap-2 rounded-md bg-muted/30 p-3">
             <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{localizedResource(resource, translate)}</legend>
-            {items.map((permission) => {
-              const checked = current.permissions.includes(permission.key)
-              const locked = requiredDependencies.has(permission.key)
-              const label = localizedPermission(permission.key, translate)
-              return <label key={permission.key} className="flex items-start gap-3 rounded-md border bg-background p-3">
-                <Checkbox checked={checked} onCheckedChange={(value) => {
-                  const explicit = current.explicitPermissions ?? current.permissions
-                  update(value === true
-                    ? { permissions: addPermissionDependencies(current.permissions, permission.key, permissions), explicitPermissions: Array.from(new Set([...explicit, permission.key])), validationError: undefined }
-                    : { permissions: current.permissions.filter((key) => key !== permission.key), explicitPermissions: explicit.filter((key) => key !== permission.key), validationError: undefined })
-                }} aria-label={label} disabled={locked || current.submitting || mutation.isPending} />
-                <span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-sm font-medium">{label}{locked ? <LockKeyhole aria-label={t('permissionRequired')} /> : null}</span><span className="block text-xs text-muted-foreground">{localizedPermissionDescription(permission.key, translate, permission.description)}{locked ? ` · ${t('permissionRequired')}` : ''}</span></span>
+			{items.map((permission) => {
+				const checked = current.permissions.includes(permission.key)
+				const lockedByActor = !actorSuperAdmin && !actorGrantable.has(permission.key)
+				const lockedByFeature = isRequiredBySelectedWrite(permission.key, current.permissions, combinations)
+				const locked = lockedByActor || lockedByFeature
+				const unavailableCombination = !actorSuperAdmin && isWritePermission(permission.key) && !combinationGrantable(permission.key, actorGrantable, combinations)
+				const label = localizedPermission(permission.key, translate)
+				return <label key={permission.key} className="flex items-start gap-3 rounded-md border bg-background p-3">
+					<Checkbox checked={checked} onCheckedChange={(value) => {
+						const explicit = current.explicitPermissions ?? current.permissions
+						if (value === true) {
+							update({ permissions: addFeaturePermissions(current.permissions, permission.key, combinations), explicitPermissions: Array.from(new Set([...explicit, permission.key])), validationError: undefined })
+							return
+						}
+						const nextExplicit = explicit.filter((key) => key !== permission.key)
+						// Keep permissions that were added for a feature visible after its
+						// write grant is removed. The administrator can explicitly clear
+						// them afterwards; silently dropping unrelated read access would
+						// make a role edit destructive and hard to review.
+						const nextPermissions = current.permissions.filter((key) => key !== permission.key)
+						update({ permissions: nextPermissions, explicitPermissions: nextExplicit, validationError: undefined })
+					}} aria-label={label} disabled={locked || unavailableCombination || current.submitting || mutation.isPending} />
+					<span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-sm font-medium">{label}{locked ? <LockKeyhole aria-label={t('permissionRequired')} /> : null}</span><span className="block text-xs text-muted-foreground">{localizedPermissionDescription(permission.key, translate, permission.description)}{locked ? ` · ${t('permissionRequired')}` : ''}</span></span>
               </label>
             })}
           </fieldset>)}
@@ -359,16 +370,24 @@ function isStaleRevision(error: unknown): boolean {
 
 const permissionLabelKeys: Record<string, string> = {
   'users.read': 'permissionUsersRead',
+  'users.write': 'permissionUsersWrite',
   'roles.read': 'permissionRolesRead',
+  'roles.write': 'permissionRolesWrite',
   'invitations.read': 'permissionInvitationsRead',
-  'invitations.manage': 'permissionInvitationsManage',
+  'invitations.write': 'permissionInvitationsWrite',
+  'settings.read': 'permissionSettingsRead',
+  'settings.write': 'permissionSettingsWrite',
 }
 
 const permissionDescriptionKeys: Record<string, string> = {
   'users.read': 'permissionUsersReadDescription',
+  'users.write': 'permissionUsersWriteDescription',
   'roles.read': 'permissionRolesReadDescription',
+  'roles.write': 'permissionRolesWriteDescription',
   'invitations.read': 'permissionInvitationsReadDescription',
-  'invitations.manage': 'permissionInvitationsManageDescription',
+  'invitations.write': 'permissionInvitationsWriteDescription',
+  'settings.read': 'permissionSettingsReadDescription',
+  'settings.write': 'permissionSettingsWriteDescription',
 }
 
 function localizedPermission(key: string, t: (key: string) => string): string {
@@ -383,38 +402,52 @@ const resourceLabelKeys: Record<string, string> = {
   users: 'users',
   roles: 'roles',
   invitations: 'invitations',
+  settings: 'settings',
 }
 
 function localizedResource(resource: string, t: (key: string) => string): string {
-  return resourceLabelKeys[resource] ? t(resourceLabelKeys[resource]) : resource
+	return resourceLabelKeys[resource] ? t(resourceLabelKeys[resource]) : resource
 }
 
-function requiredPermissionDependencies(selected: string[], definitions: Permission[]): Set<string> {
-  const byKey = new Map(definitions.map((permission) => [permission.key, permission]))
-  const required = new Set<string>()
-  const visit = (key: string, seen: Set<string>) => {
-    if (seen.has(key)) return
-    seen.add(key)
-    const definition = byKey.get(key)
-    for (const dependency of definition?.dependencies ?? []) {
-      required.add(dependency)
-      visit(dependency, seen)
-    }
-  }
-  for (const key of selected) visit(key, new Set())
-  return required
+function addFeaturePermissions(selected: string[], key: string, combinations: PermissionCombination[]): string[] {
+	const result = new Set(selected)
+	result.add(key)
+	for (const combination of combinations) {
+		if (!combinationActive(combination, result)) continue
+		for (const permission of combination.permissions) result.add(permission)
+	}
+	return Array.from(result)
 }
 
-function addPermissionDependencies(selected: string[], key: string, definitions: Permission[]): string[] {
-  const byKey = new Map(definitions.map((permission) => [permission.key, permission]))
-  const result = new Set(selected)
-  const visited = new Set<string>()
-  const visit = (current: string) => {
-    if (visited.has(current)) return
-    visited.add(current)
-    result.add(current)
-    for (const dependency of byKey.get(current)?.dependencies ?? []) visit(dependency)
-  }
-  visit(key)
-  return Array.from(result)
+function isWritePermission(key: string): boolean {
+	return key.endsWith('.write')
+}
+
+function combinationGrantable(key: string, actorPermissions: Set<string>, combinations: PermissionCombination[]): boolean {
+	if (!isWritePermission(key)) return true
+	let found = false
+	for (const combination of combinations) {
+		const trigger = combinationTrigger(combination)
+		if (!trigger.includes(key)) continue
+		found = true
+		if (combination.permissions.every((permission) => actorPermissions.has(permission))) return true
+	}
+	return !found
+}
+
+function isRequiredBySelectedWrite(key: string, selected: string[], combinations: PermissionCombination[]): boolean {
+	if (isWritePermission(key)) return false
+	const granted = new Set(selected)
+	return combinations.some((combination) => combinationActive(combination, granted) && combination.permissions.includes(key) && !combinationTrigger(combination).includes(key))
+}
+
+function combinationTrigger(combination: PermissionCombination): string[] {
+	// Older embedders may omit trigger metadata. Preserve their previous
+	// behavior by treating the write permissions in the combination as the
+	// activation set until they can upgrade their API response.
+	return combination.trigger?.length ? combination.trigger : combination.permissions.filter(isWritePermission)
+}
+
+function combinationActive(combination: PermissionCombination, selected: Set<string>): boolean {
+	return combinationTrigger(combination).every((permission) => selected.has(permission))
 }

@@ -17,7 +17,6 @@ export type RoleDraft = {
 export type InvitationDraft = {
   name: string
   email: string
-  locale: 'en' | 'zh-CN'
   roleIDs: string[]
   submitting: boolean
   submissionID?: string
@@ -35,24 +34,43 @@ export type AssignmentDraft = {
   invalidRoleSelection?: boolean
 }
 
+export type EmailSettingsDraft = {
+  host: string
+  port: number
+  security: 'none' | 'starttls' | 'tls'
+  authentication: boolean
+  username: string
+  password: string
+  clearPassword?: boolean
+  passwordSet: boolean
+  fromAddress: string
+  fromName: string
+  defaultLocale?: 'en' | 'zh-CN'
+  revision: number
+  configured: boolean
+  submitting: boolean
+}
+
 type DraftState = {
   ownerID?: string
   roleCreate?: RoleDraft
   roleEdits: Record<string, RoleDraft>
   invitation?: InvitationDraft
   assignments: Record<string, AssignmentDraft>
+  emailSettings?: EmailSettingsDraft
   setOwner: (ownerID: string) => void
   setRoleCreate: (draft: RoleDraft | undefined) => void
   setRoleEdit: (id: string, draft: RoleDraft | undefined) => void
   setInvitation: (draft: InvitationDraft | undefined) => void
   setAssignment: (id: string, draft: AssignmentDraft | undefined) => void
+  setEmailSettings: (draft: EmailSettingsDraft | undefined) => void
   clearAll: () => void
 }
 
 export const useAccessDraftStore = create<DraftState>((set) => ({
   roleEdits: {},
   assignments: {},
-  setOwner: (ownerID) => set((state) => state.ownerID === undefined || state.ownerID === ownerID ? { ownerID } : { ownerID, roleCreate: undefined, roleEdits: {}, invitation: undefined, assignments: {} }),
+  setOwner: (ownerID) => set((state) => state.ownerID === undefined || state.ownerID === ownerID ? { ownerID } : { ownerID, roleCreate: undefined, roleEdits: {}, invitation: undefined, assignments: {}, emailSettings: undefined }),
   setRoleCreate: (roleCreate) => set({ roleCreate }),
   setRoleEdit: (id, draft) => set((state) => {
     const roleEdits = { ...state.roleEdits }
@@ -67,7 +85,8 @@ export const useAccessDraftStore = create<DraftState>((set) => ({
     else assignments[id] = draft
     return { assignments }
   }),
-  clearAll: () => set({ ownerID: undefined, roleCreate: undefined, roleEdits: {}, invitation: undefined, assignments: {} }),
+  setEmailSettings: (emailSettings) => set({ emailSettings }),
+  clearAll: () => set({ ownerID: undefined, roleCreate: undefined, roleEdits: {}, invitation: undefined, assignments: {}, emailSettings: undefined }),
 }))
 
 let submissionSequence = 0
@@ -80,4 +99,9 @@ export function nextDraftSubmissionID(): string {
 
 export function clearAccessDrafts(): void {
   useAccessDraftStore.getState().clearAll()
+}
+
+export function clearEmailSettingsPasswordDraft(): void {
+  const draft = useAccessDraftStore.getState().emailSettings
+  if (draft) useAccessDraftStore.getState().setEmailSettings({ ...draft, password: '', clearPassword: false })
 }

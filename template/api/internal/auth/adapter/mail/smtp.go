@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	stdmail "net/mail"
-	"strconv"
+	"time"
 
 	"example.com/temvia/api/internal/auth/application"
-	"example.com/temvia/api/internal/config"
 	gomail "github.com/wneessen/go-mail"
 )
 
@@ -17,13 +16,27 @@ type SMTPMailer struct {
 	fromName    string
 }
 
-func NewSMTPMailer(cfg config.Config) (*SMTPMailer, error) {
-	port, err := strconv.Atoi(cfg.SMTPPort)
-	if err != nil {
-		return nil, err
+// NewSMTPMailerFromSettings constructs a mailer from the encrypted system
+// settings projection. Runtime settings are deliberately separate from env
+// configuration so a save can replace the active client without restarting.
+func NewSMTPMailerFromSettings(settings application.SMTPSettings) (*SMTPMailer, error) {
+	return NewSMTPMailerFromSettingsWithTimeout(settings, 10*time.Second)
+}
+
+func NewSMTPMailerFromSettingsWithTimeout(settings application.SMTPSettings, timeout time.Duration) (*SMTPMailer, error) {
+	if timeout <= 0 {
+		return nil, errors.New("invalid SMTP timeout")
 	}
-	options := []gomail.Option{gomail.WithPort(port), gomail.WithTimeout(cfg.SMTPTimeout)}
-	switch cfg.SMTPSecurity {
+	return newSMTPMailer(settings, timeout)
+}
+
+func newSMTPMailer(settings application.SMTPSettings, timeout time.Duration) (*SMTPMailer, error) {
+	port := settings.Port
+	if port < 1 || port > 65535 {
+		return nil, errors.New("invalid SMTP port")
+	}
+	options := []gomail.Option{gomail.WithPort(port), gomail.WithTimeout(timeout)}
+	switch settings.Security {
 	case "none":
 		options = append(options, gomail.WithTLSPolicy(gomail.NoTLS))
 	case "starttls":
@@ -33,14 +46,14 @@ func NewSMTPMailer(cfg config.Config) (*SMTPMailer, error) {
 	default:
 		return nil, errors.New("unsupported SMTP security mode")
 	}
-	if cfg.SMTPUsername != "" || cfg.SMTPPassword != "" {
-		options = append(options, gomail.WithSMTPAuth(gomail.SMTPAuthPlain), gomail.WithUsername(cfg.SMTPUsername), gomail.WithPassword(cfg.SMTPPassword))
+	if settings.Username != "" || settings.Password != "" {
+		options = append(options, gomail.WithSMTPAuth(gomail.SMTPAuthPlain), gomail.WithUsername(settings.Username), gomail.WithPassword(settings.Password))
 	}
-	client, err := gomail.NewClient(cfg.SMTPHost, options...)
+	client, err := gomail.NewClient(settings.Host, options...)
 	if err != nil {
 		return nil, err
 	}
-	return &SMTPMailer{client: client, fromAddress: cfg.SMTPFromAddress, fromName: cfg.SMTPFromName}, nil
+	return &SMTPMailer{client: client, fromAddress: settings.FromAddress, fromName: settings.FromName}, nil
 }
 
 func (m *SMTPMailer) Send(ctx context.Context, outgoing application.OutgoingMail) error {

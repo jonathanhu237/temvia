@@ -42,6 +42,7 @@ export const roleSchema = z.object({
 
 export type Role = z.infer<typeof roleSchema>
 export type Permission = z.infer<typeof permissionSchema>
+export type PermissionCombination = { key: string; labelKey: string; description: string; permissions: string[]; trigger?: string[] }
 export type RoleOption = z.infer<typeof roleOptionSchema>
 
 export const principalEnvelopeSchema = z.object({
@@ -57,6 +58,7 @@ export const authEnvelopeSchema = z.union([userEnvelopeSchema, principalEnvelope
 export const rolesResponseSchema = z.object({
   roles: z.array(roleSchema),
   permissions: z.array(permissionSchema),
+  combinations: z.array(z.object({ key: z.string(), labelKey: z.string(), description: z.string(), permissions: z.array(z.string()), trigger: z.array(z.string()).optional() }).strict()).optional(),
 }).strict()
 
 export const roleOptionsResponseSchema = z.object({ roles: z.array(roleOptionSchema) }).strict()
@@ -112,11 +114,11 @@ export const loginInputSchema = z
   .strict()
 
 export const passwordResetRequestInputSchema = z
-  .object({ email: z.string(), locale: z.enum(['en', 'zh-CN']) })
+  .object({ email: z.string() })
   .strict()
 
 export const passwordResetCompleteInputSchema = z
-  .object({ token: z.string(), password: z.string(), locale: z.enum(['en', 'zh-CN']) })
+  .object({ token: z.string(), password: z.string() })
   .strict()
 
 export const roleMutationInputSchema = z.object({
@@ -126,8 +128,25 @@ export const roleMutationInputSchema = z.object({
   revision: z.number().int().nonnegative().optional(),
 }).strict()
 export const assignmentInputSchema = z.object({ roleIds: z.array(z.string().uuid()), authVersion: z.number().int().positive() }).strict()
-export const invitationInputSchema = z.object({ name: z.string(), email: z.string(), locale: z.enum(['en', 'zh-CN']), roleIds: z.array(z.string().uuid()) }).strict()
-export const invitationAcceptanceInputSchema = z.object({ token: z.string(), password: z.string(), locale: z.enum(['en', 'zh-CN']) }).strict()
+export const invitationInputSchema = z.object({ name: z.string(), email: z.string(), roleIds: z.array(z.string().uuid()) }).strict()
+export const invitationAcceptanceInputSchema = z.object({ token: z.string(), password: z.string() }).strict()
+
+export const emailSettingsSchema = z.object({
+  configured: z.boolean(),
+  host: z.string().optional(),
+  port: z.number().int().optional(),
+  security: z.enum(['none', 'starttls', 'tls']).optional(),
+  username: z.string().optional(),
+  passwordSet: z.boolean(),
+  fromAddress: z.string().optional(),
+  fromName: z.string().optional(),
+  defaultLocale: z.enum(['en', 'zh-CN']).optional(),
+  revision: z.number().int().nonnegative(),
+  updatedAt: z.string().optional(),
+}).strict()
+export type EmailSettings = z.infer<typeof emailSettingsSchema>
+export const emailSettingsResponseSchema = z.object({ email: emailSettingsSchema }).strict()
+export const operationalWarningsSchema = z.object({ warnings: z.array(z.object({ key: z.string(), severity: z.string() }).strict()) }).strict()
 
 export const passwordResetAcceptedSchema = z
   .object({ status: z.literal('accepted') })

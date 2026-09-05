@@ -19,8 +19,23 @@ type PermissionDefinition struct {
 	Dependencies []PermissionKey
 }
 
+type PermissionCombination struct {
+	Key         string
+	LabelKey    string
+	Description string
+	Permissions []PermissionKey
+	// Trigger lists the permissions which activate this combination. Keeping
+	// this separate from Permissions lets overlapping capabilities remain
+	// independently grantable. For example, invitations.write can activate
+	// invitation creation without also activating the full invitation
+	// management combination, which additionally requires invitations.read.
+	Trigger []PermissionKey
+}
+
 type PermissionCatalog struct {
-	items map[PermissionKey]PermissionDefinition
+	items            map[PermissionKey]PermissionDefinition
+	combinations     []PermissionCombination
+	combinationError error
 }
 
 var permissionKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*\.[a-z][a-z0-9_-]*$`)
@@ -57,21 +72,84 @@ func NewPermissionCatalog(definitions ...PermissionDefinition) (PermissionCatalo
 	return PermissionCatalog{items: items}, nil
 }
 
+func (c PermissionCatalog) WithCombinations(combinations ...PermissionCombination) PermissionCatalog {
+	c.combinations = append([]PermissionCombination(nil), combinations...)
+	for _, combination := range c.combinations {
+		if combination.Key == "" || combination.LabelKey == "" || combination.Description == "" || len(combination.Permissions) == 0 {
+			c.combinationError = fmt.Errorf("invalid permission combination %q", combination.Key)
+			break
+		}
+		seen := make(map[PermissionKey]struct{}, len(combination.Permissions))
+		for _, permission := range combination.Permissions {
+			if !c.Has(permission) {
+				c.combinationError = fmt.Errorf("unknown permission %q in combination %q", permission, combination.Key)
+				break
+			}
+			if _, exists := seen[permission]; exists {
+				c.combinationError = fmt.Errorf("duplicate permission %q in combination %q", permission, combination.Key)
+				break
+			}
+			seen[permission] = struct{}{}
+		}
+		if c.combinationError != nil {
+			break
+		}
+		if len(combination.Trigger) == 0 {
+			c.combinationError = fmt.Errorf("empty trigger in combination %q", combination.Key)
+			break
+		}
+		for _, trigger := range combination.Trigger {
+			if _, exists := seen[trigger]; !exists {
+				c.combinationError = fmt.Errorf("trigger permission %q is not in combination %q", trigger, combination.Key)
+				break
+			}
+		}
+		if c.combinationError != nil {
+			break
+		}
+	}
+	return c
+}
+
+func (c PermissionCatalog) Combinations() []PermissionCombination {
+	result := append([]PermissionCombination(nil), c.combinations...)
+	sort.Slice(result, func(i, j int) bool { return result[i].Key < result[j].Key })
+	for i := range result {
+		result[i].Permissions = append([]PermissionKey(nil), result[i].Permissions...)
+		result[i].Trigger = append([]PermissionKey(nil), result[i].Trigger...)
+	}
+	return result
+}
+
 func DefaultPermissionCatalog() PermissionCatalog {
 	catalog, _ := NewPermissionCatalog(
 		PermissionDefinition{Key: PermissionUsersRead, Resource: "users", Action: "read", LabelKey: "permissions.users.read", Description: "View users and their assigned roles."},
+		PermissionDefinition{Key: PermissionUsersWrite, Resource: "users", Action: "write", LabelKey: "permissions.users.write", Description: "Assign roles to users."},
 		PermissionDefinition{Key: PermissionRolesRead, Resource: "roles", Action: "read", LabelKey: "permissions.roles.read", Description: "View roles and their grants."},
-		PermissionDefinition{Key: PermissionInvitationsRead, Resource: "invitations", Action: "read", LabelKey: "permissions.invitations.read", Description: "View invitations, their status, and assigned roles.", Dependencies: []PermissionKey{PermissionUsersRead}},
-		PermissionDefinition{Key: PermissionInvitationsManage, Resource: "invitations", Action: "manage", LabelKey: "permissions.invitations.manage", Description: "Create, resend, renew, and revoke invitations.", Dependencies: []PermissionKey{PermissionInvitationsRead, PermissionRolesRead}},
+		PermissionDefinition{Key: PermissionRolesWrite, Resource: "roles", Action: "write", LabelKey: "permissions.roles.write", Description: "Create, edit, and delete custom roles."},
+		PermissionDefinition{Key: PermissionInvitationsRead, Resource: "invitations", Action: "read", LabelKey: "permissions.invitations.read", Description: "View invitations and their status."},
+		PermissionDefinition{Key: PermissionInvitationsWrite, Resource: "invitations", Action: "write", LabelKey: "permissions.invitations.write", Description: "Create, resend, and revoke invitations."},
+		PermissionDefinition{Key: PermissionSettingsRead, Resource: "settings", Action: "read", LabelKey: "permissions.settings.read", Description: "View system settings."},
+		PermissionDefinition{Key: PermissionSettingsWrite, Resource: "settings", Action: "write", LabelKey: "permissions.settings.write", Description: "Update system settings."},
 	)
-	return catalog
+	return catalog.WithCombinations(
+		PermissionCombination{Key: "invitations.create", LabelKey: "permissions.combinations.invitationsCreate", Description: "Create invitations and choose an assignable role.", Permissions: []PermissionKey{PermissionInvitationsWrite, PermissionRolesRead}, Trigger: []PermissionKey{PermissionInvitationsWrite}},
+		PermissionCombination{Key: "invitations.manage", LabelKey: "permissions.combinations.invitationsManage", Description: "View and manage invitations with assignable roles.", Permissions: []PermissionKey{PermissionInvitationsRead, PermissionInvitationsWrite, PermissionRolesRead}, Trigger: []PermissionKey{PermissionInvitationsRead, PermissionInvitationsWrite}},
+		PermissionCombination{Key: "users.assignRoles", LabelKey: "permissions.combinations.usersAssignRoles", Description: "View users and assign roles.", Permissions: []PermissionKey{PermissionUsersRead, PermissionUsersWrite, PermissionRolesRead}, Trigger: []PermissionKey{PermissionUsersWrite}},
+		PermissionCombination{Key: "roles.manage", LabelKey: "permissions.combinations.rolesManage", Description: "View and manage roles.", Permissions: []PermissionKey{PermissionRolesRead, PermissionRolesWrite}, Trigger: []PermissionKey{PermissionRolesWrite}},
+		PermissionCombination{Key: "settings.manage", LabelKey: "permissions.combinations.settingsManage", Description: "View and update system settings.", Permissions: []PermissionKey{PermissionSettingsRead, PermissionSettingsWrite}, Trigger: []PermissionKey{PermissionSettingsWrite}},
+	)
 }
 
 const (
-	PermissionUsersRead         PermissionKey = "users.read"
-	PermissionRolesRead         PermissionKey = "roles.read"
-	PermissionInvitationsRead   PermissionKey = "invitations.read"
-	PermissionInvitationsManage PermissionKey = "invitations.manage"
+	PermissionUsersRead        PermissionKey = "users.read"
+	PermissionUsersWrite       PermissionKey = "users.write"
+	PermissionRolesRead        PermissionKey = "roles.read"
+	PermissionRolesWrite       PermissionKey = "roles.write"
+	PermissionInvitationsRead  PermissionKey = "invitations.read"
+	PermissionInvitationsWrite PermissionKey = "invitations.write"
+	PermissionSettingsRead     PermissionKey = "settings.read"
+	PermissionSettingsWrite    PermissionKey = "settings.write"
 )
 
 func (c PermissionCatalog) Has(key PermissionKey) bool { _, ok := c.items[key]; return ok }
@@ -124,13 +202,9 @@ func (c PermissionCatalog) Validate(keys []PermissionKey) ([]PermissionKey, erro
 			continue
 		}
 		seen[key] = struct{}{}
-		dependencies, err := permissionDependencies(c.items, key, nil)
-		if err != nil {
-			return nil, err
-		}
-		for dependency := range dependencies {
-			seen[dependency] = struct{}{}
-		}
+		// Read and write grants are deliberately independent. Feature-level
+		// combinations are validated explicitly by the application layer and
+		// never expanded during authorization.
 	}
 	if len(seen) == 0 {
 		return nil, &ValidationErrors{Items: []FieldError{{Field: "permissions", Code: "empty_permissions"}}}
@@ -141,6 +215,47 @@ func (c PermissionCatalog) Validate(keys []PermissionKey) ([]PermissionKey, erro
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result, nil
+}
+
+// ValidateFeatureSet checks that every write grant which represents a
+// configured feature is accompanied by the complete permission combination
+// needed to use that feature. The individual read/write keys remain
+// independent at runtime; this validation only protects role definitions
+// from persisting an unusable combination.
+func (c PermissionCatalog) ValidateFeatureSet(keys []PermissionKey) ([]PermissionKey, error) {
+	if c.combinationError != nil {
+		return nil, c.combinationError
+	}
+	validated, err := c.Validate(keys)
+	if err != nil {
+		return nil, err
+	}
+	granted := make(map[PermissionKey]struct{}, len(validated))
+	for _, key := range validated {
+		granted[key] = struct{}{}
+	}
+	for _, combination := range c.combinations {
+		triggered := true
+		for _, trigger := range combination.Trigger {
+			if _, exists := granted[trigger]; !exists {
+				triggered = false
+				break
+			}
+		}
+		if !triggered {
+			continue
+		}
+		missing := make([]string, 0)
+		for _, key := range combination.Permissions {
+			if _, exists := granted[key]; !exists {
+				missing = append(missing, string(key))
+			}
+		}
+		if len(missing) > 0 {
+			return nil, &ValidationErrors{Items: []FieldError{{Field: "permissions", Code: "incomplete_permission_combination", Params: map[string]any{"combination": combination.Key, "missing": missing}}}}
+		}
+	}
+	return validated, nil
 }
 
 func hasPermission(items map[PermissionKey]PermissionDefinition, key PermissionKey) bool {

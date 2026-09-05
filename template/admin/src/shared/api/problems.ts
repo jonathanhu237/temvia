@@ -24,6 +24,8 @@ const typeKeys: Record<string, string> = {
   '/problems/rate-limited': 'problems:rateLimited',
   '/problems/internal-error': 'problems:internalError',
   '/problems/service-unavailable': 'problems:serviceUnavailable',
+  '/problems/mail-not-configured': 'problems:mailNotConfigured',
+  '/problems/permission-scope': 'problems:permissionScope',
 }
 
 const codeKeys: Record<string, string> = {
@@ -44,6 +46,8 @@ const codeKeys: Record<string, string> = {
   validation_failed: 'problems:validationFailed',
   rate_limited: 'problems:rateLimited',
   service_unavailable: 'problems:serviceUnavailable',
+  mail_not_configured: 'problems:mailNotConfigured',
+  permission_scope_forbidden: 'problems:permissionScope',
 }
 
 const fieldKeys: Record<string, string> = {

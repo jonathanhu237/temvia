@@ -8,5 +8,5 @@ function RolesRoute() {
   const { api } = Route.useRouteContext()
   const { user } = useLoaderData({ from: '/_authenticated' })
   if (!user.superAdmin && !user.permissions?.includes('roles.read')) return <AccessDenied />
-  return <RolesPage api={api} canManage={Boolean(user.superAdmin)} />
+  return <RolesPage api={api} canManage={Boolean(user.superAdmin || (user.permissions?.includes('roles.read') && user.permissions?.includes('roles.write')))} actorPermissions={user.permissions} actorSuperAdmin={Boolean(user.superAdmin)} />
 }

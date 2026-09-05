@@ -13,8 +13,9 @@ import (
 )
 
 type RolePage struct {
-	Items   []domain.Role
-	Catalog []domain.PermissionDefinition
+	Items        []domain.Role
+	Catalog      []domain.PermissionDefinition
+	Combinations []domain.PermissionCombination
 }
 
 type UserPage struct {
@@ -47,7 +48,6 @@ type AssignmentInput struct {
 type InvitationInput struct {
 	Name    string
 	Email   string
-	Locale  string
 	RoleIDs []string
 }
 
@@ -66,10 +66,35 @@ type AccessStore interface {
 	CreateInvitation(context.Context, string, string, string, domain.Locale, []string, []byte, []byte, time.Duration) (domain.Invitation, error)
 	ListInvitations(context.Context, string, int) (InvitationPage, error)
 	FindInvitation(context.Context, string) (domain.Invitation, error)
-	ResendInvitation(context.Context, string, []byte, []byte, time.Duration) (domain.Invitation, error)
+	ResendInvitation(context.Context, string, domain.Locale, []byte, []byte, time.Duration) (domain.Invitation, error)
 	RevokeInvitation(context.Context, string) error
 	PreflightInvitation(context.Context, []byte, []byte) error
 	CompleteInvitation(context.Context, []byte, []byte, string) error
+}
+
+// ScopedUserRoleStore performs an assignment replacement while rechecking the
+// actor's authority and the changed role set inside the same database
+// transaction that writes the assignment. Stores which do not implement this
+// stronger seam retain the legacy application-level checks for compatibility.
+type ScopedUserRoleStore interface {
+	ReplaceUserRolesWithinScope(context.Context, string, string, int64, []string) (domain.AccessUser, error)
+}
+
+// ScopedRoleStore performs role mutations with the actor and target role
+// authorization checks held through the database commit boundary.
+type ScopedRoleStore interface {
+	CreateRoleWithinScope(context.Context, string, string, string, []domain.PermissionKey) (domain.Role, error)
+	ReplaceRoleWithinScope(context.Context, string, string, int64, string, string, []domain.PermissionKey) (domain.Role, error)
+	DeleteRoleWithinScope(context.Context, string, string) error
+}
+
+// ScopedInvitationStore rechecks the sender's authority and selected role
+// permissions in the invitation transaction before creating any durable mail
+// task.
+type ScopedInvitationStore interface {
+	CreateInvitationWithinScope(context.Context, string, string, string, domain.Locale, []string, []byte, []byte, time.Duration) (domain.Invitation, error)
+	ResendInvitationWithinScope(context.Context, string, string, domain.Locale, []byte, []byte, time.Duration) (domain.Invitation, error)
+	RevokeInvitationWithinScope(context.Context, string, string) error
 }
 
 // QueryableAccessStore is implemented by stores that support the searchable,
@@ -87,6 +112,7 @@ type AccessManagement struct {
 	invitationKey []byte
 	random        RandomSource
 	invitationTTL time.Duration
+	mailSettings  MailSettingsProvider
 }
 
 func NewAccessManagement(store AccessStore, principals PrincipalStore, catalog domain.PermissionCatalog) *AccessManagement {
@@ -96,11 +122,14 @@ func NewAccessManagement(store AccessStore, principals PrincipalStore, catalog d
 	return &AccessManagement{store: store, principals: principals, catalog: catalog}
 }
 
-func NewAccessManagementWithInvitations(store AccessStore, principals PrincipalStore, catalog domain.PermissionCatalog, key []byte, random RandomSource, ttl time.Duration) *AccessManagement {
+func NewAccessManagementWithInvitations(store AccessStore, principals PrincipalStore, catalog domain.PermissionCatalog, key []byte, random RandomSource, ttl time.Duration, mailSettings ...MailSettingsProvider) *AccessManagement {
 	manager := NewAccessManagement(store, principals, catalog)
 	manager.invitationKey = append([]byte(nil), key...)
 	manager.random = random
 	manager.invitationTTL = ttl
+	if len(mailSettings) > 0 {
+		manager.mailSettings = mailSettings[0]
+	}
 	return manager
 }
 
@@ -163,12 +192,16 @@ func (m *AccessManagement) Roles(ctx context.Context, actorID string) (RolePage,
 			return RolePage{}, err
 		}
 	}
-	return RolePage{Items: roles, Catalog: m.catalog.Definitions()}, nil
+	return RolePage{Items: roles, Catalog: m.catalog.Definitions(), Combinations: m.catalog.Combinations()}, nil
 }
 
 func (m *AccessManagement) RoleOptions(ctx context.Context, actorID string) ([]RoleOption, error) {
-	if err := m.require(ctx, actorID, domain.PermissionUsersRead); err != nil {
+	principal, err := m.principal(ctx, actorID)
+	if err != nil {
 		return nil, err
+	}
+	if !principal.SuperAdmin && !principal.Has(domain.PermissionRolesRead) {
+		return nil, ErrForbidden
 	}
 	options, err := m.store.ListRoleOptions(ctx)
 	if err != nil {
@@ -193,14 +226,26 @@ func (m *AccessManagement) Role(ctx context.Context, actorID, roleID string) (do
 }
 
 func (m *AccessManagement) CreateRole(ctx context.Context, actorID string, input RoleMutationInput) (domain.Role, error) {
-	if err := m.requireSuper(ctx, actorID); err != nil {
+	principal, err := m.principal(ctx, actorID)
+	if err != nil {
 		return domain.Role{}, err
+	}
+	if !principal.SuperAdmin && (!principal.Has(domain.PermissionRolesWrite) || !principal.Has(domain.PermissionRolesRead)) {
+		return domain.Role{}, ErrForbidden
 	}
 	name, description, permissions, err := validateRoleInput(m.catalog, input)
 	if err != nil {
 		return domain.Role{}, err
 	}
-	role, err := m.store.CreateRole(ctx, name, description, permissions)
+	if err := m.ensureGrantable(principal, permissions); err != nil {
+		return domain.Role{}, err
+	}
+	var role domain.Role
+	if scoped, ok := m.store.(ScopedRoleStore); ok {
+		role, err = scoped.CreateRoleWithinScope(ctx, actorID, name, description, permissions)
+	} else {
+		role, err = m.store.CreateRole(ctx, name, description, permissions)
+	}
 	if err != nil {
 		return domain.Role{}, normalizeAccessError(err)
 	}
@@ -208,14 +253,36 @@ func (m *AccessManagement) CreateRole(ctx context.Context, actorID string, input
 }
 
 func (m *AccessManagement) ReplaceRole(ctx context.Context, actorID, roleID string, input RoleMutationInput) (domain.Role, error) {
-	if err := m.requireSuper(ctx, actorID); err != nil {
+	principal, err := m.principal(ctx, actorID)
+	if err != nil {
 		return domain.Role{}, err
+	}
+	if !principal.SuperAdmin && (!principal.Has(domain.PermissionRolesWrite) || !principal.Has(domain.PermissionRolesRead)) {
+		return domain.Role{}, ErrForbidden
+	}
+	existing, err := m.store.FindRole(ctx, roleID)
+	if err != nil {
+		return domain.Role{}, normalizeAccessError(err)
+	}
+	if existing.IsSystem() {
+		return domain.Role{}, ErrImmutableRole
+	}
+	if err := m.ensureGrantable(principal, existing.Permissions); err != nil {
+		return domain.Role{}, ErrPermissionScope
 	}
 	name, description, permissions, err := validateRoleInput(m.catalog, input)
 	if err != nil {
 		return domain.Role{}, err
 	}
-	role, err := m.store.ReplaceRole(ctx, roleID, input.Revision, name, description, permissions)
+	if err := m.ensureGrantable(principal, permissions); err != nil {
+		return domain.Role{}, err
+	}
+	var role domain.Role
+	if scoped, ok := m.store.(ScopedRoleStore); ok {
+		role, err = scoped.ReplaceRoleWithinScope(ctx, actorID, roleID, input.Revision, name, description, permissions)
+	} else {
+		role, err = m.store.ReplaceRole(ctx, roleID, input.Revision, name, description, permissions)
+	}
 	if err != nil {
 		return domain.Role{}, normalizeAccessError(err)
 	}
@@ -223,11 +290,31 @@ func (m *AccessManagement) ReplaceRole(ctx context.Context, actorID, roleID stri
 }
 
 func (m *AccessManagement) DeleteRole(ctx context.Context, actorID, roleID string) error {
-	if err := m.requireSuper(ctx, actorID); err != nil {
+	principal, err := m.principal(ctx, actorID)
+	if err != nil {
 		return err
 	}
-	if err := m.store.DeleteRole(ctx, roleID); err != nil {
+	if !principal.SuperAdmin && (!principal.Has(domain.PermissionRolesWrite) || !principal.Has(domain.PermissionRolesRead)) {
+		return ErrForbidden
+	}
+	role, err := m.store.FindRole(ctx, roleID)
+	if err != nil {
 		return normalizeAccessError(err)
+	}
+	if role.IsSystem() {
+		return ErrImmutableRole
+	}
+	if err := m.ensureGrantable(principal, role.Permissions); err != nil {
+		return err
+	}
+	var deleteErr error
+	if scoped, ok := m.store.(ScopedRoleStore); ok {
+		deleteErr = scoped.DeleteRoleWithinScope(ctx, actorID, roleID)
+	} else {
+		deleteErr = m.store.DeleteRole(ctx, roleID)
+	}
+	if deleteErr != nil {
+		return normalizeAccessError(deleteErr)
 	}
 	return nil
 }
@@ -291,13 +378,25 @@ func (m *AccessManagement) normalizeUsersPage(page UserPage) (UserPage, error) {
 }
 
 func (m *AccessManagement) ReplaceUserRoles(ctx context.Context, actorID, userID string, input AssignmentInput) (domain.AccessUser, error) {
-	if err := m.requireSuper(ctx, actorID); err != nil {
+	principal, err := m.principal(ctx, actorID)
+	if err != nil {
 		return domain.AccessUser{}, err
+	}
+	if !principal.SuperAdmin && (!principal.Has(domain.PermissionUsersWrite) || !principal.Has(domain.PermissionRolesRead)) {
+		return domain.AccessUser{}, ErrForbidden
 	}
 	if err := validateRoleIDs(input.RoleIDs); err != nil {
 		return domain.AccessUser{}, err
 	}
-	user, err := m.store.ReplaceUserRoles(ctx, userID, input.AuthVersion, input.RoleIDs)
+	var user domain.AccessUser
+	if scoped, ok := m.store.(ScopedUserRoleStore); ok {
+		user, err = scoped.ReplaceUserRolesWithinScope(ctx, actorID, userID, input.AuthVersion, input.RoleIDs)
+	} else {
+		if err := m.authorizeInvitationRoles(ctx, principal, input.RoleIDs); err != nil {
+			return domain.AccessUser{}, err
+		}
+		user, err = m.store.ReplaceUserRoles(ctx, userID, input.AuthVersion, input.RoleIDs)
+	}
 	if err != nil {
 		return domain.AccessUser{}, normalizeAccessError(err)
 	}
@@ -308,6 +407,9 @@ func (m *AccessManagement) CreateInvitation(ctx context.Context, actorID string,
 	principal, err := m.invitationManager(ctx, actorID)
 	if err != nil {
 		return domain.Invitation{}, err
+	}
+	if !principal.SuperAdmin && !principal.Has(domain.PermissionRolesRead) {
+		return domain.Invitation{}, ErrForbidden
 	}
 	if m.random == nil || len(m.invitationKey) != 32 || m.invitationTTL <= 0 {
 		return domain.Invitation{}, ErrDependencyUnavailable
@@ -320,7 +422,7 @@ func (m *AccessManagement) CreateInvitation(ctx context.Context, actorID string,
 	if err != nil {
 		return domain.Invitation{}, err
 	}
-	locale, err := parseLocale(input.Locale)
+	locale, err := m.defaultMailLocale(ctx)
 	if err != nil {
 		return domain.Invitation{}, err
 	}
@@ -338,7 +440,12 @@ func (m *AccessManagement) CreateInvitation(ctx context.Context, actorID string,
 	if err != nil {
 		return domain.Invitation{}, dependencyError(err)
 	}
-	invitation, err := m.store.CreateInvitation(ctx, actorID, string(name), email.Display, locale, input.RoleIDs, material.Selector, material.VerifierDigest, m.invitationTTL)
+	var invitation domain.Invitation
+	if scoped, ok := m.store.(ScopedInvitationStore); ok {
+		invitation, err = scoped.CreateInvitationWithinScope(ctx, actorID, string(name), email.Display, locale, input.RoleIDs, material.Selector, material.VerifierDigest, m.invitationTTL)
+	} else {
+		invitation, err = m.store.CreateInvitation(ctx, actorID, string(name), email.Display, locale, input.RoleIDs, material.Selector, material.VerifierDigest, m.invitationTTL)
+	}
 	if err != nil {
 		return domain.Invitation{}, normalizeAccessError(err)
 	}
@@ -409,6 +516,10 @@ func (m *AccessManagement) ResendInvitation(ctx context.Context, actorID, invita
 	if err := m.authorizeExistingInvitation(ctx, principal, invitationID); err != nil {
 		return domain.Invitation{}, err
 	}
+	locale, err := m.defaultMailLocale(ctx)
+	if err != nil {
+		return domain.Invitation{}, err
+	}
 	if m.random == nil || len(m.invitationKey) != 32 || m.invitationTTL <= 0 {
 		return domain.Invitation{}, ErrDependencyUnavailable
 	}
@@ -420,7 +531,12 @@ func (m *AccessManagement) ResendInvitation(ctx context.Context, actorID, invita
 	if err != nil {
 		return domain.Invitation{}, dependencyError(err)
 	}
-	invitation, err := m.store.ResendInvitation(ctx, invitationID, material.Selector, material.VerifierDigest, m.invitationTTL)
+	var invitation domain.Invitation
+	if scoped, ok := m.store.(ScopedInvitationStore); ok {
+		invitation, err = scoped.ResendInvitationWithinScope(ctx, actorID, invitationID, locale, material.Selector, material.VerifierDigest, m.invitationTTL)
+	} else {
+		invitation, err = m.store.ResendInvitation(ctx, invitationID, locale, material.Selector, material.VerifierDigest, m.invitationTTL)
+	}
 	if err != nil {
 		return domain.Invitation{}, normalizeAccessError(err)
 	}
@@ -435,8 +551,14 @@ func (m *AccessManagement) RevokeInvitation(ctx context.Context, actorID, invita
 	if err := m.authorizeExistingInvitation(ctx, principal, invitationID); err != nil {
 		return err
 	}
-	if err := m.store.RevokeInvitation(ctx, invitationID); err != nil {
-		return normalizeAccessError(err)
+	var revokeErr error
+	if scoped, ok := m.store.(ScopedInvitationStore); ok {
+		revokeErr = scoped.RevokeInvitationWithinScope(ctx, actorID, invitationID)
+	} else {
+		revokeErr = m.store.RevokeInvitation(ctx, invitationID)
+	}
+	if revokeErr != nil {
+		return normalizeAccessError(revokeErr)
 	}
 	return nil
 }
@@ -446,10 +568,39 @@ func (m *AccessManagement) invitationManager(ctx context.Context, actorID string
 	if err != nil {
 		return domain.Principal{}, err
 	}
-	if !principal.Has(domain.PermissionInvitationsManage) {
+	if !principal.SuperAdmin && !principal.Has(domain.PermissionInvitationsWrite) {
 		return domain.Principal{}, ErrForbidden
 	}
 	return principal, nil
+}
+
+func (m *AccessManagement) defaultMailLocale(ctx context.Context) (domain.Locale, error) {
+	if m.mailSettings != nil {
+		if err := m.mailSettings.EnsureMailConfigured(ctx); err != nil {
+			return "", err
+		}
+		locale, err := m.mailSettings.DefaultMailLocale(ctx)
+		if err != nil {
+			return "", err
+		}
+		return locale, nil
+	}
+	// Small embedders and isolated tests may not wire system settings. The
+	// production server always supplies the provider and requires an explicit
+	// first configuration before creating a mail task.
+	return domain.LocaleEnglish, nil
+}
+
+func (m *AccessManagement) ensureGrantable(principal domain.Principal, permissions []domain.PermissionKey) error {
+	if principal.SuperAdmin {
+		return nil
+	}
+	for _, permission := range permissions {
+		if !principal.Has(permission) {
+			return ErrPermissionScope
+		}
+	}
+	return nil
 }
 
 func (m *AccessManagement) authorizeInvitationRoles(ctx context.Context, principal domain.Principal, roleIDs []string) error {
@@ -555,7 +706,7 @@ func validateRoleInput(catalog domain.PermissionCatalog, input RoleMutationInput
 	if err != nil {
 		return "", "", nil, err
 	}
-	permissions, err := catalog.Validate(input.Permissions)
+	permissions, err := catalog.ValidateFeatureSet(input.Permissions)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -686,7 +837,7 @@ func normalizeAccessError(err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, known := range []error{ErrRoleNotFound, ErrRoleAlreadyExists, ErrUserNotFound, ErrInvitationNotFound, ErrRoleInUse, ErrImmutableRole, ErrLastSuperAdmin, ErrStaleRevision, ErrInvalidRoleSet, ErrInvitationPending, ErrInvitationInvalid, ErrInvitationRoleForbidden, ErrInvitationNotManageable, ErrEmailAlreadyRegistered, ErrForbidden, ErrDependencyUnavailable} {
+	for _, known := range []error{ErrRoleNotFound, ErrRoleAlreadyExists, ErrUserNotFound, ErrInvitationNotFound, ErrRoleInUse, ErrImmutableRole, ErrLastSuperAdmin, ErrStaleRevision, ErrInvalidRoleSet, ErrInvitationPending, ErrInvitationInvalid, ErrInvitationRoleForbidden, ErrInvitationNotManageable, ErrEmailAlreadyRegistered, ErrForbidden, ErrPermissionScope, ErrMailNotConfigured, ErrInvalidMailSettings, ErrDependencyUnavailable} {
 		if errors.Is(err, known) {
 			return err
 		}
@@ -722,7 +873,7 @@ func normalizeRole(catalog domain.PermissionCatalog, role domain.Role) (domain.R
 	if len(role.Permissions) == 0 {
 		return domain.Role{}, ErrDependencyUnavailable
 	}
-	permissions, err := catalog.Validate(role.Permissions)
+	permissions, err := catalog.ValidateFeatureSet(role.Permissions)
 	if err != nil {
 		return domain.Role{}, ErrDependencyUnavailable
 	}

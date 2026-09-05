@@ -102,7 +102,7 @@ func TestPasswordRecoveryRequestDoesNotExposeAccountLookupAndWaitsMinimum(t *tes
 		func() time.Time { return time.Unix(0, 0) },
 		func(value time.Duration) { slept += value },
 	)
-	if err := recovery.Request(context.Background(), PasswordResetRequestInput{Email: " ADA@Example.COM ", Locale: "en"}); err != nil {
+	if err := recovery.Request(context.Background(), PasswordResetRequestInput{Email: " ADA@Example.COM "}); err != nil {
 		t.Fatal(err)
 	}
 	if got := limiter.calls; len(got) != 1 || got[0] != "ada@example.com" {
@@ -123,10 +123,7 @@ func TestPasswordRecoveryRequestValidationAndLimiterDenial(t *testing.T) {
 	store := &recoveryStoreFake{}
 	limiter := &recoveryLimiterFake{allowed: false}
 	recovery := NewPasswordRecovery(store, limiter, &recoveryHasherFake{}, &sequenceRandom{}, bytes.Repeat([]byte{1}, 32), time.Minute, time.Hour, 0)
-	for _, input := range []PasswordResetRequestInput{
-		{Email: "bad", Locale: "en"},
-		{Email: "a@example.com", Locale: "fr"},
-	} {
+	for _, input := range []PasswordResetRequestInput{{Email: "bad"}} {
 		if err := recovery.Request(context.Background(), input); err == nil {
 			t.Errorf("Request(%#v) accepted invalid input", input)
 		}
@@ -134,7 +131,7 @@ func TestPasswordRecoveryRequestValidationAndLimiterDenial(t *testing.T) {
 	if len(limiter.calls) != 0 || len(store.requestEmails) != 0 {
 		t.Fatalf("invalid requests reached dependencies: limiter=%#v store=%#v", limiter.calls, store.requestEmails)
 	}
-	if err := recovery.Request(context.Background(), PasswordResetRequestInput{Email: "a@example.com", Locale: "en"}); !errors.Is(err, ErrRateLimited) {
+	if err := recovery.Request(context.Background(), PasswordResetRequestInput{Email: "a@example.com"}); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("limiter denial = %v", err)
 	}
 	if len(store.requestEmails) != 0 {
@@ -142,7 +139,7 @@ func TestPasswordRecoveryRequestValidationAndLimiterDenial(t *testing.T) {
 	}
 }
 
-func TestPasswordRecoveryCompletionPreflightsBeforeHashAndUsesLocale(t *testing.T) {
+func TestPasswordRecoveryCompletionPreflightsBeforeHashAndUsesSystemFallback(t *testing.T) {
 	key := bytes.Repeat([]byte{0x3c}, domain.PasswordResetVerifierBytes)
 	material, err := domain.NewPasswordResetMaterial(key, bytes.Repeat([]byte{0x19}, domain.PasswordResetSelectorBytes))
 	if err != nil {
@@ -156,10 +153,10 @@ func TestPasswordRecoveryCompletionPreflightsBeforeHashAndUsesLocale(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := recovery.Complete(context.Background(), PasswordResetCompleteInput{Token: token, Password: "Aa1!xxxx", Locale: "zh-CN"}); err != nil {
+	if err := recovery.Complete(context.Background(), PasswordResetCompleteInput{Token: token, Password: "Aa1!xxxx"}); err != nil {
 		t.Fatal(err)
 	}
-	if hasher.hashCalls != 1 || store.completeHash != "new-hash" || store.completeLocale != domain.LocaleChinese {
+	if hasher.hashCalls != 1 || store.completeHash != "new-hash" || store.completeLocale != domain.LocaleEnglish {
 		t.Fatalf("completion hash/locale = %d, %q, %q", hasher.hashCalls, store.completeHash, store.completeLocale)
 	}
 	if got, want := events, []string{"preflight", "complete"}; !bytes.Equal([]byte(joinEvents(got)), []byte(joinEvents(want))) {
@@ -180,7 +177,7 @@ func TestPasswordRecoveryInvalidAuthorityNeverHashes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := recovery.Complete(context.Background(), PasswordResetCompleteInput{Token: token, Password: "Aa1!xxxx", Locale: "en"}); !errors.Is(err, ErrInvalidPasswordResetToken) {
+	if err := recovery.Complete(context.Background(), PasswordResetCompleteInput{Token: token, Password: "Aa1!xxxx"}); !errors.Is(err, ErrInvalidPasswordResetToken) {
 		t.Fatalf("invalid authority error = %v", err)
 	}
 	if hasher.hashCalls != 0 {

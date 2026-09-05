@@ -9,5 +9,5 @@ function InvitationsRoute() {
   const { user } = useLoaderData({ from: '/_authenticated' })
   const canView = Boolean(user.superAdmin || user.permissions?.includes('invitations.read'))
   if (!canView) return <AccessDenied />
-  return <InvitationsPage api={api} canManage={Boolean(user.superAdmin || user.permissions?.includes('invitations.manage'))} actorPermissions={user.permissions} actorSuperAdmin={Boolean(user.superAdmin)} />
+  return <InvitationsPage api={api} canManage={Boolean(user.superAdmin || (user.permissions?.includes('invitations.write') && user.permissions?.includes('roles.read')))} actorPermissions={user.permissions} actorSuperAdmin={Boolean(user.superAdmin)} />
 }

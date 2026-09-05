@@ -30,8 +30,6 @@ func TestLoadDefaultsAndModes(t *testing.T) {
 	}
 	values["APP_ENV"] = "production"
 	values["APP_PUBLIC_URL"] = "https://example.com"
-	values["SMTP_TLS_MODE"] = "starttls"
-	values["MAIL_FROM_ADDRESS"] = "no-reply@example.com"
 	c, err = Load(env(values))
 	if err != nil {
 		t.Fatal(err)
@@ -72,17 +70,15 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
-func TestLoadPasswordRecoveryAndSMTPInventory(t *testing.T) {
+func TestLoadPasswordRecoveryAndMailRuntimeSettings(t *testing.T) {
 	values := map[string]string{
 		"POSTGRES_PASSWORD":                "pg-secret",
 		"REDIS_PASSWORD":                   "redis-secret",
 		"PASSWORD_RESET_TOKEN_KEY":         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 		"INVITATION_TOKEN_KEY":             "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
 		"PASSWORD_RESET_MIN_RESPONSE_TIME": "250ms",
-		"SMTP_TLS_MODE":                    "starttls",
 		"SMTP_DELIVERY_TIMEOUT":            "5s",
 		"MAIL_OUTBOX_LEASE_TTL":            "10s",
-		"MAIL_FROM_ADDRESS":                "security@example.com",
 	}
 	c, err := Load(env(values))
 	if err != nil {
@@ -91,38 +87,20 @@ func TestLoadPasswordRecoveryAndSMTPInventory(t *testing.T) {
 	if c.InvitationLinkTTL != 72*time.Hour || len(c.InvitationTokenKey) != 32 {
 		t.Fatalf("invitation config = %#v", c)
 	}
-	if c.PasswordResetResponseMin != 250*time.Millisecond || c.SMTPTimeout != 5*time.Second || c.MailOutboxLeaseDuration != 10*time.Second || c.SMTPFromAddress != "security@example.com" {
+	if c.PasswordResetResponseMin != 250*time.Millisecond || c.SMTPTimeout != 5*time.Second || c.MailOutboxLeaseDuration != 10*time.Second {
 		t.Fatalf("loaded recovery config = %#v", c)
 	}
-	for key, value := range map[string]string{
-		"PASSWORD_RESET_TOKEN_KEY": "not-base64",
-		"SMTP_TLS_MODE":            "none",
+	if _, err := Load(env(map[string]string{
+		"POSTGRES_PASSWORD":        "pg-secret",
+		"REDIS_PASSWORD":           "redis-secret",
+		"PASSWORD_RESET_TOKEN_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"INVITATION_TOKEN_KEY":     "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+		"SMTP_PORT":                "bad",
+		"SMTP_TLS_MODE":            "invalid",
 		"MAIL_FROM_ADDRESS":        "bad\r\n@example.com",
-	} {
-		copyValues := map[string]string{}
-		for name, original := range values {
-			copyValues[name] = original
-		}
-		copyValues[key] = value
-		if key == "SMTP_TLS_MODE" {
-			copyValues["APP_ENV"] = "production"
-		}
-		if _, err := Load(env(copyValues)); err == nil {
-			t.Errorf("Load accepted invalid %s=%q", key, value)
-		}
+	})); err != nil {
+		t.Fatalf("legacy SMTP environment should be ignored: %v", err)
 	}
-	values["APP_ENV"] = "production"
-	values["APP_PUBLIC_URL"] = "https://example.com"
-	values["SMTP_TLS_MODE"] = "starttls"
-	values["MAIL_FROM_ADDRESS"] = "no-reply@example.com"
-	if _, err := Load(env(values)); err != nil {
-		t.Fatalf("production SMTP config rejected: %v", err)
-	}
-	values["MAIL_FROM_ADDRESS"] = "no-reply@temvia.test"
-	if _, err := Load(env(values)); err == nil {
-		t.Fatal("production reserved .test sender accepted")
-	}
-	values["MAIL_FROM_ADDRESS"] = "no-reply@example.com"
 	values["MAIL_OUTBOX_LEASE_TTL"] = "5s"
 	if _, err := Load(env(values)); err == nil {
 		t.Fatal("outbox lease shorter than delivery timeout accepted")

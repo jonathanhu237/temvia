@@ -47,18 +47,29 @@ func TestPermissionCatalogIsStrictAndDeterministic(t *testing.T) {
 	}
 }
 
-func TestPermissionCatalogExpandsDependencies(t *testing.T) {
+func TestPermissionCatalogKeepsReadWriteIndependentAndValidatesCombinations(t *testing.T) {
 	catalog := DefaultPermissionCatalog()
-	permissions, err := catalog.Validate([]PermissionKey{PermissionInvitationsManage})
-	if err != nil {
-		t.Fatal(err)
+	permissions, err := catalog.Validate([]PermissionKey{PermissionInvitationsWrite})
+	if err != nil || !reflect.DeepEqual(permissions, []PermissionKey{PermissionInvitationsWrite}) {
+		t.Fatalf("Validate(invitations.write) = %#v, %v", permissions, err)
 	}
-	want := []PermissionKey{PermissionInvitationsManage, PermissionInvitationsRead, PermissionRolesRead, PermissionUsersRead}
-	if !reflect.DeepEqual(permissions, want) {
-		t.Fatalf("Validate(manage invitations) = %#v, want %#v", permissions, want)
+	if dependencies := catalog.Dependencies(PermissionInvitationsWrite); len(dependencies) != 0 {
+		t.Fatalf("Dependencies(invitations.write) = %#v, want empty", dependencies)
 	}
-	if dependencies := catalog.Dependencies(PermissionInvitationsManage); !reflect.DeepEqual(dependencies, []PermissionKey{PermissionInvitationsRead, PermissionRolesRead, PermissionUsersRead}) {
-		t.Fatalf("Dependencies(manage invitations) = %#v", dependencies)
+	if _, err := catalog.ValidateFeatureSet([]PermissionKey{PermissionInvitationsWrite}); err == nil {
+		t.Fatal("incomplete invitation combination accepted")
+	} else {
+		var validation *ValidationErrors
+		if !errors.As(err, &validation) || validation.Items[0].Code != "incomplete_permission_combination" {
+			t.Fatalf("incomplete combination error = %v", err)
+		}
+	}
+	permissions, err = catalog.ValidateFeatureSet([]PermissionKey{PermissionInvitationsWrite, PermissionRolesRead})
+	if err != nil || !reflect.DeepEqual(permissions, []PermissionKey{PermissionInvitationsWrite, PermissionRolesRead}) {
+		t.Fatalf("complete invitation combination = %#v, %v", permissions, err)
+	}
+	if _, err := catalog.ValidateFeatureSet([]PermissionKey{PermissionInvitationsRead, PermissionInvitationsWrite}); err == nil {
+		t.Fatal("incomplete invitation management combination accepted")
 	}
 }
 

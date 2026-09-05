@@ -48,6 +48,8 @@ var problemCatalog = map[string]struct {
 	"rate-limited":                 {"Too Many Requests"},
 	"internal-error":               {"Internal Server Error"},
 	"service-unavailable":          {"Service Unavailable"},
+	"mail-not-configured":          {"Mail Service Not Configured"},
+	"permission-scope":             {"Permission Outside Actor Scope"},
 }
 
 func writeProblem(w http.ResponseWriter, status int, name string) {
@@ -99,6 +101,12 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblemWithCode(w, http.StatusTooManyRequests, "rate-limited", "rate_limited", "", nil)
 	case applicationError(err, application.ErrDependencyUnavailable), applicationError(err, application.ErrPasswordHashBusy):
 		writeProblem(w, http.StatusServiceUnavailable, "service-unavailable")
+	case applicationError(err, application.ErrMailNotConfigured):
+		writeProblemWithCode(w, http.StatusServiceUnavailable, "mail-not-configured", "mail_not_configured", "", nil)
+	case applicationError(err, application.ErrPermissionScope):
+		writeProblemWithCode(w, http.StatusForbidden, "permission-scope", "permission_scope_forbidden", "", nil)
+	case applicationError(err, application.ErrInvalidMailSettings):
+		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "invalid_mail_settings", "", nil)
 	case applicationError(err, application.ErrForbidden):
 		writeProblem(w, http.StatusForbidden, "forbidden")
 	case applicationError(err, application.ErrRoleNotFound), applicationError(err, application.ErrUserNotFound), applicationError(err, application.ErrInvitationNotFound):

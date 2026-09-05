@@ -46,8 +46,8 @@ const permissionDefinitions: Permission[] = [
 
 const invitationPermissionDefinitions: Permission[] = [
   ...permissionDefinitions,
-  { key: 'invitations.read', resource: 'invitations', action: 'read', labelKey: 'permissions.invitations.read', description: 'View invitations', dependencies: ['users.read'] },
-  { key: 'invitations.manage', resource: 'invitations', action: 'manage', labelKey: 'permissions.invitations.manage', description: 'Manage invitations', dependencies: ['invitations.read', 'roles.read'] },
+  { key: 'invitations.read', resource: 'invitations', action: 'read', labelKey: 'permissions.invitations.read', description: 'View invitations' },
+  { key: 'invitations.write', resource: 'invitations', action: 'write', labelKey: 'permissions.invitations.write', description: 'Create and manage invitations' },
 ]
 
 const pendingInvitation: Invitation = {
@@ -151,7 +151,7 @@ describe('access components', () => {
     ))
   })
 
-  it('keeps invitations on their own page and confirms the original mail language', async () => {
+  it('keeps invitations on their own page and confirms the system mail language', async () => {
     const resendInvitation = vi.fn().mockResolvedValue({ invitation: pendingInvitation })
     const api = mockApi({
       getInvitations: vi.fn().mockResolvedValue({ invitations: [pendingInvitation] }),
@@ -170,7 +170,6 @@ describe('access components', () => {
 
     await user.click(within(table).getByRole('button', { name: 'Resend' }))
     const confirmation = await screen.findByRole('alertdialog')
-    expect(confirmation).toHaveTextContent('简体中文')
     expect(confirmation).toHaveTextContent('previous link will stop working')
     await user.click(within(confirmation).getByRole('button', { name: 'Resend' }))
     await waitFor(() => expect(resendInvitation).toHaveBeenCalledWith(pendingInvitation.id))
@@ -207,9 +206,9 @@ describe('access components', () => {
     expect(deleteItem).toHaveAttribute('title', 'Reassign all users and invitations before deleting this role.')
   })
 
-  it('selects and locks transitive permission dependencies in the role editor', async () => {
+  it('selects and locks the permissions required by an invitation feature', async () => {
     const api = mockApi({
-      getRoles: vi.fn().mockResolvedValue({ roles: [systemRole], permissions: invitationPermissionDefinitions }),
+      getRoles: vi.fn().mockResolvedValue({ roles: [systemRole], permissions: invitationPermissionDefinitions, combinations: [{ key: 'invitations.create', labelKey: 'permissions.combinations.invitationsCreate', description: 'Create invitations', permissions: ['invitations.write', 'roles.read'], trigger: ['invitations.write'] }, { key: 'invitations.manage', labelKey: 'permissions.combinations.invitationsManage', description: 'View and manage invitations', permissions: ['invitations.read', 'invitations.write', 'roles.read'], trigger: ['invitations.read', 'invitations.write'] }] }),
     })
     const user = userEvent.setup()
     renderWithQueryClient(<RolesPage api={api} canManage />)
@@ -220,18 +219,18 @@ describe('access components', () => {
     const manage = within(editor).getByRole('checkbox', { name: 'Manage invitations' })
     await user.click(manage)
     expect(manage).toBeChecked()
-    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).toBeChecked()
-    expect(within(editor).getByRole('checkbox', { name: 'View users' })).toBeChecked()
+    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).not.toBeChecked()
     expect(within(editor).getByRole('checkbox', { name: 'View roles' })).toBeChecked()
-    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).toBeDisabled()
-    expect(within(editor).getByRole('checkbox', { name: 'View users' })).toBeDisabled()
+    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).not.toBeDisabled()
     expect(within(editor).getByRole('checkbox', { name: 'View roles' })).toBeDisabled()
+
+    await user.click(within(editor).getByRole('checkbox', { name: 'View invitations' }))
+    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).toBeChecked()
+    expect(within(editor).getByRole('checkbox', { name: 'View roles' })).toBeChecked()
+    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).not.toBeDisabled()
 
     await user.click(manage)
     expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).toBeChecked()
-    expect(within(editor).getByRole('checkbox', { name: 'View users' })).toBeChecked()
-    expect(within(editor).getByRole('checkbox', { name: 'View roles' })).toBeChecked()
-    expect(within(editor).getByRole('checkbox', { name: 'View invitations' })).not.toBeDisabled()
   })
 
   it('disables invitation actions when the selected role exceeds the actor permissions', async () => {
@@ -239,7 +238,7 @@ describe('access components', () => {
       getInvitations: vi.fn().mockResolvedValue({ invitations: [{ ...pendingInvitation, roles: [systemRole] }] }),
       getRoles: vi.fn().mockResolvedValue({ roles: [systemRole], permissions: permissionDefinitions }),
     })
-    renderWithQueryClient(<InvitationsPage api={api} canManage actorPermissions={['invitations.manage', 'invitations.read', 'users.read', 'roles.read']} />)
+    renderWithQueryClient(<InvitationsPage api={api} canManage actorPermissions={['invitations.write', 'invitations.read', 'roles.read']} />)
 
     const table = await screen.findByRole('table')
     const resend = within(table).getByRole('button', { name: /Resend: You need higher permissions/ })

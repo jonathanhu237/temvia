@@ -44,7 +44,8 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
   const [action, setAction] = useState<{ invitation: Invitation; kind: InvitationAction }>()
   const [notice, setNotice] = useState<unknown>()
   const invitations = useQuery(invitationsOptions(api, { cursor, q: search, roleId: roleFilter, status: statusFilter || undefined, sort, direction }))
-  const roleOptions = useQuery({ ...roleOptionsOptions(api), enabled: Boolean(api.getRoleOptions) })
+  const canReadRoles = Boolean(actorSuperAdmin || actorPermissions?.includes('roles.read'))
+  const roleOptions = useQuery({ ...roleOptionsOptions(api), enabled: Boolean(api.getRoleOptions) && canReadRoles })
   const roleAdministration = useQuery({
     queryKey: ['access', 'roles'],
     queryFn: ({ signal }) => api.getRoles ? api.getRoles(signal) : Promise.reject(new Error('missing getRoles')),
@@ -86,7 +87,6 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
   const retryInvitations = () => void invitations.refetch()
   const retryRoles = () => void roleAdministration.refetch()
   const expired = (invitation: Invitation) => new Date(invitation.expiresAt).getTime() <= Date.now()
-  const localeLabel = (locale: Invitation['locale']) => locale === 'zh-CN' ? t('common:chinese') : t('common:english')
 
   const columns = useMemo<ColumnDef<Invitation, unknown>[]>(() => [
     {
@@ -157,7 +157,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
           onSortingChange={handleSorting}
           manualFiltering
           manualSorting
-          toolbar={<div className="flex flex-wrap items-center gap-2"><Select value={roleFilter || 'all'} onValueChange={(value) => setFilter(setRoleFilter, value)}><SelectTrigger className="w-44" aria-label={t('filterByRole')}><SelectValue placeholder={t('allRoles')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allRoles')}</SelectItem>{roleFilterOptions.map((role) => <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>)}</SelectGroup></SelectContent></Select><Select value={statusFilter || 'all'} onValueChange={(value) => { setStatusFilter(value === 'all' ? '' : value as 'pending' | 'expired'); setCursor(''); setHistory([]) }}><SelectTrigger className="w-36" aria-label={t('filterByStatus')}><SelectValue placeholder={t('allStatuses')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allStatuses')}</SelectItem><SelectItem value="pending">{t('pending')}</SelectItem><SelectItem value="expired">{t('expired')}</SelectItem></SelectGroup></SelectContent></Select></div>}
+          toolbar={<div className="flex flex-wrap items-center gap-2">{canReadRoles ? <Select value={roleFilter || 'all'} onValueChange={(value) => setFilter(setRoleFilter, value)}><SelectTrigger className="w-44" aria-label={t('filterByRole')}><SelectValue placeholder={t('allRoles')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allRoles')}</SelectItem>{roleFilterOptions.map((role) => <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>)}</SelectGroup></SelectContent></Select> : null}<Select value={statusFilter || 'all'} onValueChange={(value) => { setStatusFilter(value === 'all' ? '' : value as 'pending' | 'expired'); setCursor(''); setHistory([]) }}><SelectTrigger className="w-36" aria-label={t('filterByStatus')}><SelectValue placeholder={t('allStatuses')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allStatuses')}</SelectItem><SelectItem value="pending">{t('pending')}</SelectItem><SelectItem value="expired">{t('expired')}</SelectItem></SelectGroup></SelectContent></Select></div>}
         />
         {invitations.isFetching && !invitations.isPending ? <p role="status" className="mt-3 text-sm text-muted-foreground">{t('common:loading')}</p> : null}
         <PageNavigation hasPrevious={history.length > 0} hasNext={Boolean(invitations.data.nextCursor)} loading={invitations.isFetching} onPrevious={() => { const previous = history[history.length - 1] ?? ''; setHistory((current) => current.slice(0, -1)); setCursor(previous) }} onNext={() => { if (!invitations.data.nextCursor) return; setHistory((current) => [...current, cursor]); setCursor(invitations.data.nextCursor) }} t={(key) => t(key as never)} />
@@ -170,7 +170,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{action?.kind === 'revoke' ? t('revoke') : action?.kind === 'renew' ? t('renewInvitation') : t('resend')}</AlertDialogTitle>
-          <AlertDialogDescription>{action?.kind === 'revoke' ? t('revokeConfirm', { email: action.invitation.email }) : t('sendInvitationConfirm', { email: action?.invitation.email ?? '', locale: action ? localeLabel(action.invitation.locale) : '' })}</AlertDialogDescription>
+          <AlertDialogDescription>{action?.kind === 'revoke' ? t('revokeConfirm', { email: action.invitation.email }) : t('sendInvitationConfirm', { email: action?.invitation.email ?? '' })}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t('common:cancel')}</AlertDialogCancel>

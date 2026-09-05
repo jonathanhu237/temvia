@@ -205,18 +205,18 @@ func TestProblemMappings(t *testing.T) {
 func TestPasswordRecoveryHTTPContracts(t *testing.T) {
 	recovery := &recoveryFake{}
 	handler := NewHandler(&setupFake{status: application.SetupRequired}, &authFake{}, testConfig(), recovery)
-	requestResponse := request(handler, http.MethodPost, "/api/auth/password-reset/request", `{"email":"ada@example.com","locale":"en"}`, true)
+	requestResponse := request(handler, http.MethodPost, "/api/auth/password-reset/request", `{"email":"ada@example.com"}`, true)
 	if requestResponse.Code != http.StatusAccepted || requestResponse.Header().Get("Cache-Control") != "no-store" || requestResponse.Header().Get("Content-Type") != "application/json; charset=utf-8" || requestResponse.Body.String() != "{\"status\":\"accepted\"}\n" {
 		t.Fatalf("request response = %d, headers %#v, body %q", requestResponse.Code, requestResponse.Header(), requestResponse.Body.String())
 	}
 	if recovery.requestCalls != 1 {
 		t.Fatalf("request calls = %d", recovery.requestCalls)
 	}
-	complete := request(handler, http.MethodPost, "/api/auth/password-reset/complete", `{"token":123,"password":"Aa1!xxxx","locale":"en"}`, true)
+	complete := request(handler, http.MethodPost, "/api/auth/password-reset/complete", `{"token":123,"password":"Aa1!xxxx"}`, true)
 	if complete.Code != http.StatusForbidden || recovery.completeCalls != 0 {
 		t.Fatalf("malformed token response = %d, calls=%d", complete.Code, recovery.completeCalls)
 	}
-	complete = request(handler, http.MethodPost, "/api/auth/password-reset/complete", `{"token":"v1.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"Aa1!xxxx","locale":"en"}`, true)
+	complete = request(handler, http.MethodPost, "/api/auth/password-reset/complete", `{"token":"v1.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"Aa1!xxxx"}`, true)
 	if complete.Code != http.StatusNoContent {
 		t.Fatalf("complete response = %d, body=%q", complete.Code, complete.Body.String())
 	}
@@ -227,7 +227,7 @@ func TestPasswordRecoveryHTTPContracts(t *testing.T) {
 	if recovery.completeCalls != 1 {
 		t.Fatalf("completion calls = %d", recovery.completeCalls)
 	}
-	missingOrigin := request(handler, http.MethodPost, "/api/auth/password-reset/request", `{"email":"ada@example.com","locale":"en"}`, false)
+	missingOrigin := request(handler, http.MethodPost, "/api/auth/password-reset/request", `{"email":"ada@example.com"}`, false)
 	if missingOrigin.Code != http.StatusForbidden || recovery.requestCalls != 1 {
 		t.Fatalf("missing Origin response = %d, calls=%d", missingOrigin.Code, recovery.requestCalls)
 	}
@@ -240,11 +240,11 @@ func TestPasswordRecoveryHTTPContracts(t *testing.T) {
 func TestPasswordRecoveryHTTPErrorMapping(t *testing.T) {
 	recovery := &recoveryFake{requestErr: application.ErrRateLimited, completeErr: application.ErrInvalidPasswordResetToken}
 	handler := NewHandler(&setupFake{status: application.SetupRequired}, &authFake{}, testConfig(), recovery)
-	limited := request(handler, http.MethodPost, "/api/auth/password-reset/request", `{"email":"ada@example.com","locale":"en"}`, true)
+	limited := request(handler, http.MethodPost, "/api/auth/password-reset/request", `{"email":"ada@example.com"}`, true)
 	if limited.Code != http.StatusTooManyRequests || !strings.Contains(limited.Body.String(), `"type":"/problems/rate-limited"`) {
 		t.Fatalf("rate-limit response = %d, body=%s", limited.Code, limited.Body.String())
 	}
-	invalid := request(handler, http.MethodPost, "/api/auth/password-reset/complete", `{"token":"v1.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"Aa1!xxxx","locale":"en"}`, true)
+	invalid := request(handler, http.MethodPost, "/api/auth/password-reset/complete", `{"token":"v1.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"Aa1!xxxx"}`, true)
 	if invalid.Code != http.StatusForbidden || !strings.Contains(invalid.Body.String(), `"type":"/problems/invalid-password-reset-token"`) {
 		t.Fatalf("invalid-token response = %d, body=%s", invalid.Code, invalid.Body.String())
 	}
@@ -253,19 +253,19 @@ func TestPasswordRecoveryHTTPErrorMapping(t *testing.T) {
 func TestInvitationAcceptanceHTTPContracts(t *testing.T) {
 	acceptance := &invitationAcceptanceFake{}
 	handler := NewHandlerWithAccess(&setupFake{status: application.SetupRequired}, &authFake{}, testConfig(), nil, nil, acceptance)
-	response := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":"token","password":"Aa1!xxxx","locale":"en"}`, true)
+	response := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":"token","password":"Aa1!xxxx"}`, true)
 	if response.Code != http.StatusNoContent || acceptance.calls != 1 || len(response.Result().Cookies()) != 1 {
 		t.Fatalf("acceptance response = %d, calls=%d, cookies=%#v", response.Code, acceptance.calls, response.Result().Cookies())
 	}
-	invalidLocale := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":"token","password":"Aa1!xxxx","locale":"fr"}`, true)
-	if invalidLocale.Code != http.StatusUnprocessableEntity || acceptance.calls != 1 {
-		t.Fatalf("invalid locale response = %d, calls=%d", invalidLocale.Code, acceptance.calls)
+	unknownLocale := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":"token","password":"Aa1!xxxx","locale":"fr"}`, true)
+	if unknownLocale.Code != http.StatusBadRequest || acceptance.calls != 1 {
+		t.Fatalf("unknown locale response = %d, calls=%d", unknownLocale.Code, acceptance.calls)
 	}
-	invalidTokenType := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":123,"password":"Aa1!xxxx","locale":"en"}`, true)
+	invalidTokenType := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":123,"password":"Aa1!xxxx"}`, true)
 	if invalidTokenType.Code != http.StatusForbidden || acceptance.calls != 1 || !strings.Contains(invalidTokenType.Body.String(), `"type":"/problems/invalid-invitation"`) {
 		t.Fatalf("invalid token type response = %d, calls=%d, body=%s", invalidTokenType.Code, acceptance.calls, invalidTokenType.Body.String())
 	}
-	missingOrigin := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":"token","password":"Aa1!xxxx","locale":"en"}`, false)
+	missingOrigin := request(handler, http.MethodPost, "/api/auth/invitations/accept", `{"token":"token","password":"Aa1!xxxx"}`, false)
 	if missingOrigin.Code != http.StatusForbidden || acceptance.calls != 1 {
 		t.Fatalf("missing Origin response = %d, calls=%d", missingOrigin.Code, acceptance.calls)
 	}

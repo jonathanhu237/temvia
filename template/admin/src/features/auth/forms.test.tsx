@@ -342,7 +342,7 @@ describe('authentication forms', () => {
     renderWithQueryClient(<PasswordResetRequestForm api={api} onAccepted={onAccepted} />)
     await user.type(screen.getByLabelText('Email'), ' admin@example.com ')
     await user.click(screen.getByRole('button', { name: 'Send reset link' }))
-    await waitFor(() => expect(api.requestPasswordReset).toHaveBeenCalledWith({ email: 'admin@example.com', locale: 'en' }))
+	await waitFor(() => expect(api.requestPasswordReset).toHaveBeenCalledWith({ email: 'admin@example.com' }))
     expect(onAccepted).toHaveBeenCalledOnce()
   })
 
@@ -354,7 +354,7 @@ describe('authentication forms', () => {
     await user.type(screen.getByLabelText('Password', { exact: true }), 'Aa1!e\u0301xxx')
     await user.type(screen.getByLabelText('Confirm password'), 'Aa1!éxxx')
     await user.click(screen.getByRole('button', { name: 'Set new password' }))
-    await waitFor(() => expect(api.completePasswordReset).toHaveBeenCalledWith({ token: 'v1.token', password: 'Aa1!éxxx', locale: 'en' }))
+	await waitFor(() => expect(api.completePasswordReset).toHaveBeenCalledWith({ token: 'v1.token', password: 'Aa1!éxxx' }))
     expect(onSuccess).toHaveBeenCalledOnce()
   })
 })

@@ -12,9 +12,10 @@ starting the containers:
 ```sh
 cp .env.example .env
 chmod 600 .env
-# edit .env and set POSTGRES_PASSWORD, REDIS_PASSWORD, PASSWORD_RESET_TOKEN_KEY, and INVITATION_TOKEN_KEY
+# edit .env and set POSTGRES_PASSWORD, REDIS_PASSWORD, PASSWORD_RESET_TOKEN_KEY, INVITATION_TOKEN_KEY, and EMAIL_SETTINGS_ENCRYPTION_KEY
 # openssl rand -base64url 32  # use the output for PASSWORD_RESET_TOKEN_KEY
 # openssl rand -base64url 32  # generate a separate value for INVITATION_TOKEN_KEY
+# openssl rand -base64url 32  # generate a separate value for EMAIL_SETTINGS_ENCRYPTION_KEY
 make build
 make migrate-up
 make up
@@ -56,15 +57,17 @@ Compose network on `mailpit:1025`; it is never published to the host. A normal
 The API does not wait for SMTP readiness, so a provider outage leaves durable
 outbox work to retry.
 
-In production, set `SMTP_TLS_MODE` to `starttls` or `tls`, use a real sender
-address, and provide paired SMTP credentials when required by the provider.
-Keep `PASSWORD_RESET_TOKEN_KEY` stable across restarts. Deliberate key rotation
+In production, configure SMTP security (`starttls` or `tls`), a real sender
+address, and paired credentials when required by the provider in the System
+settings page. Keep `EMAIL_SETTINGS_ENCRYPTION_KEY` stable and back it up
+separately from PostgreSQL; it protects the stored SMTP password. Keep
+`PASSWORD_RESET_TOKEN_KEY` stable across restarts. Deliberate key rotation
 invalidates pending reset-mail jobs (already delivered links remain consumable
 because PostgreSQL stores their digest); affected users can request a fresh
 link. Keep `INVITATION_TOKEN_KEY` stable as well; it is intentionally separate
 from the reset key. Invitation links expire after 72 hours by default and may
-be configured with `INVITATION_LINK_TTL` up to seven days. Run migration 3
-before deploying the RBAC API. To roll back, stop the new API, apply one
+be configured with `INVITATION_LINK_TTL` up to seven days. Run migration 4
+before deploying this API. To roll back, stop the new API, apply one
 migration down, then deploy the previous API; passwords already changed by the
 feature are not reverted.
 
@@ -105,20 +108,22 @@ go test -bench='Benchmark(Hasher|Verifier)$' -benchtime=1x ./internal/auth/adapt
 ```
 
 The recovery API accepts `POST /api/auth/password-reset/request` with an email
-and `locale` (`en` or `zh-CN`) and returns the same `202 {"status":"accepted"}`
+and returns the same `202 {"status":"accepted"}`
 for known and unknown accounts. The reset email opens
 `/reset-password#token=...`; the browser removes the fragment before React
-mounts. Completion accepts the token, a policy-compliant password, and locale,
+mounts. Completion accepts the token and a policy-compliant password,
 returns `204`, clears any presented session cookie, invalidates all old
 sessions, and requires an explicit login with the new password.
 
 After setup, the first administrator is assigned to the immutable `Super
 Admin` role. The Users, Invitations, and Roles pages are grouped under the
-authenticated Users & Access navigation. `users.read`, `roles.read`,
-`invitations.read`, and `invitations.manage` form the live permission catalog;
-invitation permissions include their documented dependencies. Super Admins
-retain full access, while invitation managers may create, resend, renew, or
-revoke only invitations whose roles fit their own effective permissions.
+authenticated Users & Access navigation. The live permission catalog uses
+independent `resource.read` and `resource.write` grants for users, roles,
+invitations, and settings. Feature combinations (for example, invitation
+creation plus `roles.read`) are shown in the role editor and validated by the
+API. Super Admins retain full access, while delegated managers may create,
+resend, renew, or revoke only invitations whose roles fit their own effective
+permissions.
 Custom roles must retain at least one permission, users and invitations at
 least one role, and a role cannot be deleted while assigned to a user or
 invitation. The API refuses any change that would leave zero usable Super

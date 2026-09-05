@@ -97,7 +97,7 @@ export function LanguageMenu({ className }: { className?: string }) {
 
 export function PreferencesButtons({ className }: { className?: string }) {
   return (
-    <div className={cn('flex items-center gap-2', className)}>
+    <div className={cn('flex items-center gap-3', className)}>
       <AppearanceMenu />
       <LanguageMenu />
     </div>

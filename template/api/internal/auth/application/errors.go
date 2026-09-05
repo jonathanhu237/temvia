@@ -27,4 +27,7 @@ var (
 	ErrInvitationInvalid         = errors.New("invalid invitation")
 	ErrInvitationRoleForbidden   = errors.New("invitation role is outside actor permissions")
 	ErrInvitationNotManageable   = errors.New("invitation is not manageable by actor")
+	ErrPermissionScope           = errors.New("permission is outside actor scope")
+	ErrMailNotConfigured         = errors.New("mail service is not configured")
+	ErrInvalidMailSettings       = errors.New("invalid mail settings")
 )

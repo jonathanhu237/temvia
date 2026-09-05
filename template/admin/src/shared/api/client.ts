@@ -9,6 +9,8 @@ import {
 	passwordResetAcceptedSchema,
 	passwordResetCompleteInputSchema,
 	passwordResetRequestInputSchema,
+	emailSettingsResponseSchema,
+	operationalWarningsSchema,
 	problemDetailsSchema,
 	roleMutationInputSchema,
 	roleResponseSchema,
@@ -25,7 +27,8 @@ import {
   type Role,
   type Permission,
   type Invitation,
-  type RoleOption,
+	  type RoleOption,
+	  type EmailSettings,
 } from './contracts'
 
 export class ApiProblemError extends Error {
@@ -60,7 +63,7 @@ export interface ApiClient {
   setup(input: { token: string; name: string; email: string; password: string }, signal?: AbortSignal): Promise<void>
   login(input: { email: string; password: string }, signal?: AbortSignal): Promise<User>
   me(signal?: AbortSignal): Promise<User>
-	getRoles?(signal?: AbortSignal): Promise<{ roles: Role[]; permissions: Permission[] }>
+	getRoles?(signal?: AbortSignal): Promise<{ roles: Role[]; permissions: Permission[]; combinations?: Array<{ key: string; labelKey: string; description: string; permissions: string[]; trigger?: string[] }> }>
 	getRoleOptions?(signal?: AbortSignal): Promise<{ roles: RoleOption[] }>
 	getRole?(id: string, signal?: AbortSignal): Promise<Role>
 	createRole?(input: { name: string; description: string; permissions: string[] }, signal?: AbortSignal): Promise<Role>
@@ -69,13 +72,17 @@ export interface ApiClient {
 	getUsers?(options?: { cursor?: string; limit?: number; q?: string; roleId?: string; sort?: string; direction?: 'asc' | 'desc' }, signal?: AbortSignal): Promise<{ users: Array<{ id: string; name: string; email: string; createdAt: string; authVersion: number; roles: Role[] }>; nextCursor?: string }>
 	replaceUserRoles?(id: string, input: { roleIds: string[]; authVersion: number }, signal?: AbortSignal): Promise<{ user: { id: string; name: string; email: string; createdAt: string; authVersion: number; roles: Role[] } }>
 	getInvitations?(options?: { cursor?: string; limit?: number; q?: string; roleId?: string; status?: 'pending' | 'expired'; sort?: string; direction?: 'asc' | 'desc' }, signal?: AbortSignal): Promise<{ invitations: Invitation[]; nextCursor?: string }>
-	createInvitation?(input: { name: string; email: string; locale: 'en' | 'zh-CN'; roleIds: string[] }, signal?: AbortSignal): Promise<{ invitation: Invitation }>
+	createInvitation?(input: { name: string; email: string; roleIds: string[] }, signal?: AbortSignal): Promise<{ invitation: Invitation }>
 	resendInvitation?(id: string, signal?: AbortSignal): Promise<{ invitation: Invitation }>
 	revokeInvitation?(id: string, signal?: AbortSignal): Promise<void>
-	acceptInvitation?(input: { token: string; password: string; locale: 'en' | 'zh-CN' }, signal?: AbortSignal): Promise<void>
+	acceptInvitation?(input: { token: string; password: string }, signal?: AbortSignal): Promise<void>
 	logout(signal?: AbortSignal): Promise<void>
-	requestPasswordReset(input: { email: string; locale: 'en' | 'zh-CN' }, signal?: AbortSignal): Promise<void>
-	completePasswordReset(input: { token: string; password: string; locale: 'en' | 'zh-CN' }, signal?: AbortSignal): Promise<void>
+	requestPasswordReset(input: { email: string }, signal?: AbortSignal): Promise<void>
+	completePasswordReset(input: { token: string; password: string }, signal?: AbortSignal): Promise<void>
+	getEmailSettings?(signal?: AbortSignal): Promise<EmailSettings>
+	saveEmailSettings?(input: { host: string; port: number; security: 'none' | 'starttls' | 'tls'; username: string; password?: string; clearPassword?: boolean; fromAddress: string; fromName: string; defaultLocale: 'en' | 'zh-CN'; revision: number }, signal?: AbortSignal): Promise<EmailSettings>
+	testEmailSettings?(input: { host: string; port: number; security: 'none' | 'starttls' | 'tls'; username: string; password?: string; clearPassword?: boolean; fromAddress: string; fromName: string; defaultLocale: 'en' | 'zh-CN'; revision?: number }, signal?: AbortSignal): Promise<void>
+	getOperationalWarnings?(signal?: AbortSignal): Promise<{ warnings: Array<{ key: string; severity: string }> }>
 }
 
 interface RequestOptions {
@@ -195,12 +202,16 @@ export function createApiClient(): ApiClient {
       await request('/api/auth/logout', { parse: (value: unknown) => value as undefined }, { method: 'POST', signal, expectedStatus: 204 })
     },
     requestPasswordReset: async (input, signal) => {
-      const body = passwordResetRequestInputSchema.parse(input)
+		const body = passwordResetRequestInputSchema.parse(input)
       await request('/api/auth/password-reset/request', passwordResetAcceptedSchema, { method: 'POST', body, signal, expectedStatus: 202 })
     },
     completePasswordReset: async (input, signal) => {
-      const body = passwordResetCompleteInputSchema.parse(input)
-      await request('/api/auth/password-reset/complete', { parse: (value: unknown) => value as undefined }, { method: 'POST', body, signal, expectedStatus: 204 })
-    },
+		const body = passwordResetCompleteInputSchema.parse(input)
+	      await request('/api/auth/password-reset/complete', { parse: (value: unknown) => value as undefined }, { method: 'POST', body, signal, expectedStatus: 204 })
+	    },
+		getEmailSettings: async (signal) => (await request('/api/settings/email', emailSettingsResponseSchema, { signal, expectedStatus: 200 })).email,
+		saveEmailSettings: async (input, signal) => (await request('/api/settings/email', emailSettingsResponseSchema, { method: 'PUT', body: input, signal, expectedStatus: 200 })).email,
+		testEmailSettings: async (input, signal) => { await request('/api/settings/email/test', passwordResetAcceptedSchema, { method: 'POST', body: input, signal, expectedStatus: 202 }) },
+		getOperationalWarnings: async (signal) => request('/api/operational-warnings', operationalWarningsSchema, { signal, expectedStatus: 200 }),
   }
 }

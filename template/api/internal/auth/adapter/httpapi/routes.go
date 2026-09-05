@@ -43,6 +43,13 @@ type AccessService interface {
 	RevokeInvitation(context.Context, string, string) error
 }
 
+type SettingsService interface {
+	GetEmailSettings(context.Context) (application.EmailSettingsView, error)
+	SaveEmailSettings(context.Context, application.EmailSettingsInput) (application.EmailSettingsView, error)
+	TestEmailSettings(context.Context, application.EmailSettingsInput, string) error
+	OperationalWarnings(context.Context) ([]application.OperationalWarning, error)
+}
+
 type QueryableAccessService interface {
 	UsersWithOptions(context.Context, string, application.AccessListOptions) (application.UserPage, error)
 	InvitationsWithOptions(context.Context, string, application.AccessListOptions) (application.InvitationPage, error)
@@ -58,6 +65,7 @@ type Handler struct {
 	recovery         PasswordRecoveryService
 	access           AccessService
 	acceptInvitation InvitationAcceptanceService
+	settings         SettingsService
 	cfg              config.Config
 	mux              *http.ServeMux
 }
@@ -66,8 +74,12 @@ func NewHandler(setup SetupService, auth AuthenticationService, cfg config.Confi
 	return newHandler(setup, auth, cfg, firstRecovery(recovery), nil, nil)
 }
 
-func NewHandlerWithAccess(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService) http.Handler {
-	return newHandler(setup, auth, cfg, recovery, access, accept)
+func NewHandlerWithAccess(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings ...SettingsService) http.Handler {
+	var service SettingsService
+	if len(settings) > 0 {
+		service = settings[0]
+	}
+	return newHandler(setup, auth, cfg, recovery, access, accept, service)
 }
 
 func firstRecovery(recovery []PasswordRecoveryService) PasswordRecoveryService {
@@ -78,8 +90,12 @@ func firstRecovery(recovery []PasswordRecoveryService) PasswordRecoveryService {
 	return passwordRecovery
 }
 
-func newHandler(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService) http.Handler {
-	h := &Handler{setup: setup, auth: auth, recovery: recovery, access: access, acceptInvitation: accept, cfg: cfg, mux: http.NewServeMux()}
+func newHandler(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings ...SettingsService) http.Handler {
+	var settingsService SettingsService
+	if len(settings) > 0 {
+		settingsService = settings[0]
+	}
+	h := &Handler{setup: setup, auth: auth, recovery: recovery, access: access, acceptInvitation: accept, settings: settingsService, cfg: cfg, mux: http.NewServeMux()}
 	h.mux.HandleFunc("GET /api/setup/status", h.setupStatus)
 	h.mux.HandleFunc("POST /api/setup", h.setupComplete)
 	h.mux.HandleFunc("POST /api/auth/login", h.login)
@@ -102,6 +118,12 @@ func newHandler(setup SetupService, auth AuthenticationService, cfg config.Confi
 		h.mux.HandleFunc("POST /api/user-invitations", h.createInvitation)
 		h.mux.HandleFunc("POST /api/user-invitations/{id}/resend", h.resendInvitation)
 		h.mux.HandleFunc("DELETE /api/user-invitations/{id}", h.revokeInvitation)
+	}
+	if h.settings != nil {
+		h.mux.HandleFunc("GET /api/settings/email", h.emailSettings)
+		h.mux.HandleFunc("PUT /api/settings/email", h.saveEmailSettings)
+		h.mux.HandleFunc("POST /api/settings/email/test", h.testEmailSettings)
+		h.mux.HandleFunc("GET /api/operational-warnings", h.operationalWarnings)
 	}
 	if h.acceptInvitation != nil {
 		h.mux.HandleFunc("POST /api/auth/invitations/accept", h.acceptInvitationHandler)
@@ -143,6 +165,9 @@ var knownMethods = map[string]string{
 	"/api/access/role-options":          "GET",
 	"/api/users":                        "GET",
 	"/api/user-invitations":             "GET, POST",
+	"/api/settings/email":               "GET, PUT",
+	"/api/settings/email/test":          "POST",
+	"/api/operational-warnings":         "GET",
 	"/api/auth/invitations/accept":      "POST",
 }
 
@@ -286,7 +311,7 @@ func (h *Handler) passwordResetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input application.PasswordResetRequestInput
-	if err := decodeJSONObject(r, &input, map[string]struct{}{"email": {}, "locale": {}}); err != nil {
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"email": {}}); err != nil {
 		writeDecodeError(w, err)
 		return
 	}
@@ -303,7 +328,7 @@ func (h *Handler) passwordResetComplete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var input application.PasswordResetCompleteInput
-	if err := decodeJSONObject(r, &input, map[string]struct{}{"token": {}, "password": {}, "locale": {}}); err != nil {
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"token": {}, "password": {}}); err != nil {
 		var fieldErr fieldValueError
 		if errors.As(err, &fieldErr) && fieldErr.field == "token" {
 			writeProblem(w, http.StatusForbidden, "invalid-password-reset-token")
@@ -375,7 +400,19 @@ func (h *Handler) roles(w http.ResponseWriter, r *http.Request) {
 		}
 		permissions = append(permissions, permissionResponseBody{Key: string(definition.Key), Resource: definition.Resource, Action: definition.Action, LabelKey: definition.LabelKey, Description: definition.Description, Dependencies: dependencies})
 	}
-	writeJSON(w, http.StatusOK, roleListResponse{Roles: roles, Permissions: permissions})
+	combinations := make([]combinationResponseBody, 0, len(result.Combinations))
+	for _, combination := range result.Combinations {
+		keys := make([]string, 0, len(combination.Permissions))
+		for _, permission := range combination.Permissions {
+			keys = append(keys, string(permission))
+		}
+		triggers := make([]string, 0, len(combination.Trigger))
+		for _, trigger := range combination.Trigger {
+			triggers = append(triggers, string(trigger))
+		}
+		combinations = append(combinations, combinationResponseBody{Key: combination.Key, LabelKey: combination.LabelKey, Description: combination.Description, Permissions: keys, Trigger: triggers})
+	}
+	writeJSON(w, http.StatusOK, roleListResponse{Roles: roles, Permissions: permissions, Combinations: combinations})
 }
 
 func (h *Handler) roleOptions(w http.ResponseWriter, r *http.Request) {
@@ -639,7 +676,6 @@ func (h *Handler) invitations(w http.ResponseWriter, r *http.Request) {
 type invitationRequest struct {
 	Name    string   `json:"name"`
 	Email   string   `json:"email"`
-	Locale  string   `json:"locale"`
 	RoleIDs []string `json:"roleIds"`
 }
 
@@ -654,11 +690,11 @@ func (h *Handler) createInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input invitationRequest
-	if err := decodeJSONObject(r, &input, map[string]struct{}{"name": {}, "email": {}, "locale": {}, "roleIds": {}}); err != nil {
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"name": {}, "email": {}, "roleIds": {}}); err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	item, err := h.access.CreateInvitation(r.Context(), principal.User.ID, application.InvitationInput{Name: input.Name, Email: input.Email, Locale: input.Locale, RoleIDs: input.RoleIDs})
+	item, err := h.access.CreateInvitation(r.Context(), principal.User.ID, application.InvitationInput{Name: input.Name, Email: input.Email, RoleIDs: input.RoleIDs})
 	if err != nil {
 		writeApplicationError(w, err)
 		return
@@ -719,9 +755,8 @@ func (h *Handler) acceptInvitationHandler(w http.ResponseWriter, r *http.Request
 	var input struct {
 		Token    string `json:"token"`
 		Password string `json:"password"`
-		Locale   string `json:"locale"`
 	}
-	if err := decodeJSONObject(r, &input, map[string]struct{}{"token": {}, "password": {}, "locale": {}}); err != nil {
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"token": {}, "password": {}}); err != nil {
 		var fieldErr fieldValueError
 		if errors.As(err, &fieldErr) && strings.EqualFold(fieldErr.field, "token") {
 			writeProblem(w, http.StatusForbidden, "invalid-invitation")
@@ -730,14 +765,142 @@ func (h *Handler) acceptInvitationHandler(w http.ResponseWriter, r *http.Request
 		writeDecodeError(w, err)
 		return
 	}
-	if !domain.Locale(input.Locale).Valid() {
-		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "validation_failed", "", []domain.FieldError{{Field: "locale", Code: "invalid_locale"}})
-		return
-	}
 	if err := h.acceptInvitation.Complete(r.Context(), input.Token, input.Password); err != nil {
 		writeApplicationError(w, err)
 		return
 	}
 	h.clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) emailSettings(w http.ResponseWriter, r *http.Request) {
+	if h.settings == nil {
+		h.notFound(w, r)
+		return
+	}
+	principal, err := h.currentPrincipal(r)
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	if !principal.SuperAdmin && !principal.Has(domain.PermissionSettingsRead) {
+		writeProblem(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	view, err := h.settings.GetEmailSettings(r.Context())
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, emailSettingsEnvelope{Email: emailSettingsResponseBody(view)})
+}
+
+type emailSettingsRequest struct {
+	Host          string  `json:"host"`
+	Port          int     `json:"port"`
+	Security      string  `json:"security"`
+	Username      string  `json:"username"`
+	Password      *string `json:"password"`
+	ClearPassword bool    `json:"clearPassword"`
+	FromAddress   string  `json:"fromAddress"`
+	FromName      string  `json:"fromName"`
+	DefaultLocale string  `json:"defaultLocale"`
+	Revision      *int64  `json:"revision"`
+}
+
+func (h *Handler) saveEmailSettings(w http.ResponseWriter, r *http.Request) {
+	if h.settings == nil {
+		h.notFound(w, r)
+		return
+	}
+	if !h.validOrigin(r) {
+		writeProblem(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	principal, err := h.currentPrincipal(r)
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	if !principal.SuperAdmin && !principal.Has(domain.PermissionSettingsWrite) {
+		writeProblem(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	var input emailSettingsRequest
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"host": {}, "port": {}, "security": {}, "username": {}, "password": {}, "clearPassword": {}, "fromAddress": {}, "fromName": {}, "defaultLocale": {}, "revision": {}}); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	revision := int64(0)
+	if input.Revision != nil {
+		revision = *input.Revision
+	}
+	view, err := h.settings.SaveEmailSettings(r.Context(), application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, Revision: revision})
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, emailSettingsEnvelope{Email: emailSettingsResponseBody(view)})
+}
+
+func (h *Handler) testEmailSettings(w http.ResponseWriter, r *http.Request) {
+	if h.settings == nil {
+		h.notFound(w, r)
+		return
+	}
+	if !h.validOrigin(r) {
+		writeProblem(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	principal, err := h.currentPrincipal(r)
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	if !principal.SuperAdmin && !principal.Has(domain.PermissionSettingsWrite) {
+		writeProblem(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	var input struct {
+		emailSettingsRequest
+	}
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"host": {}, "port": {}, "security": {}, "username": {}, "password": {}, "clearPassword": {}, "fromAddress": {}, "fromName": {}, "defaultLocale": {}, "revision": {}}); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	err = h.settings.TestEmailSettings(r.Context(), application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, Revision: input.RevisionValue()}, principal.User.Email)
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+func (r emailSettingsRequest) RevisionValue() int64 {
+	if r.Revision == nil {
+		return 0
+	}
+	return *r.Revision
+}
+
+func (h *Handler) operationalWarnings(w http.ResponseWriter, r *http.Request) {
+	if h.settings == nil {
+		h.notFound(w, r)
+		return
+	}
+	principal, err := h.currentPrincipal(r)
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	if !principal.SuperAdmin && !principal.Has(domain.PermissionSettingsRead) {
+		writeJSON(w, http.StatusOK, map[string]any{"warnings": []application.OperationalWarning{}})
+		return
+	}
+	warnings, err := h.settings.OperationalWarnings(r.Context())
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"warnings": warnings})
 }
