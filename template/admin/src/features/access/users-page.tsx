@@ -11,11 +11,11 @@ import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field
 import { Input } from '@/components/ui/input'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { Role } from '@/shared/api/contracts'
-import { AccessError } from './access-error'
 import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { PageNavigation, RoleBadges, canAssignRole, formatDate, type AccessUser } from './access-components'
 import { usersOptions } from './queries'
+import { notifyRequestError, notifySuccess, useRequestErrorToast } from '@/shared/feedback'
 
 export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = false }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean }) {
   const { t, i18n } = useTranslation(['access', 'common'])
@@ -33,6 +33,8 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     enabled: canManage,
     staleTime: 10_000,
   })
+  useRequestErrorToast(users.error, users.isError, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
+  useRequestErrorToast(roleAdministration.error, roleAdministration.isError && canManage, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
   const [assignmentOpen, setAssignmentOpen] = useState(false)
   const [assignmentUser, setAssignmentUser] = useState<AccessUser | undefined>()
   const [assignmentGeneration, setAssignmentGeneration] = useState(0)
@@ -46,8 +48,6 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     setUserDirection(first?.desc ? 'desc' : 'asc')
     setUserCursor(''); setUserHistory([])
   }
-  const retryUsers = () => void users.refetch()
-  const retryRoles = () => void roleAdministration.refetch()
   const roleList = roleAdministration.data?.roles ?? []
   const activeAssignmentUser = assignmentUser ? users.data?.users.find((item) => item.id === assignmentUser.id) ?? assignmentUser : undefined
   const openAssignment = (user: AccessUser) => {
@@ -89,9 +89,6 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
   ], [canManage, i18n.language, t])
 
   if (users.isPending || (canManage && roleAdministration.isPending)) return <p role="status">{t('common:loading')}</p>
-  if (users.isError) return <AccessError error={users.error} onRetry={retryUsers} />
-  if (canManage && roleAdministration.isError) return <AccessError error={roleAdministration.error} onRetry={retryRoles} />
-
   return <section className="flex flex-col gap-5" aria-labelledby="users-title">
     <div><h1 id="users-title" className="text-2xl font-semibold tracking-tight">{t('usersTitle')}</h1></div>
     <Card>
@@ -99,39 +96,30 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
       <CardContent>
         <DataTable
           columns={userColumns}
-          data={users.data.users}
+          data={users.data?.users ?? []}
           search={userSearch}
           onSearchChange={resetPaging}
           searchPlaceholder={t('searchUsers')}
           clearSearchLabel={t('clearSearch')}
-          emptyMessage={userSearch ? t('noSearchResults') : t('noUsers')}
+          emptyMessage={users.isError && !users.data ? t('common:refreshPage') : userSearch ? t('noSearchResults') : t('noUsers')}
           sorting={[{ id: userSort, desc: userDirection === 'desc' }]}
           onSortingChange={handleSorting}
           manualFiltering
           manualSorting
         />
         {users.isFetching && !users.isPending ? <p role="status" className="mt-3 text-sm text-muted-foreground">{t('common:loading')}</p> : null}
-        <PageNavigation hasPrevious={userHistory.length > 0} hasNext={Boolean(users.data.nextCursor)} loading={users.isFetching} onPrevious={() => { const previous = userHistory[userHistory.length - 1] ?? ''; setUserHistory((current) => current.slice(0, -1)); setUserCursor(previous) }} onNext={() => { if (!users.data.nextCursor) return; setUserHistory((current) => [...current, userCursor]); setUserCursor(users.data.nextCursor) }} t={(key) => t(key as never)} />
+        <PageNavigation hasPrevious={userHistory.length > 0} hasNext={Boolean(users.data?.nextCursor)} loading={users.isFetching} onPrevious={() => { const previous = userHistory[userHistory.length - 1] ?? ''; setUserHistory((current) => current.slice(0, -1)); setUserCursor(previous) }} onNext={() => { if (!users.data?.nextCursor) return; setUserHistory((current) => [...current, userCursor]); setUserCursor(users.data.nextCursor) }} t={(key) => t(key as never)} />
       </CardContent>
     </Card>
-    <UserAssignmentDialog key={activeAssignmentUser?.id ?? 'none'} open={assignmentOpen} user={activeAssignmentUser} roles={roleList} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin} api={api} canManage={canManage} assignmentGeneration={assignmentGeneration} onClose={() => setAssignmentOpen(false)} onDone={(_userID, generation) => { if (generation !== assignmentGenerationRef.current) return; setAssignmentOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }); void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] }) }} onReload={async () => {
-      if (!activeAssignmentUser) return
-      const result = await users.refetch()
-      const refreshed = result.data?.users.find((item) => item.id === activeAssignmentUser.id)
-      if (refreshed) {
-        setAssignmentUser(refreshed)
-        useAccessDraftStore.getState().setAssignment(refreshed.id, undefined)
-      }
-    }} />
+    <UserAssignmentDialog key={activeAssignmentUser?.id ?? 'none'} open={assignmentOpen} user={activeAssignmentUser} roles={roleList} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin} api={api} canManage={canManage} assignmentGeneration={assignmentGeneration} onClose={() => setAssignmentOpen(false)} onDone={(_userID, generation) => { if (generation !== assignmentGenerationRef.current) return; setAssignmentOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }); void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] }) }} />
   </section>
 }
 
-export function UserAssignmentDialog({ api, user, roles, actorPermissions, actorSuperAdmin = false, canManage = true, open, assignmentGeneration, onClose, onDone, onReload }: { api: ApiClient; user?: AccessUser; roles: Role[]; actorPermissions?: string[]; actorSuperAdmin?: boolean; canManage?: boolean; open: boolean; assignmentGeneration: number; onClose: () => void; onDone: (userID: string, generation: number) => void; onReload: () => Promise<void> }) {
+export function UserAssignmentDialog({ api, user, roles, actorPermissions, actorSuperAdmin = false, canManage = true, open, assignmentGeneration, onClose, onDone }: { api: ApiClient; user?: AccessUser; roles: Role[]; actorPermissions?: string[]; actorSuperAdmin?: boolean; canManage?: boolean; open: boolean; assignmentGeneration: number; onClose: () => void; onDone: (userID: string, generation: number) => void }) {
   const { t } = useTranslation(['access', 'problems', 'common'])
   const queryClient = useQueryClient()
   const assignment = useAccessDraftStore((state) => user ? state.assignments[user.id] : undefined)
   const setAssignment = useAccessDraftStore((state) => state.setAssignment)
-  const [error, setError] = useState<unknown>()
   const initialRoles = useMemo(() => user?.roles.map((role) => role.id).slice().sort() ?? [], [user])
   useEffect(() => {
     if (!open) return
@@ -152,9 +140,8 @@ export function UserAssignmentDialog({ api, user, roles, actorPermissions, actor
     setAssignment(user.id, { ...(existing ?? current), ...patch })
     return true
   }
-  const update = (patch: Partial<typeof current>) => { setError(undefined); updateDraft(patch) }
+  const update = (patch: Partial<typeof current>) => { updateDraft(patch) }
   const resetDraft = () => {
-    setError(undefined)
     if (user) setAssignment(user.id, { userID: user.id, authVersion: user.authVersion, roleIDs: initialRoles, submitting: false, conflict: false, validationError: false, invalidRoleSelection: false })
   }
   const beginSubmission = (): Submission => {
@@ -186,14 +173,18 @@ export function UserAssignmentDialog({ api, user, roles, actorPermissions, actor
       void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] })
       const existing = user ? state.assignments[user.id] : undefined
       if (!user || existing?.userID !== submission.userID || existing?.submissionID !== submission.submissionID) return
-      setError(undefined)
       setAssignment(user.id, undefined)
+      notifySuccess(t('assignmentsSaved'))
       onDone(user.id, assignmentGeneration)
     },
     onError: (error, submission) => {
       if (!submission || !updateDraft({ submitting: false }, submission)) return
-      if (isStaleRevision(error)) updateDraft({ conflict: true }, submission)
-      else if (!(error instanceof Error && (error.message === 'invalid roles' || error.message === 'stale draft'))) setError(error)
+      if (isStaleRevision(error)) {
+        updateDraft({ conflict: true }, submission)
+        notifyRequestError(error, t, { title: t('conflictTitle'), description: t('draftConflictDescription') })
+      } else if (!(error instanceof Error && (error.message === 'invalid roles' || error.message === 'stale draft'))) {
+        notifyRequestError(error, t, { title: t('saveAssignments') })
+      }
     },
   })
   if (!user || !canManage) return null
@@ -201,14 +192,12 @@ export function UserAssignmentDialog({ api, user, roles, actorPermissions, actor
   return <Dialog open={open} onOpenChange={(value) => { if (!value) onClose() }}>
     <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
       <DialogHeader><DialogTitle>{t('assignRoles')}</DialogTitle><DialogDescription>{user.name} · {user.email}</DialogDescription></DialogHeader>
-      {error !== undefined ? <AccessError error={error} /> : null}
-      {current.conflict ? <AccessError error={new ApiProblemError({ type: '/problems/stale-revision', title: 'stale revision', status: 409, code: 'stale_revision' })} descriptionOverride={t('draftConflictDescription')} reloadLabel={t('reloadLatest')} onReload={() => void onReload()} /> : null}
       <fieldset className="flex flex-col gap-2" aria-describedby={current.validationError ? 'assignment-roles-error' : undefined}>
         <legend className="text-sm font-medium">{t('role')}</legend>
-        {roles.map((role) => { const allowed = actorPermissions === undefined ? true : canAssignRole(role, actorPermissions, actorSuperAdmin); return <label key={role.id} className="flex items-center gap-3 rounded-md border p-3 text-sm"><Checkbox checked={current.roleIDs.includes(role.id)} onCheckedChange={(value) => update({ roleIDs: value === true ? [...current.roleIDs, role.id] : current.roleIDs.filter((id) => id !== role.id), validationError: false, invalidRoleSelection: false })} aria-label={role.name} disabled={!allowed || current.submitting || mutation.isPending} />{role.name}{!allowed ? <span className="ml-auto text-xs text-muted-foreground">{t('unavailable')}</span> : null}</label> })}
+        {roles.map((role) => { const allowed = actorPermissions === undefined ? true : canAssignRole(role, actorPermissions, actorSuperAdmin); return <label key={role.id} className="flex items-center gap-3 rounded-md border p-3 text-sm"><Checkbox checked={current.roleIDs.includes(role.id)} onCheckedChange={(value) => update({ roleIDs: value === true ? [...current.roleIDs, role.id] : current.roleIDs.filter((id) => id !== role.id), validationError: false, invalidRoleSelection: false })} aria-label={role.name} disabled={!allowed || current.submitting || mutation.isPending || current.conflict} />{role.name}{!allowed ? <span className="ml-auto text-xs text-muted-foreground">{t('unavailable')}</span> : null}</label> })}
         {current.validationError ? <FieldError id="assignment-roles-error">{current.invalidRoleSelection ? t('invalidRoleSelection') : t('requiredRole')}</FieldError> : null}
       </fieldset>
-      <DialogFooter><Button type="button" variant="ghost" onClick={resetDraft}>{t('common:reset')}</Button><DialogClose asChild><Button type="button" variant="outline">{t('common:cancel')}</Button></DialogClose><Button type="button" disabled={current.submitting || mutation.isPending || current.roleIDs.length === 0 || !hasChanges} onClick={() => { if (!current.submitting && !mutation.isPending) mutation.mutate(beginSubmission()) }}><Save aria-hidden="true" />{current.submitting || mutation.isPending ? t('saving') : t('saveAssignments')}</Button></DialogFooter>
+      <DialogFooter><Button type="button" variant="ghost" onClick={resetDraft} disabled={current.conflict}>{t('common:reset')}</Button><DialogClose asChild><Button type="button" variant="outline">{t('common:cancel')}</Button></DialogClose><Button type="button" disabled={current.submitting || mutation.isPending || current.conflict || current.roleIDs.length === 0 || !hasChanges} onClick={() => { if (!current.submitting && !mutation.isPending && !current.conflict) mutation.mutate(beginSubmission()) }}><Save aria-hidden="true" />{current.submitting || mutation.isPending ? t('saving') : t('saveAssignments')}</Button></DialogFooter>
     </DialogContent>
   </Dialog>
 }
@@ -229,7 +218,6 @@ export function InvitationForm({ api, roles, open, onDone, assignableRoleIDs }: 
   const queryClient = useQueryClient()
   const invitation = useAccessDraftStore((state) => state.invitation)
   const setInvitation = useAccessDraftStore((state) => state.setInvitation)
-  const [error, setError] = useState<unknown>()
   useEffect(() => {
     if (open && !invitation) setInvitation({ name: '', email: '', roleIDs: [], submitting: false })
   }, [invitation, open, setInvitation])
@@ -242,8 +230,8 @@ export function InvitationForm({ api, roles, open, onDone, assignableRoleIDs }: 
     setInvitation({ ...(existing ?? current), ...patch })
     return true
   }
-  const update = (patch: Partial<typeof current>) => { setError(undefined); updateDraft(patch) }
-  const resetDraft = () => { setError(undefined); setInvitation({ name: '', email: '', roleIDs: [], submitting: false }) }
+  const update = (patch: Partial<typeof current>) => { updateDraft(patch) }
+  const resetDraft = () => { setInvitation({ name: '', email: '', roleIDs: [], submitting: false }) }
   const beginSubmission = (): Submission => {
     const state = useAccessDraftStore.getState()
     const submission = { ownerID: state.ownerID, submissionID: nextDraftSubmissionID() }
@@ -270,18 +258,17 @@ export function InvitationForm({ api, roles, open, onDone, assignableRoleIDs }: 
       if (state.ownerID !== submission.ownerID) return
       void queryClient.invalidateQueries({ queryKey: ['access', 'invitations'] })
       if (state.invitation?.submissionID !== submission.submissionID) return
-      setError(undefined)
       setInvitation(undefined)
+      notifySuccess(t('invitationCreated'))
       onDone()
     },
     onError: (error, submission) => {
       if (!submission || !updateDraft({ submitting: false }, submission)) return
-      if (!(error instanceof Error && (error.message === 'validation' || error.message === 'stale draft'))) setError(error)
+      if (!(error instanceof Error && (error.message === 'validation' || error.message === 'stale draft'))) notifyRequestError(error, t, { title: t('sendInvitation') })
     },
   })
   return <>
     <DialogHeader><DialogTitle>{t('inviteUser')}</DialogTitle></DialogHeader>
-    {error !== undefined ? <AccessError error={error} /> : null}
     <form className="flex flex-col gap-5" noValidate onSubmit={(event) => { event.preventDefault(); if (!current.submitting && !mutation.isPending) mutation.mutate(beginSubmission()) }}>
       <FieldGroup>
         <Field data-invalid={current.validationError === 'name'}><FieldLabel htmlFor="invite-name">{t('inviteName')}</FieldLabel><Input id="invite-name" value={current.name} onChange={(event) => update({ name: event.target.value, validationError: undefined })} aria-invalid={current.validationError === 'name'} autoComplete="name" disabled={current.submitting || mutation.isPending} />{current.validationError === 'name' ? <FieldError>{t('problems:fields.invalidName')}</FieldError> : null}</Field>

@@ -1,6 +1,5 @@
 import { useTranslation } from 'react-i18next'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
 import { ApiProblemError, ApiProtocolError, ApiTransportError } from '@/shared/api/client'
 import { translateProblem } from '@/shared/api/problems'
 
@@ -34,7 +33,7 @@ type AccessErrorProps = {
   descriptionOverride?: string
 }
 
-export function AccessError({ error, onRetry, onReload, reloadLabel, descriptionOverride }: AccessErrorProps) {
+export function AccessError({ error, descriptionOverride }: AccessErrorProps) {
   const { t } = useTranslation(['access', 'common', 'problems'])
   const kind = accessFailureKind(error)
   const title = kind === 'dependency' ? t('unavailableTitle') : t(`${kind}Title`)
@@ -43,14 +42,11 @@ export function AccessError({ error, onRetry, onReload, reloadLabel, description
     : kind === 'dependency'
       ? t('unavailableDescription')
       : translateProblem(error, t))
-  const action = kind === 'conflict' ? onReload : kind === 'dependency' ? onRetry : undefined
-
   return (
     <Alert variant="destructive" role="alert" aria-live="polite">
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription className="flex flex-wrap items-center gap-3">
         <span>{description}</span>
-        {action && <Button type="button" variant="outline" size="sm" onClick={action}>{kind === 'conflict' ? reloadLabel ?? t('reload') : t('common:retry')}</Button>}
       </AlertDescription>
     </Alert>
   )

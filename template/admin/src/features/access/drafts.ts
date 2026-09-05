@@ -49,6 +49,7 @@ export type EmailSettingsDraft = {
   revision: number
   configured: boolean
   submitting: boolean
+  conflict: boolean
 }
 
 type DraftState = {

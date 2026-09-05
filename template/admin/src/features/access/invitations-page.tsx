@@ -21,11 +21,11 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import type { ApiClient } from '@/shared/api/client'
 import type { Invitation } from '@/shared/api/contracts'
-import { AccessError } from './access-error'
 import { DataTable, SortableHeader } from './data-table'
 import { InvitationForm } from './users-page'
 import { PageNavigation, RoleBadges, canAssignRole, formatDate } from './access-components'
 import { invitationsOptions, roleOptionsOptions } from './queries'
+import { notifyRequestError, notifySuccess, useRequestErrorToast } from '@/shared/feedback'
 
 type InvitationAction = 'resend' | 'renew' | 'revoke'
 type InvitationSort = 'name' | 'email' | 'createdAt' | 'expiresAt'
@@ -42,7 +42,6 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
   const [direction, setDirection] = useState<'asc' | 'desc'>('desc')
   const [inviteOpen, setInviteOpen] = useState(false)
   const [action, setAction] = useState<{ invitation: Invitation; kind: InvitationAction }>()
-  const [notice, setNotice] = useState<unknown>()
   const invitations = useQuery(invitationsOptions(api, { cursor, q: search, roleId: roleFilter, status: statusFilter || undefined, sort, direction }))
   const canReadRoles = Boolean(actorSuperAdmin || actorPermissions?.includes('roles.read'))
   const roleOptions = useQuery({ ...roleOptionsOptions(api), enabled: Boolean(api.getRoleOptions) && canReadRoles })
@@ -53,14 +52,17 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
     enabled: canManage,
     staleTime: 10_000,
   })
+  useRequestErrorToast(invitations.error, invitations.isError, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
+  useRequestErrorToast(roleOptions.error, roleOptions.isError && canReadRoles, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
+  useRequestErrorToast(roleAdministration.error, roleAdministration.isError && canManage, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
   const resend = useMutation({
     retry: false,
-    mutationFn: async (invitation: Invitation) => {
+    mutationFn: async ({ invitation, kind }: { invitation: Invitation; kind: 'resend' | 'renew' }) => {
       if (!api.resendInvitation) throw new Error('missing resendInvitation')
-      return api.resendInvitation(invitation.id)
+      return { result: await api.resendInvitation(invitation.id), kind }
     },
-    onSuccess: () => { setAction(undefined); setNotice(undefined); void queryClient.invalidateQueries({ queryKey: ['access', 'invitations'] }) },
-    onError: setNotice,
+    onSuccess: (_result, variables) => { setAction(undefined); notifySuccess(t(variables.kind === 'renew' ? 'invitationRenewed' : 'invitationResent')); void queryClient.invalidateQueries({ queryKey: ['access', 'invitations'] }) },
+    onError: (error, variables) => notifyRequestError(error, t, { title: t(variables?.kind === 'renew' ? 'renewAndSend' : 'resend') }),
   })
   const revoke = useMutation({
     retry: false,
@@ -68,8 +70,8 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
       if (!api.revokeInvitation) throw new Error('missing revokeInvitation')
       await api.revokeInvitation(invitation.id)
     },
-    onSuccess: () => { setAction(undefined); setNotice(undefined); void queryClient.invalidateQueries({ queryKey: ['access', 'invitations'] }) },
-    onError: setNotice,
+    onSuccess: () => { setAction(undefined); notifySuccess(t('invitationRevoked')); void queryClient.invalidateQueries({ queryKey: ['access', 'invitations'] }) },
+    onError: (error) => notifyRequestError(error, t, { title: t('revoke') }),
   })
 
   const resetPaging = (value: string) => { setSearch(value); setCursor(''); setHistory([]) }
@@ -84,8 +86,6 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
   const roleList = useMemo(() => roleAdministration.data?.roles ?? [], [roleAdministration.data?.roles])
   const roleFilterOptions = roleOptions.data?.roles ?? []
   const assignableRoleIDs = useMemo(() => new Set(roleList.filter((role) => canAssignRole(role, actorPermissions, actorSuperAdmin)).map((role) => role.id)), [actorPermissions, actorSuperAdmin, roleList])
-  const retryInvitations = () => void invitations.refetch()
-  const retryRoles = () => void roleAdministration.refetch()
   const expired = (invitation: Invitation) => new Date(invitation.expiresAt).getTime() <= Date.now()
 
   const columns = useMemo<ColumnDef<Invitation, unknown>[]>(() => [
@@ -126,7 +126,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
         const busy = resend.isPending || revoke.isPending
         const unavailableReason = t('invitationActionUnavailable')
         const actionButton = (kind: InvitationAction, label: string, icon: React.ReactNode, variant: 'outline' | 'ghost') => {
-          const button = <Button type="button" variant={variant} size="sm" disabled={!allowed || busy} aria-label={!allowed ? `${label}: ${unavailableReason}` : label} onClick={() => { setNotice(undefined); setAction({ invitation: row.original, kind }) }}>{icon}{label}</Button>
+          const button = <Button type="button" variant={variant} size="sm" disabled={!allowed || busy} aria-label={!allowed ? `${label}: ${unavailableReason}` : label} onClick={() => { setAction({ invitation: row.original, kind }) }}>{icon}{label}</Button>
           if (allowed) return button
           return <TooltipProvider><Tooltip><TooltipTrigger asChild><span tabIndex={0} className="inline-flex" aria-label={`${label}: ${unavailableReason}`}>{button}</span></TooltipTrigger><TooltipContent>{unavailableReason}</TooltipContent></Tooltip></TooltipProvider>
         }
@@ -136,23 +136,19 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
   ], [actorPermissions, actorSuperAdmin, canManage, i18n.language, resend.isPending, revoke.isPending, t])
 
   if (invitations.isPending || (canManage && roleAdministration.isPending)) return <p role="status">{t('common:loading')}</p>
-  if (invitations.isError) return <AccessError error={invitations.error} onRetry={retryInvitations} />
-  if (canManage && roleAdministration.isError) return <AccessError error={roleAdministration.error} onRetry={retryRoles} />
-
   return <section className="flex flex-col gap-5" aria-labelledby="invitations-title">
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="invitations-title" className="text-2xl font-semibold tracking-tight">{t('invitationsTitle')}</h1></div>{canManage ? <Button type="button" onClick={() => { setNotice(undefined); setInviteOpen(true) }}><UserPlus aria-hidden="true" data-icon="inline-start" />{t('inviteUser')}</Button> : null}</div>
-    {notice !== undefined ? <AccessError error={notice} /> : null}
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="invitations-title" className="text-2xl font-semibold tracking-tight">{t('invitationsTitle')}</h1></div>{canManage ? <Button type="button" onClick={() => setInviteOpen(true)}><UserPlus aria-hidden="true" data-icon="inline-start" />{t('inviteUser')}</Button> : null}</div>
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('invitations')}</CardTitle></CardHeader>
       <CardContent>
         <DataTable
           columns={columns}
-          data={invitations.data.invitations}
+          data={invitations.data?.invitations ?? []}
           search={search}
           onSearchChange={resetPaging}
           searchPlaceholder={t('searchInvitations')}
           clearSearchLabel={t('clearSearch')}
-          emptyMessage={search || roleFilter || statusFilter ? t('noSearchResults') : t('noInvitations')}
+          emptyMessage={invitations.isError && !invitations.data ? t('common:refreshPage') : search || roleFilter || statusFilter ? t('noSearchResults') : t('noInvitations')}
           sorting={[{ id: sort, desc: direction === 'desc' }]}
           onSortingChange={handleSorting}
           manualFiltering
@@ -160,7 +156,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
           toolbar={<div className="flex flex-wrap items-center gap-2">{canReadRoles ? <Select value={roleFilter || 'all'} onValueChange={(value) => setFilter(setRoleFilter, value)}><SelectTrigger className="w-44" aria-label={t('filterByRole')}><SelectValue placeholder={t('allRoles')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allRoles')}</SelectItem>{roleFilterOptions.map((role) => <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>)}</SelectGroup></SelectContent></Select> : null}<Select value={statusFilter || 'all'} onValueChange={(value) => { setStatusFilter(value === 'all' ? '' : value as 'pending' | 'expired'); setCursor(''); setHistory([]) }}><SelectTrigger className="w-36" aria-label={t('filterByStatus')}><SelectValue placeholder={t('allStatuses')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allStatuses')}</SelectItem><SelectItem value="pending">{t('pending')}</SelectItem><SelectItem value="expired">{t('expired')}</SelectItem></SelectGroup></SelectContent></Select></div>}
         />
         {invitations.isFetching && !invitations.isPending ? <p role="status" className="mt-3 text-sm text-muted-foreground">{t('common:loading')}</p> : null}
-        <PageNavigation hasPrevious={history.length > 0} hasNext={Boolean(invitations.data.nextCursor)} loading={invitations.isFetching} onPrevious={() => { const previous = history[history.length - 1] ?? ''; setHistory((current) => current.slice(0, -1)); setCursor(previous) }} onNext={() => { if (!invitations.data.nextCursor) return; setHistory((current) => [...current, cursor]); setCursor(invitations.data.nextCursor) }} t={(key) => t(key as never)} />
+        <PageNavigation hasPrevious={history.length > 0} hasNext={Boolean(invitations.data?.nextCursor)} loading={invitations.isFetching} onPrevious={() => { const previous = history[history.length - 1] ?? ''; setHistory((current) => current.slice(0, -1)); setCursor(previous) }} onNext={() => { if (!invitations.data?.nextCursor) return; setHistory((current) => [...current, cursor]); setCursor(invitations.data.nextCursor) }} t={(key) => t(key as never)} />
       </CardContent>
     </Card>
     <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
@@ -174,7 +170,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t('common:cancel')}</AlertDialogCancel>
-          <AlertDialogAction disabled={resend.isPending || revoke.isPending} onClick={() => { if (!action) return; if (action.kind === 'revoke') revoke.mutate(action.invitation); else resend.mutate(action.invitation) }}>{action?.kind === 'revoke' ? t('revoke') : action?.kind === 'renew' ? t('renewAndSend') : t('resend')}</AlertDialogAction>
+          <AlertDialogAction disabled={resend.isPending || revoke.isPending} onClick={() => { if (!action) return; if (action.kind === 'revoke') revoke.mutate(action.invitation); else resend.mutate({ invitation: action.invitation, kind: action.kind }) }}>{action?.kind === 'revoke' ? t('revoke') : action?.kind === 'renew' ? t('renewAndSend') : t('resend')}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

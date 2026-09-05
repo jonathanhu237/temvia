@@ -117,6 +117,24 @@ describe('email settings page', () => {
     expect(testEmailSettings).not.toHaveBeenCalled()
   })
 
+  it('announces that email settings were saved after confirmation', async () => {
+    const saveEmailSettings = vi.fn().mockResolvedValue({ configured: true, host: 'smtp.example.com', port: 587, security: 'starttls', passwordSet: false, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 1 })
+    const api = mockApi({
+      getEmailSettings: vi.fn().mockResolvedValue({ configured: false, passwordSet: false, revision: 0 }),
+      saveEmailSettings,
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<EmailSettingsPage api={api} />)
+
+    await screen.findByRole('heading', { name: 'System settings' })
+    await user.click(screen.getByRole('combobox', { name: 'Default email language' }))
+    await user.click(await screen.findByRole('option', { name: 'English' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(saveEmailSettings).toHaveBeenCalledOnce())
+    expect(toast.success).toHaveBeenCalledWith('Email settings saved.')
+  })
+
   it('keeps fields and mutation controls unavailable to settings readers', async () => {
     const api = mockApi({
       getEmailSettings: vi.fn().mockResolvedValue({ configured: true, host: 'smtp.example.com', port: 587, security: 'starttls', username: 'mailer', passwordSet: true, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 3 }),
@@ -131,11 +149,9 @@ describe('email settings page', () => {
     expect(within(screen.getByRole('group', { name: 'Authentication' })).getByLabelText('Use SMTP authentication')).toBeDisabled()
   })
 
-  it('keeps the draft on a conflict and lets the administrator load the latest settings', async () => {
+  it('keeps the draft on a conflict and requires a browser refresh', async () => {
     const saveEmailSettings = vi.fn().mockRejectedValue(new ApiProblemError({ type: '/problems/stale-revision', title: 'stale revision', status: 409, code: 'stale_revision' }))
-    const getEmailSettings = vi.fn()
-      .mockResolvedValueOnce({ configured: false, passwordSet: false, revision: 0 })
-      .mockResolvedValueOnce({ configured: true, host: 'smtp.example.com', port: 587, security: 'starttls', username: '', passwordSet: false, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 1 })
+    const getEmailSettings = vi.fn().mockResolvedValue({ configured: false, passwordSet: false, revision: 0 })
     const api = mockApi({ getEmailSettings, saveEmailSettings })
     const user = userEvent.setup()
     renderWithQueryClient(<EmailSettingsPage api={api} />)
@@ -144,11 +160,10 @@ describe('email settings page', () => {
     await user.click(screen.getByRole('combobox', { name: 'Default email language' }))
     await user.click(await screen.findByRole('option', { name: 'English' }))
     await user.click(screen.getByRole('button', { name: 'Save' }))
-    expect(await screen.findByRole('button', { name: 'Discard draft and reload' })).toBeVisible()
-
-    await user.click(screen.getByRole('button', { name: 'Discard draft and reload' }))
-    await waitFor(() => expect(getEmailSettings).toHaveBeenCalledTimes(2))
-    expect(await screen.findByDisplayValue('smtp.example.com')).toBeVisible()
+    await waitFor(() => expect(saveEmailSettings).toHaveBeenCalledOnce())
+    expect(screen.getByLabelText('SMTP host')).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Discard draft and reload' })).not.toBeInTheDocument()
+    expect(toast.error).toHaveBeenCalledWith('This record changed', { description: 'Another administrator changed this record. Refresh the page before trying again. Refreshing will discard unsaved changes.' })
   })
 })

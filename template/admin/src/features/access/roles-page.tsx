@@ -23,11 +23,11 @@ import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { Permission, PermissionCombination, Role } from '@/shared/api/contracts'
-import { AccessError } from './access-error'
 import { AssignmentCount, AssignmentCountInfo, BuiltInRoleIndicator } from './access-components'
 import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { roleQueryKey, rolesOptions, rolesQueryKey } from './queries'
+import { notifyRequestError, notifySuccess, useRequestErrorToast } from '@/shared/feedback'
 
 export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = false }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean }) {
   const { t } = useTranslation(['access', 'problems', 'common'])
@@ -39,7 +39,6 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
   const [deleteTarget, setDeleteTarget] = useState<Role | undefined>()
   const [search, setSearch] = useState('')
   const [sorting, setSorting] = useState<SortingState>([])
-  const [notice, setNotice] = useState<unknown>()
   const [editorGeneration, setEditorGeneration] = useState(0)
   const editorGenerationRef = useRef(0)
   const advanceEditorGeneration = () => {
@@ -48,6 +47,7 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     setEditorGeneration(next)
   }
   const roles = useMemo(() => query.data?.roles ?? [], [query.data?.roles])
+  useRequestErrorToast(query.error, query.isError, t, { title: t('unavailableTitle'), description: t('unavailableDescription') })
   const selectedRole = selected ? roles.find((role) => role.id === selected.id) ?? selected : undefined
   const filteredRoles = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase()
@@ -61,13 +61,13 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
       await api.deleteRole(role.id)
     },
     onSuccess: (_, role) => {
-      setNotice(undefined)
       setSelected((current) => current?.id === role.id ? undefined : current)
       setDeleteTarget(undefined)
       useAccessDraftStore.getState().setRoleEdit(role.id, undefined)
+      notifySuccess(t('roleDeleted'))
       void queryClient.invalidateQueries({ queryKey: rolesQueryKey })
     },
-    onError: setNotice,
+    onError: (error) => notifyRequestError(error, t, { title: t('deleteRole') }),
   })
 
   const openCreate = () => {
@@ -75,13 +75,11 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     setSelected(undefined)
     setEditorOpen(true)
     setDetailOpen(false)
-    setNotice(undefined)
   }
   const openDetail = useCallback((role: Role) => {
     setSelected(role)
     setDetailOpen(true)
     setEditorOpen(false)
-    setNotice(undefined)
   }, [])
   const openEdit = useCallback((role: Role) => {
     if (!canManage || role.system) return
@@ -89,25 +87,10 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     setSelected(role)
     setDetailOpen(false)
     setEditorOpen(true)
-    setNotice(undefined)
   }, [canManage])
   const handleSorting: OnChangeFn<SortingState> = (updater) => {
     setSorting((current) => typeof updater === 'function' ? updater(current) : updater)
   }
-  const reloadRoles = async () => {
-    setNotice(undefined)
-    const result = await query.refetch()
-    if (result.error || !result.data || !selectedRole) return
-    const refreshed = result.data.roles.find((role) => role.id === selectedRole.id)
-    setSelected(refreshed)
-    if (!refreshed) {
-      setDetailOpen(false)
-      setEditorOpen(false)
-      return
-    }
-    useAccessDraftStore.getState().setRoleEdit(refreshed.id, undefined)
-  }
-
   const columns = useMemo<ColumnDef<Role, unknown>[]>(() => [
     {
       accessorKey: 'name',
@@ -155,14 +138,11 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
   ], [canManage, openDetail, openEdit, t])
 
   if (query.isPending) return <p role="status">{t('common:loading')}</p>
-  if (query.isError) return <AccessError error={query.error} onRetry={() => void query.refetch()} />
-
   return <section className="flex flex-col gap-5" aria-labelledby="roles-title">
     <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1></div>{canManage ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" data-icon="inline-start" />{t('createRole')}</Button> : null}</div>
-    {notice !== undefined ? <AccessError error={notice} onReload={() => void reloadRoles()} /> : null}
     <Card>
       <CardHeader><CardTitle className="text-lg">{t('roles')}</CardTitle></CardHeader>
-      <CardContent><DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} /></CardContent>
+      <CardContent>{query.isError && !query.data ? <p role="status" className="text-sm text-muted-foreground">{t('common:refreshPage')}</p> : <DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} />}</CardContent>
     </Card>
     <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
       <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
@@ -171,7 +151,7 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     </Dialog>
     <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
       <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
-        <RoleEditor key={selectedRole?.id ?? 'new'} api={api} role={selectedRole} permissions={query.data?.permissions ?? []} combinations={query.data?.combinations ?? []} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin || actorPermissions === undefined} open={editorOpen} editorGeneration={editorGeneration} onDone={(role, generation) => { if (generation !== editorGenerationRef.current) return; setSelected(role); setEditorOpen(false); void queryClient.invalidateQueries({ queryKey: rolesQueryKey }); void queryClient.invalidateQueries({ queryKey: roleQueryKey(role.id) }) }} onReload={reloadRoles} />
+        <RoleEditor key={selectedRole?.id ?? 'new'} api={api} role={selectedRole} permissions={query.data?.permissions ?? []} combinations={query.data?.combinations ?? []} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin || actorPermissions === undefined} open={editorOpen} editorGeneration={editorGeneration} onDone={(role, generation) => { if (generation !== editorGenerationRef.current) return; setSelected(role); setEditorOpen(false); void queryClient.invalidateQueries({ queryKey: rolesQueryKey }); void queryClient.invalidateQueries({ queryKey: roleQueryKey(role.id) }) }} />
       </DialogContent>
     </Dialog>
     <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open) setDeleteTarget(undefined) }}>
@@ -199,14 +179,13 @@ function RoleDetail({ role, permissions, canManage, onEdit }: { role: Role; perm
   </>
 }
 
-function RoleEditor({ api, role, permissions, combinations, actorPermissions, actorSuperAdmin, open, editorGeneration, onDone, onReload }: { api: ApiClient; role?: Role; permissions: Permission[]; combinations: PermissionCombination[]; actorPermissions?: string[]; actorSuperAdmin: boolean; open: boolean; editorGeneration: number; onDone: (role: Role, generation: number) => void; onReload: () => Promise<void> }) {
+function RoleEditor({ api, role, permissions, combinations, actorPermissions, actorSuperAdmin, open, editorGeneration, onDone }: { api: ApiClient; role?: Role; permissions: Permission[]; combinations: PermissionCombination[]; actorPermissions?: string[]; actorSuperAdmin: boolean; open: boolean; editorGeneration: number; onDone: (role: Role, generation: number) => void }) {
   const { t } = useTranslation(['access', 'problems', 'common'])
   const queryClient = useQueryClient()
   const roleCreate = useAccessDraftStore((state) => state.roleCreate)
   const roleEdit = useAccessDraftStore((state) => role ? state.roleEdits[role.id] : undefined)
   const setRoleCreate = useAccessDraftStore((state) => state.setRoleCreate)
   const setRoleEdit = useAccessDraftStore((state) => state.setRoleEdit)
-  const [error, setError] = useState<unknown>()
   const draft = role ? roleEdit : roleCreate
   const initial = useMemo(() => role
     ? { id: role.id, revision: role.revision, name: role.name, description: role.description, permissions: role.permissions.slice(), explicitPermissions: role.permissions.slice() }
@@ -239,7 +218,6 @@ function RoleEditor({ api, role, permissions, combinations, actorPermissions, ac
     return true
   }
   const update = (patch: Partial<typeof current>) => {
-    setError(undefined)
     updateDraft(patch)
   }
   const beginSubmission = (): Submission => {
@@ -250,7 +228,6 @@ function RoleEditor({ api, role, permissions, combinations, actorPermissions, ac
     return submission
   }
   const resetDraft = () => {
-    setError(undefined)
     const next = { ...initial, submitting: false, conflict: false, validationError: undefined }
     if (role) setRoleEdit(role.id, next)
     else setRoleCreate(next)
@@ -291,16 +268,20 @@ function RoleEditor({ api, role, permissions, combinations, actorPermissions, ac
       if (role) void queryClient.invalidateQueries({ queryKey: roleQueryKey(role.id) })
       const existing = role ? state.roleEdits[role.id] : state.roleCreate
       if (existing?.submissionID !== submission.submissionID) return
-      setError(undefined)
       if (role) setRoleEdit(role.id, undefined)
       else setRoleCreate(undefined)
+      notifySuccess(t(role ? 'roleUpdated' : 'roleCreated'))
       onDone(saved, editorGeneration)
     },
     onError: (error, submission) => {
       if (!submission) return
       if (!updateDraft({ submitting: false }, submission)) return
-      if (isStaleRevision(error)) updateDraft({ conflict: true }, submission)
-      else if (!(error instanceof Error && (error.message === 'invalid name' || error.message === 'invalid permissions'))) setError(error)
+      if (isStaleRevision(error)) {
+        updateDraft({ conflict: true }, submission)
+        notifyRequestError(error, t, { title: t('conflictTitle'), description: t('draftConflictDescription') })
+      } else if (!(error instanceof Error && (error.message === 'invalid name' || error.message === 'invalid permissions'))) {
+        notifyRequestError(error, t, { title: t(role ? 'saveRole' : 'createRole') })
+      }
     },
   })
 
@@ -308,18 +289,16 @@ function RoleEditor({ api, role, permissions, combinations, actorPermissions, ac
     <DialogHeader>
       <DialogTitle>{role ? t('editRole') : t('createRole')}</DialogTitle>
     </DialogHeader>
-    {error !== undefined ? <AccessError error={error} /> : null}
-    {current.conflict ? <AccessError error={new ApiProblemError({ type: '/problems/stale-revision', title: 'stale revision', status: 409, code: 'stale_revision' })} descriptionOverride={t('draftConflictDescription')} reloadLabel={t('reloadLatest')} onReload={() => void onReload()} /> : null}
-    <form className="flex flex-col gap-5" onSubmit={(event) => { event.preventDefault(); if (!current.submitting && !mutation.isPending) mutation.mutate(beginSubmission()) }} noValidate>
+    <form className="flex flex-col gap-5" onSubmit={(event) => { event.preventDefault(); if (!current.submitting && !mutation.isPending && !current.conflict) mutation.mutate(beginSubmission()) }} noValidate>
       <FieldGroup>
         <Field data-invalid={current.validationError === 'name'}>
           <FieldLabel htmlFor="role-name">{t('roleName')}</FieldLabel>
-          <Input id="role-name" value={current.name} onChange={(event) => update({ name: event.target.value, validationError: undefined })} aria-invalid={current.validationError === 'name'} disabled={current.submitting || mutation.isPending} />
+          <Input id="role-name" value={current.name} onChange={(event) => update({ name: event.target.value, validationError: undefined })} aria-invalid={current.validationError === 'name'} disabled={current.submitting || mutation.isPending || current.conflict} />
           {current.validationError === 'name' ? <FieldError>{t('problems:fields.invalidValue')}</FieldError> : null}
         </Field>
         <Field>
           <FieldLabel htmlFor="role-description">{t('roleDescription')}</FieldLabel>
-          <textarea id="role-description" className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={current.description} onChange={(event) => update({ description: event.target.value })} disabled={current.submitting || mutation.isPending} />
+          <textarea id="role-description" className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={current.description} onChange={(event) => update({ description: event.target.value })} disabled={current.submitting || mutation.isPending || current.conflict} />
         </Field>
         <fieldset className="flex flex-col gap-4" aria-describedby={current.validationError === 'permissions' || current.validationError === 'invalidPermissions' ? 'role-permissions-error' : undefined}>
           <legend className="text-sm font-medium">{t('permissions')}</legend>
@@ -332,8 +311,8 @@ function RoleEditor({ api, role, permissions, combinations, actorPermissions, ac
 				const locked = lockedByActor || lockedByFeature
 				const unavailableCombination = !actorSuperAdmin && isWritePermission(permission.key) && !combinationGrantable(permission.key, actorGrantable, combinations)
 				const label = localizedPermission(permission.key, translate)
-				return <label key={permission.key} className="flex items-start gap-3 rounded-md border bg-background p-3">
-					<Checkbox checked={checked} onCheckedChange={(value) => {
+            return <label key={permission.key} className="flex items-start gap-3 rounded-md border bg-background p-3">
+						<Checkbox checked={checked} onCheckedChange={(value) => {
 						const explicit = current.explicitPermissions ?? current.permissions
 						if (value === true) {
 							update({ permissions: addFeaturePermissions(current.permissions, permission.key, combinations), explicitPermissions: Array.from(new Set([...explicit, permission.key])), validationError: undefined })
@@ -346,7 +325,7 @@ function RoleEditor({ api, role, permissions, combinations, actorPermissions, ac
 						// make a role edit destructive and hard to review.
 						const nextPermissions = current.permissions.filter((key) => key !== permission.key)
 						update({ permissions: nextPermissions, explicitPermissions: nextExplicit, validationError: undefined })
-					}} aria-label={label} disabled={locked || unavailableCombination || current.submitting || mutation.isPending} />
+						}} aria-label={label} disabled={locked || unavailableCombination || current.submitting || mutation.isPending || current.conflict} />
 					<span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-sm font-medium">{label}{locked ? <LockKeyhole aria-label={t('permissionRequired')} /> : null}</span><span className="block text-xs text-muted-foreground">{localizedPermissionDescription(permission.key, translate, permission.description)}{locked ? ` · ${t('permissionRequired')}` : ''}</span></span>
               </label>
             })}
@@ -355,9 +334,9 @@ function RoleEditor({ api, role, permissions, combinations, actorPermissions, ac
         </fieldset>
       </FieldGroup>
       <DialogFooter>
-        <Button type="button" variant="ghost" onClick={resetDraft}>{t('common:reset')}</Button>
+        <Button type="button" variant="ghost" onClick={resetDraft} disabled={current.conflict}>{t('common:reset')}</Button>
         <DialogClose asChild><Button type="button" variant="outline">{t('common:cancel')}</Button></DialogClose>
-        <Button type="submit" disabled={current.submitting || mutation.isPending}><Save aria-hidden="true" />{current.submitting || mutation.isPending ? t('saving') : t('saveRole')}</Button>
+        <Button type="submit" disabled={current.submitting || mutation.isPending || current.conflict}><Save aria-hidden="true" />{current.submitting || mutation.isPending ? t('saving') : t('saveRole')}</Button>
       </DialogFooter>
     </form>
   </>

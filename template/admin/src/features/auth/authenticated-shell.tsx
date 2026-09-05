@@ -3,8 +3,6 @@ import { ChevronDown, House, LogOut, Mail, Settings, ShieldCheck, UserRound, Use
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import {
   Sidebar,
@@ -24,7 +22,8 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { PreferencesButtons } from './preferences-menu'
-import { translateProblem } from '@/shared/api/problems'
+import { translateProblemWithFields } from '@/shared/api/problems'
+import { notifyRequestError, notifySuccess } from '@/shared/feedback'
 import type { ApiClient } from '@/shared/api/client'
 import { currentUserQueryKey } from './queries'
 import type { User } from '@/shared/api/contracts'
@@ -35,7 +34,6 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
-  const [logoutError, setLogoutError] = useState<unknown>()
   const hasUsersAccess = Boolean(user.superAdmin || user.permissions?.includes('users.read'))
   const hasInvitationsAccess = Boolean(user.superAdmin || user.permissions?.includes('invitations.read'))
   const hasRolesAccess = Boolean(user.superAdmin || user.permissions?.includes('roles.read'))
@@ -54,15 +52,13 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
     meta: { preserveAccessDraftsOnError: true },
     mutationFn: () => api.logout(),
     onSuccess: () => {
-      setLogoutError(undefined)
       clearAccessDrafts()
       queryClient.removeQueries({ queryKey: currentUserQueryKey })
       queryClient.removeQueries({ queryKey: ['access'] })
+      notifySuccess(t('auth:logoutSuccess'))
       void navigate({ to: '/login', replace: true })
     },
-    onError: (error) => {
-      setLogoutError(error)
-    },
+    onError: (error) => notifyRequestError(error, t, { title: t('auth:logoutFailedTitle'), description: translateProblemWithFields(error, t) }),
   })
 
   return (
@@ -119,7 +115,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
                 <p className="truncate text-xs text-muted-foreground">{user.email}</p>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem disabled={logout.isPending} onSelect={(event) => { event.preventDefault(); setLogoutError(undefined); logout.mutate() }}>
+              <DropdownMenuItem disabled={logout.isPending} onSelect={(event) => { event.preventDefault(); logout.mutate() }}>
                 <LogOut aria-hidden="true" data-icon="inline-start" />
                 {logout.isPending ? t('auth:loggingOut') : t('logout')}
               </DropdownMenuItem>
@@ -137,17 +133,6 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
           <PreferencesButtons className="shrink-0" />
         </header>
         <div className="flex min-h-[calc(100dvh-3.5rem)] flex-1 flex-col gap-5 p-4 sm:p-6 lg:p-8">
-          {logoutError !== undefined && (
-            <Alert variant="destructive" role="alert" aria-live="polite" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <AlertTitle>{t('auth:logoutFailedTitle')}</AlertTitle>
-                <AlertDescription>{translateProblem(logoutError, t)}</AlertDescription>
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => { setLogoutError(undefined); logout.mutate() }}>
-                {t('retry')}
-              </Button>
-            </Alert>
-          )}
           {children}
         </div>
       </SidebarInset>

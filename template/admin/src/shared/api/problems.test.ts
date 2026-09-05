@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { ApiProblemError } from './client'
+import { ApiProblemError, ApiTransportError } from './client'
 import {
   fieldProblemFor,
   fieldMessageKey,
+  isRequestCancelled,
   isInvalidPasswordResetToken,
   isInvalidSetupToken,
   isSetupComplete,
@@ -12,6 +13,7 @@ import {
   translateClientFieldError,
   translatePasswordResetProblem,
   translateProblem,
+  translateProblemWithFields,
 } from './problems'
 import { i18n, initializeI18n } from '@/shared/i18n'
 
@@ -31,6 +33,25 @@ describe('localized problem mapping', () => {
     const field = fieldProblemFor(error, '/email')
     expect(translateFieldProblem(field, i18n.t.bind(i18n))).toBe('Enter a valid email address.')
     expect(translateProblem(new Error('private'), i18n.t.bind(i18n))).toBe('Something went wrong. Try again.')
+  })
+
+  it('adds localized server field guidance to a request error', async () => {
+    await initializeI18n()
+    const error = new ApiProblemError({
+      type: '/problems/validation-failed',
+      title: 'diagnostic title',
+      detail: 'internal detail',
+      status: 400,
+      errors: [{ pointer: '/email', code: 'invalid_email' }],
+    })
+
+    expect(translateProblemWithFields(error, i18n.t.bind(i18n))).toBe('Review the highlighted fields and try again. Enter a valid email address.')
+  })
+
+  it('identifies cancelled transport requests so they stay silent', () => {
+    expect(isRequestCancelled(new ApiTransportError('cancelled', { aborted: true }))).toBe(true)
+    expect(isRequestCancelled(new ApiTransportError('network'))).toBe(false)
+    expect(isRequestCancelled(new Error('cancelled'))).toBe(false)
   })
 
   it.each([

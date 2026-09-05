@@ -81,6 +81,10 @@ export function isUnauthenticated(error: unknown): boolean {
   )
 }
 
+export function isRequestCancelled(error: unknown): boolean {
+  return error instanceof ApiTransportError && error.aborted
+}
+
 export function isInvalidSetupToken(error: unknown): boolean {
   return error instanceof ApiProblemError && error.problem.status === 403 && (
     error.problem.type === '/problems/invalid-setup-token' || error.problem.code === 'invalid_setup_token'
@@ -114,6 +118,15 @@ export function problemMessageKey(error: unknown): string {
 
 export function translateProblem(error: unknown, t: unknown): string {
   return (t as (key: string) => string)(problemMessageKey(error))
+}
+
+export function translateProblemWithFields(error: unknown, t: unknown): string {
+  const message = translateProblem(error, t)
+  if (!(error instanceof ApiProblemError) || !error.problem.errors?.length) return message
+  const fields = error.problem.errors
+    .map((field) => translateFieldProblem(field, t))
+    .filter((value): value is string => Boolean(value))
+  return fields.length > 0 ? `${message} ${fields.join(' ')}` : message
 }
 
 export function translatePasswordResetProblem(error: unknown, t: unknown): string {

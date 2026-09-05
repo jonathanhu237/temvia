@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RolesPage } from './roles-page'
 import { UsersPage } from './users-page'
@@ -10,6 +11,8 @@ import { clearAccessDrafts } from './drafts'
 import { ApiProblemError, ApiTransportError, type ApiClient } from '@/shared/api/client'
 import type { Invitation, Permission, Role } from '@/shared/api/contracts'
 import { i18n, initializeI18n } from '@/shared/i18n'
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const usersRole: Role = {
   id: '019535d9-3df7-79fb-b466-fa907fa17f95',
@@ -85,6 +88,7 @@ function problem(type: string, status: number, code?: string) {
 
 describe('access components', () => {
   beforeEach(async () => {
+    vi.clearAllMocks()
     await initializeI18n()
     await i18n.changeLanguage('en')
     clearAccessDrafts()
@@ -120,6 +124,36 @@ describe('access components', () => {
     expect(rows[1]).toHaveTextContent('Roles reader')
     expect(rows[2]).toHaveTextContent('Super Admin')
     expect(rows[3]).toHaveTextContent('Users reader')
+  })
+
+  it('announces a failed role read once and asks for a manual refresh', async () => {
+    const api = mockApi({ getRoles: vi.fn().mockRejectedValue(new ApiTransportError('network')) })
+    renderWithQueryClient(<RolesPage api={api} canManage={false} />)
+
+    expect(await screen.findByText('Refresh the page to load the latest data.')).toBeVisible()
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Access data is unavailable', { description: 'The API could not load access data. Refresh the page to try again.' }))
+    expect(toast.error).toHaveBeenCalledOnce()
+  })
+
+  it('announces successful role creation after the API confirms it', async () => {
+    const createdRole: Role = { id: '019535d9-3df7-79fb-b466-fa907fa17f98', name: 'Auditor', description: '', permissions: ['users.read'], revision: 1, assignmentCount: 0 }
+    const createRole = vi.fn().mockResolvedValue(createdRole)
+    const api = mockApi({
+      getRoles: vi.fn().mockResolvedValue({ roles: [systemRole], permissions: permissionDefinitions }),
+      createRole,
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<RolesPage api={api} canManage />)
+
+    await screen.findByRole('heading', { name: 'Role management' })
+    await user.click(screen.getByRole('button', { name: 'Create role' }))
+    const editor = await screen.findByRole('dialog', { name: 'Create role' })
+    await user.type(within(editor).getByLabelText('Role name'), 'Auditor')
+    await user.click(within(editor).getByRole('checkbox', { name: 'View users' }))
+    await user.click(within(editor).getByRole('button', { name: 'Save role' }))
+
+    await waitFor(() => expect(createRole).toHaveBeenCalledWith({ name: 'Auditor', description: '', permissions: ['users.read'] }))
+    expect(toast.success).toHaveBeenCalledWith('Role created.')
   })
 
   it('renders a read-only users page without loading role administration data', async () => {
@@ -173,6 +207,7 @@ describe('access components', () => {
     expect(confirmation).toHaveTextContent('previous link will stop working')
     await user.click(within(confirmation).getByRole('button', { name: 'Resend' }))
     await waitFor(() => expect(resendInvitation).toHaveBeenCalledWith(pendingInvitation.id))
+    expect(toast.success).toHaveBeenCalledWith('Invitation email submitted.')
   })
 
   it('shows role details without type labels and localizes permissions', async () => {
@@ -299,14 +334,12 @@ describe('access components', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
-  it('distinguishes conflicts and offers reload recovery', async () => {
-    const reload = vi.fn()
-    render(<AccessError error={problem('/problems/role-in-use', 409, 'role_in_use')} onReload={reload} />)
+  it('distinguishes conflicts without offering a recovery action', () => {
+    render(<AccessError error={problem('/problems/role-in-use', 409, 'role_in_use')} onReload={vi.fn()} />)
 
     expect(screen.getByRole('heading', { name: 'This record changed' })).toBeVisible()
     expect(screen.getByText('This role is still assigned. Reassign users and invitations first.')).toBeVisible()
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Reload' }))
-    expect(reload).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
   it('distinguishes validation failures and dependency failures', async () => {
@@ -319,19 +352,12 @@ describe('access components', () => {
     view.unmount()
     render(<AccessError error={new ApiTransportError('network')} onRetry={retry} />)
     expect(screen.getByRole('heading', { name: 'Access data is unavailable' })).toBeVisible()
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Try again' }))
-    expect(retry).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
-  it('refreshes the selected role before retrying a stale edit', async () => {
-    const refreshedRole: Role = { ...usersRole, name: 'Users editor', description: 'Updated users', revision: 2 }
-    const getRoles = vi.fn()
-      .mockResolvedValueOnce({ roles: [systemRole, usersRole, rolesRole], permissions: permissionDefinitions })
-      .mockResolvedValue({ roles: [systemRole, refreshedRole, rolesRole], permissions: permissionDefinitions })
-    const replaceRole = vi.fn()
-      .mockRejectedValueOnce(problem('/problems/stale-revision', 409, 'stale_revision'))
-      .mockResolvedValue(refreshedRole)
-    const api = mockApi({ getRoles, replaceRole })
+  it('keeps a stale role draft and requires a browser refresh', async () => {
+    const replaceRole = vi.fn().mockRejectedValue(problem('/problems/stale-revision', 409, 'stale_revision'))
+    const api = mockApi({ getRoles: vi.fn().mockResolvedValue({ roles: [systemRole, usersRole], permissions: permissionDefinitions }), replaceRole })
     const user = userEvent.setup()
     renderWithQueryClient(<RolesPage api={api} canManage />)
 
@@ -341,23 +367,13 @@ describe('access components', () => {
     await user.click(within(roleRow!).getByRole('button', { name: 'More actions' }))
     await user.click(await screen.findByRole('menuitem', { name: 'Edit' }))
     await user.click(screen.getByRole('button', { name: 'Save role' }))
-    await screen.findByRole('heading', { name: 'This record changed' })
-
-    await user.click(screen.getByRole('button', { name: 'Discard draft and reload' }))
-    await waitFor(() => expect(screen.getByDisplayValue('Users editor')).toBeVisible())
-    expect(screen.getByDisplayValue('Updated users')).toBeVisible()
-
-    await user.click(screen.getByRole('button', { name: 'Save role' }))
-    await waitFor(() => expect(replaceRole).toHaveBeenCalledTimes(2))
-    expect(replaceRole).toHaveBeenLastCalledWith(usersRole.id, {
-      name: 'Users editor',
-      description: 'Updated users',
-      permissions: ['users.read'],
-      revision: 2,
-    })
+    await waitFor(() => expect(replaceRole).toHaveBeenCalledTimes(1))
+    expect(screen.getByDisplayValue('Users reader')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Save role' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Discard draft and reload' })).not.toBeInTheDocument()
   })
 
-  it('synchronizes local role selection after a stale assignment refresh', async () => {
+  it('keeps a stale assignment draft and requires a browser refresh', async () => {
     const userRecord = {
       id: '019535d9-3df7-79fb-b466-fa907fa17f91',
       name: 'Ada',
@@ -366,11 +382,8 @@ describe('access components', () => {
       authVersion: 1,
       roles: [usersRole],
     }
-    const refreshedUser = { ...userRecord, authVersion: 2, roles: [rolesRole] }
-    const getUsers = vi.fn().mockResolvedValueOnce({ users: [userRecord] }).mockResolvedValue({ users: [refreshedUser] })
-    const replaceUserRoles = vi.fn()
-      .mockRejectedValueOnce(problem('/problems/stale-revision', 409, 'stale_revision'))
-      .mockResolvedValue({ user: refreshedUser })
+    const getUsers = vi.fn().mockResolvedValue({ users: [userRecord] })
+    const replaceUserRoles = vi.fn().mockRejectedValue(problem('/problems/stale-revision', 409, 'stale_revision'))
     const api = mockApi({
       getUsers,
       getRoles: vi.fn().mockResolvedValue({ roles: [usersRole, rolesRole], permissions: permissionDefinitions }),
@@ -388,23 +401,11 @@ describe('access components', () => {
     await user.click(usersCheckbox)
     await user.click(rolesCheckbox)
     await user.click(within(dialog).getByRole('button', { name: 'Save assignments' }))
-    await screen.findByRole('heading', { name: 'This record changed' })
-
-    await user.click(screen.getByRole('button', { name: 'Discard draft and reload' }))
-    await waitFor(() => {
-      expect(within(dialog).getByRole('checkbox', { name: 'Users reader' })).not.toBeChecked()
-      expect(within(dialog).getByRole('checkbox', { name: 'Roles reader' })).toBeChecked()
-      expect(within(dialog).getByRole('button', { name: 'Save assignments' })).toBeDisabled()
-    })
-
-    await user.click(within(dialog).getByRole('checkbox', { name: 'Roles reader' }))
-    await user.click(within(dialog).getByRole('checkbox', { name: 'Users reader' }))
-    await user.click(within(dialog).getByRole('button', { name: 'Save assignments' }))
-    await waitFor(() => expect(replaceUserRoles).toHaveBeenCalledTimes(2))
-    expect(replaceUserRoles).toHaveBeenLastCalledWith(refreshedUser.id, {
-      roleIds: [usersRole.id],
-      authVersion: 2,
-    })
+    await waitFor(() => expect(replaceUserRoles).toHaveBeenCalledTimes(1))
+    expect(within(dialog).getByRole('checkbox', { name: 'Users reader' })).not.toBeChecked()
+    expect(within(dialog).getByRole('checkbox', { name: 'Roles reader' })).toBeChecked()
+    expect(within(dialog).getByRole('button', { name: 'Save assignments' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Discard draft and reload' })).not.toBeInTheDocument()
   })
 
   it('keeps a role draft when its dialog is closed and reopened', async () => {
