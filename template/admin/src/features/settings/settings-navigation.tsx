@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
-const sectionIds = ['email-settings-title', 'retention-settings-title'] as const
+const sectionIds = ['identity-settings-title', 'email-settings-title', 'retention-settings-title'] as const
 
 export function SettingsNavigation() {
   const { t } = useTranslation(['settings', 'operationLog'])
@@ -33,7 +33,7 @@ export function SettingsNavigation() {
     }
   }, [])
 
-  const labels = [t('email.title'), t('operationLog:retentionTitle')]
+  const labels = [t('identity.title'), t('email.title'), t('operationLog:retentionTitle')]
   return <nav aria-label={t('onThisPage')} className="sticky top-6 hidden self-start pt-24 xl:block">
     <ul className="flex flex-col border-l border-border">
       {sectionIds.map((id, index) => <li key={id}>

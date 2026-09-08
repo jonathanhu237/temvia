@@ -55,6 +55,12 @@ type SettingsService interface {
 	OperationalWarnings(context.Context) ([]application.OperationalWarning, error)
 }
 
+type SystemIdentityService interface {
+	application.SystemIdentityProvider
+	GetSystemIdentity(context.Context) (application.SystemIdentityView, error)
+	SaveSystemIdentity(context.Context, application.SystemIdentityInput) (application.SystemIdentityView, error)
+}
+
 type OperationLogService interface {
 	Record(context.Context, application.OperationLogInput) error
 	List(context.Context, application.OperationLogListOptions) (application.OperationLogPage, error)
@@ -84,6 +90,7 @@ type Handler struct {
 	access           AccessService
 	acceptInvitation InvitationAcceptanceService
 	settings         SettingsService
+	identity         SystemIdentityService
 	operationLogs    OperationLogService
 	cfg              config.Config
 	mux              *http.ServeMux
@@ -107,6 +114,13 @@ func NewHandlerWithAccessAndOperationLog(setup SetupService, auth Authentication
 	return newHandlerWithOperationLog(setup, auth, cfg, recovery, access, accept, settings, operations)
 }
 
+// NewHandlerWithAccessAndOperationLogAndIdentity adds the shared public and
+// protected system identity endpoints while preserving the older constructor
+// seams used by embedders and tests.
+func NewHandlerWithAccessAndOperationLogAndIdentity(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService) http.Handler {
+	return newHandlerWithOperationLogAndIdentity(setup, auth, cfg, recovery, access, accept, settings, operations, identity)
+}
+
 func firstRecovery(recovery []PasswordRecoveryService) PasswordRecoveryService {
 	var passwordRecovery PasswordRecoveryService
 	if len(recovery) > 0 {
@@ -124,7 +138,17 @@ func newHandler(setup SetupService, auth AuthenticationService, cfg config.Confi
 }
 
 func newHandlerWithOperationLog(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService) http.Handler {
-	h := &Handler{setup: setup, auth: auth, recovery: recovery, access: access, acceptInvitation: accept, settings: settings, operationLogs: operations, cfg: cfg, mux: http.NewServeMux()}
+	return newHandlerWithOperationLogAndIdentity(setup, auth, cfg, recovery, access, accept, settings, operations, nil)
+}
+
+func newHandlerWithOperationLogAndIdentity(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService) http.Handler {
+	h := &Handler{setup: setup, auth: auth, recovery: recovery, access: access, acceptInvitation: accept, settings: settings, identity: identity, operationLogs: operations, cfg: cfg, mux: http.NewServeMux()}
+	if h.identity != nil {
+		h.mux.HandleFunc("GET /api/public/system-identity", h.publicSystemIdentity)
+		h.mux.HandleFunc("GET /api/public/system-identity/icon", h.publicSystemIdentityIcon)
+		h.mux.HandleFunc("GET /api/settings/system-identity", h.systemIdentity)
+		h.mux.HandleFunc("PUT /api/settings/system-identity", h.saveSystemIdentity)
+	}
 	h.mux.HandleFunc("GET /api/setup/status", h.setupStatus)
 	h.mux.HandleFunc("POST /api/setup", h.setupComplete)
 	h.mux.HandleFunc("POST /api/auth/login", h.login)
@@ -214,6 +238,9 @@ var knownMethods = map[string]string{
 	"/api/user-invitations":                 "GET, POST",
 	"/api/settings/email":                   "GET, PUT",
 	"/api/settings/email/test":              "POST",
+	"/api/public/system-identity":           "GET",
+	"/api/public/system-identity/icon":      "GET",
+	"/api/settings/system-identity":         "GET, PUT",
 	"/api/operational-warnings":             "GET",
 	"/api/operation-logs":                   "GET",
 	"/api/operation-logs/status":            "GET",

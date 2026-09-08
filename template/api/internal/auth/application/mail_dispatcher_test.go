@@ -64,6 +64,18 @@ type dispatcherMailerFake struct {
 	err     error
 }
 
+type dispatcherIdentityFake struct {
+	identity SystemIdentityView
+	err      error
+}
+
+func (f *dispatcherIdentityFake) CurrentSystemIdentity(context.Context) (SystemIdentityView, error) {
+	if f.err != nil {
+		return SystemIdentityView{}, f.err
+	}
+	return f.identity, nil
+}
+
 func (f *dispatcherMailerFake) Send(_ context.Context, message OutgoingMail) error {
 	f.message = message
 	return f.err
@@ -257,7 +269,7 @@ func TestMailTemplatesRenderBilingualSecurityLayouts(t *testing.T) {
 			if !strings.Contains(reset.HTML, test.resetTitle) || !strings.Contains(reset.HTML, test.resetCopy) || !strings.Contains(reset.HTML, test.expiry) || !strings.Contains(reset.HTML, test.singleUse) {
 				t.Fatalf("reset HTML lacks the %s security content", test.name)
 			}
-			if !strings.Contains(reset.HTML, test.footer) || !strings.Contains(reset.HTML, "TEMVIA") {
+			if !strings.Contains(reset.HTML, test.footer) || !strings.Contains(reset.HTML, "Temvia") {
 				t.Fatalf("reset HTML lacks the branded footer/header: %s", test.name)
 			}
 			if !strings.Contains(changed.HTML, test.changedTitle) || !strings.Contains(changed.HTML, test.changedCopy) || !strings.Contains(changed.HTML, "2026-09-01 04:34:56 UTC") {
@@ -270,6 +282,142 @@ func TestMailTemplatesRenderBilingualSecurityLayouts(t *testing.T) {
 				t.Fatalf("plain-text alternative lost its security details: reset=%q changed=%q", reset.Text, changed.Text)
 			}
 		})
+	}
+}
+
+func TestMailDispatcherUsesLocalizedIdentityAndFallback(t *testing.T) {
+	resetKey := bytes.Repeat([]byte{0x61}, 32)
+	invitationKey := bytes.Repeat([]byte{0x62}, 32)
+	selector := bytes.Repeat([]byte{0x17}, 16)
+	resetMaterial, err := domain.NewPasswordResetMaterial(resetKey, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitationMaterial, err := domain.NewInvitationMaterial(invitationKey, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := &dispatcherIdentityFake{identity: SystemIdentityView{
+		SystemName:        `品牌 <主站> & Co`,
+		EnglishSystemName: `Brand <Admin> & Co`,
+	}}
+	dispatcher := NewMailDispatcher(&dispatcherOutboxFake{}, &dispatcherMailerFake{}, &fakeRandom{value: 9}, resetKey, "https://admin.example", time.Second, time.Second, time.Second, time.Minute, invitationKey)
+	dispatcher.SetSystemIdentityProvider(identity)
+
+	englishReset, err := dispatcher.compose(context.Background(), MailJob{
+		ID:             "00000000-0000-4000-8000-000000000010",
+		Kind:           MailPasswordReset,
+		Name:           `Ada <admin> & owner`,
+		Email:          "ada+reset@example.com",
+		Locale:         domain.LocaleEnglish,
+		ResetSelector:  resetMaterial.Selector,
+		VerifierDigest: resetMaterial.VerifierDigest,
+		ExpiresAt:      time.Unix(100, 0).Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if englishReset.SystemName != `Brand <Admin> & Co` || !strings.Contains(englishReset.Subject, `Brand <Admin> & Co`) {
+		t.Fatalf("english identity = %#v", englishReset)
+	}
+	if englishReset.Name != `Ada <admin> & owner` || englishReset.To != "ada+reset@example.com" || !strings.Contains(englishReset.HTML, `Ada &lt;admin&gt; &amp; owner`) || strings.Contains(englishReset.HTML, `Ada <admin> & owner`) {
+		t.Fatalf("recipient identity was changed or not escaped in HTML: %#v", englishReset)
+	}
+	if !strings.Contains(englishReset.HTML, `Brand &lt;Admin&gt; &amp; Co`) || strings.Contains(englishReset.HTML, `Brand <Admin> & Co`) {
+		t.Fatal("english identity was not escaped in HTML")
+	}
+
+	chineseInvitation, err := dispatcher.compose(context.Background(), MailJob{
+		ID:             "00000000-0000-4000-8000-000000000011",
+		Kind:           MailUserInvitation,
+		Name:           "Ada",
+		Email:          "ada@example.com",
+		Locale:         domain.LocaleChinese,
+		ResetSelector:  invitationMaterial.Selector,
+		VerifierDigest: invitationMaterial.VerifierDigest,
+		ExpiresAt:      time.Unix(100, 0).Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chineseInvitation.SystemName != `品牌 <主站> & Co` || !strings.Contains(chineseInvitation.Subject, `品牌 <主站> & Co`) {
+		t.Fatalf("chinese identity = %#v", chineseInvitation)
+	}
+	if !strings.Contains(chineseInvitation.HTML, `品牌 &lt;主站&gt; &amp; Co`) || strings.Contains(chineseInvitation.HTML, `品牌 <主站> & Co`) {
+		t.Fatal("chinese identity was not escaped in HTML")
+	}
+
+	englishChanged, err := dispatcher.compose(context.Background(), MailJob{
+		ID:        "00000000-0000-4000-8000-000000000012",
+		Kind:      MailPasswordChanged,
+		Name:      "Ada",
+		Email:     "ada@example.com",
+		Locale:    domain.LocaleEnglish,
+		CreatedAt: time.Unix(100, 0),
+		ExpiresAt: time.Unix(100, 0).Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if englishChanged.SystemName != `Brand <Admin> & Co` || !strings.Contains(englishChanged.Subject, `Brand <Admin> & Co`) || !strings.Contains(englishChanged.HTML, `Brand &lt;Admin&gt; &amp; Co`) {
+		t.Fatalf("English password-changed identity = %#v", englishChanged)
+	}
+
+	chineseChanged, err := dispatcher.compose(context.Background(), MailJob{
+		ID:        "00000000-0000-4000-8000-000000000014",
+		Kind:      MailPasswordChanged,
+		Name:      "Ada",
+		Email:     "ada@example.com",
+		Locale:    domain.LocaleChinese,
+		CreatedAt: time.Unix(100, 0),
+		ExpiresAt: time.Unix(100, 0).Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chineseChanged.SystemName != `品牌 <主站> & Co` || !strings.Contains(chineseChanged.Subject, `品牌 <主站> & Co`) || !strings.Contains(chineseChanged.HTML, `品牌 &lt;主站&gt; &amp; Co`) {
+		t.Fatalf("Chinese password-changed identity = %#v", chineseChanged)
+	}
+
+	identity.identity.EnglishSystemName = ""
+	englishFallback, err := dispatcher.compose(context.Background(), MailJob{
+		ID:        "00000000-0000-4000-8000-000000000012",
+		Kind:      MailPasswordChanged,
+		Name:      "Ada",
+		Email:     "ada@example.com",
+		Locale:    domain.LocaleEnglish,
+		CreatedAt: time.Unix(100, 0),
+		ExpiresAt: time.Unix(100, 0).Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if englishFallback.SystemName != `品牌 <主站> & Co` || !strings.Contains(englishFallback.Text, `品牌 <主站> & Co`) {
+		t.Fatalf("english fallback = %#v", englishFallback)
+	}
+}
+
+func TestMailDispatcherRetriesWhenIdentityDependencyFails(t *testing.T) {
+	created := time.Unix(100, 0)
+	outbox := &dispatcherOutboxFake{job: &MailJob{
+		ID:        "00000000-0000-4000-8000-000000000013",
+		Kind:      MailPasswordChanged,
+		Name:      "Ada",
+		Email:     "ada@example.com",
+		Locale:    domain.LocaleEnglish,
+		CreatedAt: created,
+		ExpiresAt: created.Add(time.Hour),
+		Attempts:  1,
+	}}
+	dispatcher := NewMailDispatcher(outbox, &dispatcherMailerFake{}, &fakeRandom{value: 9}, bytes.Repeat([]byte{0x61}, 32), "https://admin.example", time.Second, time.Second, time.Second, time.Minute)
+	dispatcher.SetSystemIdentityProvider(&dispatcherIdentityFake{err: errors.New("identity database unavailable")})
+	dispatcher.now = func() time.Time { return created.Add(time.Minute) }
+
+	if err := dispatcher.ProcessOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !outbox.retried || outbox.errorCode != "temporary" || outbox.sent || outbox.dead || outbox.discarded {
+		t.Fatalf("identity dependency state = %#v", outbox)
 	}
 }
 

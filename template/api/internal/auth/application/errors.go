@@ -30,6 +30,8 @@ var (
 	ErrPermissionScope               = errors.New("permission is outside actor scope")
 	ErrMailNotConfigured             = errors.New("mail service is not configured")
 	ErrInvalidMailSettings           = errors.New("invalid mail settings")
+	ErrSystemIdentityNotConfigured   = errors.New("system identity is not configured")
+	ErrInvalidSystemIdentity         = errors.New("invalid system identity")
 	ErrOperationLogNotFound          = errors.New("operation log not found")
 	ErrOperationLogRetentionNotFound = errors.New("operation log retention not configured")
 )

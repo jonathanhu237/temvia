@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
+	"html"
 	"net/mail"
 	"strconv"
 	"strings"
@@ -82,6 +83,7 @@ type SettingsManagement struct {
 	cipher     SecretBox
 	factory    MailerFactory
 	runtime    *ReloadableMailer
+	identity   SystemIdentityProvider
 	production bool
 	// saveMu serializes the commit and runtime reload pair. Without one
 	// critical section, two successful saves could reload their mailers in the
@@ -96,6 +98,12 @@ func NewSettingsManagement(store EmailSettingsStore, cipher SecretBox, factory M
 func (s *SettingsManagement) SetProductionMode(production bool) {
 	if s != nil {
 		s.production = production
+	}
+}
+
+func (s *SettingsManagement) SetSystemIdentityProvider(identity SystemIdentityProvider) {
+	if s != nil {
+		s.identity = identity
 	}
 }
 
@@ -279,20 +287,28 @@ func (s *SettingsManagement) TestEmailSettings(ctx context.Context, input EmailS
 	if !validSMTPCredentials(strings.TrimSpace(input.Username), password != "") {
 		return ErrInvalidMailSettings
 	}
+	systemName := DefaultSystemName
+	if s.identity != nil {
+		identity, identityErr := s.identity.CurrentSystemIdentity(ctx)
+		if identityErr != nil {
+			return identityErr
+		}
+		systemName = identity.NameForLocale(domain.Locale(input.DefaultLocale))
+	}
 	mailer, err := s.factory(SMTPSettings{Host: strings.TrimSpace(input.Host), Port: input.Port, Security: strings.ToLower(strings.TrimSpace(input.Security)), Username: strings.TrimSpace(input.Username), Password: password, FromAddress: strings.TrimSpace(input.FromAddress), FromName: strings.TrimSpace(input.FromName)})
 	if err != nil {
 		return dependencyError(err)
 	}
 	locale := domain.Locale(input.DefaultLocale)
-	message := OutgoingMail{MessageID: "temvia-settings-test-" + strconv.FormatInt(time.Now().UnixNano(), 10) + "@temvia", Kind: MailPasswordReset, Name: "Temvia administrator", To: recipient, Locale: locale}
+	message := OutgoingMail{MessageID: "temvia-settings-test-" + strconv.FormatInt(time.Now().UnixNano(), 10) + "@temvia", Kind: MailPasswordReset, SystemName: systemName, Name: "administrator", To: recipient, Locale: locale}
 	if locale == domain.LocaleChinese {
-		message.Subject = "Temvia 邮件服务测试"
-		message.Text = "这是一封 Temvia 邮件服务测试邮件。"
-		message.HTML = "<p>这是一封 Temvia 邮件服务测试邮件。</p>"
+		message.Subject = systemName + " 邮件服务测试"
+		message.Text = "这是一封 " + systemName + " 邮件服务测试邮件。"
+		message.HTML = "<p>这是一封 " + html.EscapeString(systemName) + " 邮件服务测试邮件。</p>"
 	} else {
-		message.Subject = "Temvia email service test"
-		message.Text = "This is a test email from Temvia."
-		message.HTML = "<p>This is a test email from Temvia.</p>"
+		message.Subject = systemName + " email service test"
+		message.Text = "This is a test email from " + systemName + "."
+		message.HTML = "<p>This is a test email from " + html.EscapeString(systemName) + ".</p>"
 	}
 	return mailer.Send(ctx, message)
 }

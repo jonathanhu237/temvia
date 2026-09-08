@@ -45,6 +45,7 @@ var problemCatalog = map[string]struct {
 	"content-too-large":            {"Content Too Large"},
 	"unsupported-media-type":       {"Unsupported Media Type"},
 	"validation-failed":            {"Validation Failed"},
+	"invalid-system-identity":      {"Invalid System Identity"},
 	"rate-limited":                 {"Too Many Requests"},
 	"internal-error":               {"Internal Server Error"},
 	"service-unavailable":          {"Service Unavailable"},
@@ -107,6 +108,8 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblemWithCode(w, http.StatusForbidden, "permission-scope", "permission_scope_forbidden", "", nil)
 	case applicationError(err, application.ErrInvalidMailSettings):
 		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "invalid_mail_settings", "", nil)
+	case applicationError(err, application.ErrInvalidSystemIdentity):
+		writeProblemWithCode(w, http.StatusUnprocessableEntity, "invalid-system-identity", "invalid_system_identity", "", nil)
 	case applicationError(err, application.ErrForbidden):
 		writeProblem(w, http.StatusForbidden, "forbidden")
 	case applicationError(err, application.ErrRoleNotFound), applicationError(err, application.ErrUserNotFound), applicationError(err, application.ErrInvitationNotFound), applicationError(err, application.ErrOperationLogNotFound):

@@ -69,6 +69,10 @@ const fieldKeys: Record<string, string> = {
   invalid_role_set: 'problems:fields.invalidRoleSet',
   invalid_description: 'problems:fields.invalidDescription',
   invalid_locale: 'problems:fields.invalidValue',
+  too_long: 'problems:fields.tooLong',
+  control_character: 'problems:fields.invalidValue',
+  invalid_icon: 'problems:fields.invalidIcon',
+  unsupported_type: 'problems:fields.unsupportedImageType',
 }
 
 export function fieldMessageKey(code: string | undefined): string {

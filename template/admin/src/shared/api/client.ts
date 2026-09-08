@@ -18,6 +18,7 @@ import {
 	operationLogResponseSchema,
 	operationLogsResponseSchema,
 	operationLogStatusSchema,
+	systemIdentityResponseSchema,
 	problemDetailsSchema,
 	roleMutationInputSchema,
 	roleResponseSchema,
@@ -37,6 +38,7 @@ import {
 	  type RoleOption,
   type EmailSettings,
   type OperationLog,
+  type SystemIdentity,
 } from './contracts'
 
 export class ApiProblemError extends Error {
@@ -99,6 +101,9 @@ export interface ApiClient {
 	getOperationLog?(id: string, signal?: AbortSignal): Promise<OperationLog>
 	getOperationLogRetention?(signal?: AbortSignal): Promise<{ retentionDays: number; revision: number; updatedAt?: string }>
 	saveOperationLogRetention?(input: { retentionDays: number; revision: number }, signal?: AbortSignal): Promise<{ retentionDays: number; revision: number; updatedAt?: string }>
+	getPublicSystemIdentity?(signal?: AbortSignal): Promise<SystemIdentity>
+	getSystemIdentity?(signal?: AbortSignal): Promise<SystemIdentity>
+	saveSystemIdentity?(input: FormData, signal?: AbortSignal): Promise<SystemIdentity>
 }
 
 interface RequestOptions {
@@ -116,7 +121,7 @@ const JSON_HEADERS = {
 async function request<T>(path: string, schema: { parse(value: unknown): T }, options: RequestOptions): Promise<T> {
   const headers = new Headers(JSON_HEADERS)
   if (options.body !== undefined) {
-    headers.set('Content-Type', 'application/json')
+	    if (typeof FormData === 'undefined' || !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   }
 
   let response: Response
@@ -126,7 +131,7 @@ async function request<T>(path: string, schema: { parse(value: unknown): T }, op
       credentials: 'same-origin',
       cache: 'no-store',
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body: options.body === undefined ? undefined : (typeof FormData !== 'undefined' && options.body instanceof FormData ? options.body : JSON.stringify(options.body)),
       signal: options.signal,
     })
   } catch (error) {
@@ -240,5 +245,8 @@ export function createApiClient(): ApiClient {
 		getOperationLog: async (id, signal) => (await request(`/api/operation-logs/${encodeURIComponent(id)}`, operationLogResponseSchema, { signal, expectedStatus: 200 })).log,
 		getOperationLogRetention: async (signal) => request('/api/settings/operation-log', operationLogRetentionSchema, { signal, expectedStatus: 200 }),
 		saveOperationLogRetention: async (input, signal) => (await request('/api/settings/operation-log', operationLogRetentionSchema, { method: 'PUT', body: input, signal, expectedStatus: 200 })),
+		getPublicSystemIdentity: (signal) => request('/api/public/system-identity', systemIdentityResponseSchema, { signal, expectedStatus: 200 }),
+		getSystemIdentity: (signal) => request('/api/settings/system-identity', systemIdentityResponseSchema, { signal, expectedStatus: 200 }),
+		saveSystemIdentity: async (input, signal) => request('/api/settings/system-identity', systemIdentityResponseSchema, { method: 'PUT', body: input, signal, expectedStatus: 200 }),
   }
 }

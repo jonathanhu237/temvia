@@ -16,10 +16,11 @@ async function bootstrap() {
   captureInvitationAuthority()
   await initializeI18n()
   const queryClient = createAppQueryClient()
-  const router = createAppRouter({ api: createApiClient(), queryClient })
+  const api = createApiClient()
+  const router = createAppRouter({ api, queryClient })
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <AppProviders queryClient={queryClient} router={router} />
+      <AppProviders queryClient={queryClient} router={router} api={api} />
     </StrictMode>,
   )
 }

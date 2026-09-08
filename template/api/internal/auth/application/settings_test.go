@@ -231,6 +231,48 @@ func TestSettingsTestUsesUnsavedSnapshotWithoutPersistence(t *testing.T) {
 	}
 }
 
+func TestSettingsTestUsesLocalizedIdentityWithoutChangingSMTPFromName(t *testing.T) {
+	mailer := &settingsMailerFake{}
+	var captured SMTPSettings
+	identity := &dispatcherIdentityFake{identity: SystemIdentityView{
+		SystemName:        `品牌 <主站> & Co`,
+		EnglishSystemName: `Brand <Admin> & Co`,
+	}}
+	service := NewSettingsManagement(nil, nil, func(settings SMTPSettings) (Mailer, error) {
+		captured = settings
+		return mailer, nil
+	}, nil)
+	service.SetSystemIdentityProvider(identity)
+
+	input := EmailSettingsInput{Host: "mailpit", Port: 1025, Security: "none", FromAddress: "no-reply@example.com", FromName: "Operations Mailer", DefaultLocale: "en"}
+	if err := service.TestEmailSettings(context.Background(), input, "recipient@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if captured.FromAddress != input.FromAddress || captured.FromName != input.FromName {
+		t.Fatalf("SMTP sender settings changed by identity: %#v", captured)
+	}
+	if len(mailer.messages) != 1 || mailer.messages[0].SystemName != identity.identity.EnglishSystemName || mailer.messages[0].To != "recipient@example.com" || !strings.Contains(mailer.messages[0].Subject, identity.identity.EnglishSystemName) || !strings.Contains(mailer.messages[0].HTML, `Brand &lt;Admin&gt; &amp; Co`) {
+		t.Fatalf("English test mail identity = %#v", mailer.messages)
+	}
+
+	input.DefaultLocale = "zh-CN"
+	if err := service.TestEmailSettings(context.Background(), input, "recipient@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if len(mailer.messages) != 2 || mailer.messages[1].SystemName != identity.identity.SystemName || !strings.Contains(mailer.messages[1].Subject, identity.identity.SystemName) || !strings.Contains(mailer.messages[1].HTML, `品牌 &lt;主站&gt; &amp; Co`) {
+		t.Fatalf("Chinese test mail identity = %#v", mailer.messages)
+	}
+
+	identity.identity.EnglishSystemName = ""
+	input.DefaultLocale = "en"
+	if err := service.TestEmailSettings(context.Background(), input, "recipient@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if len(mailer.messages) != 3 || mailer.messages[2].SystemName != identity.identity.SystemName || !strings.Contains(mailer.messages[2].Subject, identity.identity.SystemName) {
+		t.Fatalf("English fallback test mail identity = %#v", mailer.messages)
+	}
+}
+
 func TestSettingsTestValidatesAndNormalizesRecipient(t *testing.T) {
 	mailer := &settingsMailerFake{}
 	service := NewSettingsManagement(nil, nil, func(SMTPSettings) (Mailer, error) { return mailer, nil }, nil)

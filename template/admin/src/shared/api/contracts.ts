@@ -148,6 +148,17 @@ export type EmailSettings = z.infer<typeof emailSettingsSchema>
 export const emailSettingsResponseSchema = z.object({ email: emailSettingsSchema }).strict()
 export const operationalWarningsSchema = z.object({ warnings: z.array(z.object({ key: z.string(), severity: z.string() }).strict()) }).strict()
 
+export const systemIdentitySchema = z.object({
+  systemName: z.string(),
+  englishSystemName: z.string(),
+  iconUrl: z.string(),
+  hasCustomIcon: z.boolean(),
+  revision: z.number().int().nonnegative(),
+  updatedAt: z.string().optional(),
+}).strict()
+export type SystemIdentity = z.infer<typeof systemIdentitySchema>
+export const systemIdentityResponseSchema = systemIdentitySchema
+
 export const operationActorSchema = z.object({ id: z.string().optional(), name: z.string().optional(), email: z.string().optional(), kind: z.string().optional(), label: z.string().optional() }).strict()
 export const operationLogSchema = z.object({
   id: z.string().uuid(),

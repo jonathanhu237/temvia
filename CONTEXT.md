@@ -21,6 +21,16 @@ Shared administrative configuration that applies throughout a Temvia administrat
 **Email configuration**:
 The shared delivery settings and default language for email sent by a Temvia administration app.
 
+**System name（系统名称）**:
+The shared display name identifying an administration app across its pages, browser titles, and system emails.
+
+**English system name（英文系统名称）**:
+An optional English display name used in English interfaces and English system emails. When absent, the system name is used instead.
+
+**System icon（系统图标）**:
+The shared visual symbol identifying an administration app on its pages and browser tabs.
+_Avoid_: ICON
+
 **Operational warning**:
 A current system condition shown on the home page that needs administrative attention, such as missing email configuration.
 _Avoid_: Notification history, audit log

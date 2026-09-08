@@ -29,11 +29,14 @@ import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { roleQueryKey, rolesOptions, rolesQueryKey } from './queries'
 import { notifyRequestError, notifySuccess, readFailureFeedback, useRequestErrorToast } from '@/shared/feedback'
+import { systemIdentityName, usePublicSystemIdentity } from '@/features/identity/system-identity'
 
 export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = false }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean }) {
-  const { t } = useTranslation(['access', 'problems', 'common'])
+  const { t, i18n } = useTranslation(['access', 'problems', 'common'])
   const queryClient = useQueryClient()
   const query = useQuery(rolesOptions(api))
+  const identity = usePublicSystemIdentity(api)
+  const systemName = systemIdentityName(identity.data, i18n.language)
   const [selected, setSelected] = useState<Role | undefined>()
   const [detailOpen, setDetailOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
@@ -97,7 +100,7 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     {
       accessorKey: 'name',
       header: ({ column }) => <SortableHeader column={column}>{t('roleName')}</SortableHeader>,
-      cell: ({ row }) => <div className="flex min-w-0 items-center gap-2"><button type="button" className="min-w-0 truncate text-left font-medium" onClick={() => openDetail(row.original)}>{row.original.name}</button>{row.original.system ? <BuiltInRoleIndicator label={t('builtInRoleTooltip')} /> : null}</div>,
+      cell: ({ row }) => <div className="flex min-w-0 items-center gap-2"><button type="button" className="min-w-0 truncate text-left font-medium" onClick={() => openDetail(row.original)}>{row.original.name}</button>{row.original.system ? <BuiltInRoleIndicator label={t('builtInRoleTooltip', { systemName })} /> : null}</div>,
     },
     {
       accessorKey: 'description',
@@ -137,7 +140,7 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
         </DropdownMenu>
       },
     },
-  ], [canManage, openDetail, openEdit, t])
+  ], [canManage, openDetail, openEdit, systemName, t])
 
   if (query.isPending) return <p role="status">{t('common:loading')}</p>
   return <section className="flex flex-col gap-5" aria-labelledby="roles-title">

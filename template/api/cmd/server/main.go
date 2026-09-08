@@ -51,6 +51,10 @@ func newApplicationHandlerWithSettings(cfg config.Config, setup application.Setu
 }
 
 func newApplicationHandlerWithOperationLog(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery httpapi.PasswordRecoveryService, settingsService *application.SettingsManagement, operationLogs *application.OperationLogService) http.Handler {
+	return newApplicationHandlerWithOperationLogAndIdentity(cfg, setup, auth, hasher, sessions, limiter, random, recovery, settingsService, operationLogs, nil)
+}
+
+func newApplicationHandlerWithOperationLogAndIdentity(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery httpapi.PasswordRecoveryService, settingsService *application.SettingsManagement, operationLogs *application.OperationLogService, identity *application.SystemIdentityManagement) http.Handler {
 	setupService := application.NewSetup(setup, hasher, random, cfg.SetupLinkTTL)
 	catalog := domain.DefaultPermissionCatalog()
 	authService := application.NewAuthentication(auth, hasher, sessions, limiter, random, catalog)
@@ -68,7 +72,11 @@ func newApplicationHandlerWithOperationLog(cfg config.Config, setup application.
 			var authHandler http.Handler
 			if settingsService != nil {
 				if operationLogs != nil {
-					authHandler = httpapi.NewHandlerWithAccessAndOperationLog(setupService, authService, cfg, recovery, access, accept, settingsService, operationLogs)
+					if identity != nil {
+						authHandler = httpapi.NewHandlerWithAccessAndOperationLogAndIdentity(setupService, authService, cfg, recovery, access, accept, settingsService, operationLogs, identity)
+					} else {
+						authHandler = httpapi.NewHandlerWithAccessAndOperationLog(setupService, authService, cfg, recovery, access, accept, settingsService, operationLogs)
+					}
 				} else {
 					authHandler = httpapi.NewHandlerWithAccess(setupService, authService, cfg, recovery, access, accept, settingsService)
 				}
@@ -131,10 +139,12 @@ func main() {
 	}
 	runtimeMailer := application.NewReloadableMailer()
 	operationLogs := application.NewOperationLogService(postgresStore)
+	identityService := application.NewSystemIdentityManagement(postgresStore)
 	settingsService := application.NewSettingsManagement(postgresStore, secretBox, func(settings application.SMTPSettings) (application.Mailer, error) {
 		return mailadapter.NewSMTPMailerFromSettingsWithTimeout(settings, cfg.SMTPTimeout)
 	}, runtimeMailer)
 	settingsService.SetProductionMode(cfg.Environment == "production")
+	settingsService.SetSystemIdentityProvider(identityService)
 	if err := settingsService.LoadRuntime(startupContext); err != nil {
 		log.Fatalf("email settings initialization failed: %v", err)
 	}
@@ -161,7 +171,8 @@ func main() {
 		cfg.MailOutboxRetryMax,
 		cfg.InvitationTokenKey,
 	)
-	handler := newApplicationHandlerWithOperationLog(cfg, postgresStore, postgresStore, hasher, redisStore, redisStore, random, recovery, settingsService, operationLogs)
+	dispatcher.SetSystemIdentityProvider(identityService)
+	handler := newApplicationHandlerWithOperationLogAndIdentity(cfg, postgresStore, postgresStore, hasher, redisStore, redisStore, random, recovery, settingsService, operationLogs, identityService)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,

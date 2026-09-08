@@ -20,7 +20,7 @@ const emptyDraft: EmailSettingsDraft = {
   host: '', port: 587, security: 'starttls', authentication: false, username: '', password: '', clearPassword: false, passwordSet: false, fromAddress: '', fromName: 'Temvia', revision: 0, configured: false, submitting: false, conflict: false,
 }
 
-export function EmailSettingsPage({ api, canWrite = true }: { api: ApiClient; canWrite?: boolean }) {
+export function EmailSettingsPage({ api, canWrite = true, showTitle = true }: { api: ApiClient; canWrite?: boolean; showTitle?: boolean }) {
   const { t } = useTranslation(['settings', 'common', 'problems', 'access'])
   const queryClient = useQueryClient()
   const draft = useAccessDraftStore((state) => state.emailSettings)
@@ -89,8 +89,7 @@ export function EmailSettingsPage({ api, canWrite = true }: { api: ApiClient; ca
   const hasSettings = Boolean(query.data || draft)
   const forbidden = query.isError && isForbidden(query.error)
   return <section className="flex min-w-0 flex-col gap-8" aria-labelledby="settings-title">
-    <div><h1 id="settings-title" className="text-2xl font-semibold tracking-tight">{t('title')}</h1></div>
-    <Separator />
+    {showTitle ? <><div><h1 id="settings-title" className="text-2xl font-semibold tracking-tight">{t('title')}</h1></div><Separator /></> : null}
     <SettingsSection id="email-settings-title" title={t('email.title')}>{query.isError && (forbidden || !hasSettings) ? <p role="status" className="text-sm text-muted-foreground">{forbidden ? t('access:forbiddenDescription') : t('common:refreshPage')}</p> : <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); if (!busy && !current.conflict) save.mutate() }} noValidate>
         <FieldGroup>
           <FieldGroup className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]"><Field><FieldLabel htmlFor="smtp-host">{t('email.host')}</FieldLabel><Input id="smtp-host" value={current.host} onChange={(event) => update({ host: event.target.value })} disabled={disabled} /></Field><Field><FieldLabel htmlFor="smtp-port">{t('email.port')}</FieldLabel><Input id="smtp-port" type="number" min={1} max={65535} value={current.port} onChange={(event) => update({ port: Number(event.target.value) })} disabled={disabled} /></Field></FieldGroup>

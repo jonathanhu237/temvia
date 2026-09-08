@@ -107,14 +107,15 @@ type MailOutboxStore interface {
 }
 
 type OutgoingMail struct {
-	MessageID string
-	Kind      MailKind
-	Name      string
-	To        string
-	Locale    domain.Locale
-	Subject   string
-	Text      string
-	HTML      string
+	MessageID  string
+	Kind       MailKind
+	SystemName string
+	Name       string
+	To         string
+	Locale     domain.Locale
+	Subject    string
+	Text       string
+	HTML       string
 }
 
 type Mailer interface {

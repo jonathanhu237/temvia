@@ -28,6 +28,7 @@ import type { ApiClient } from '@/shared/api/client'
 import { currentUserQueryKey } from './queries'
 import type { User } from '@/shared/api/contracts'
 import { clearAccessDrafts, useAccessDraftStore } from '@/features/access/drafts'
+import { IdentityMark } from '@/features/identity/system-identity'
 
 export function AuthenticatedShell({ api, user, children }: { api: ApiClient; user: User; children: React.ReactNode }) {
   const { t } = useTranslation(['common', 'auth', 'problems', 'access', 'operationLog', 'onlineUsers'])
@@ -86,6 +87,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
     <SidebarProvider defaultOpen>
       <Sidebar variant="inset" collapsible="icon" role="navigation" aria-label={t('menu')}>
         <SidebarContent>
+          <div className="px-3 py-4"><IdentityMark api={api} compact /></div>
           <SidebarGroup>
             <SidebarGroupLabel>{t('menu')}</SidebarGroupLabel>
             <SidebarGroupContent>
