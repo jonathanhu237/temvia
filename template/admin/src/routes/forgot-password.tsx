@@ -18,8 +18,9 @@ function ForgotPasswordRoute() {
 
   if (accepted) {
     return (
-      <AuthPage title={t('resetRequestAcceptedTitle')} description={t('resetRequestAcceptedDescription')}>
+      <AuthPage title={t('resetRequestAcceptedTitle')}>
         <div className="flex flex-col gap-4">
+          <p role="status" className="text-sm text-muted-foreground">{t('resetRequestAcceptedDescription')}</p>
           <Button type="button" className="w-full" onClick={() => setAccepted(false)}>{t('resetAgain')}</Button>
           <Button asChild type="button" variant="outline" className="w-full"><a href="/login">{commonT('backToLogin')}</a></Button>
         </div>
@@ -28,7 +29,7 @@ function ForgotPasswordRoute() {
   }
 
   return (
-    <AuthPage title={t('forgotPasswordTitle')} description={t('forgotPasswordDescription')}>
+    <AuthPage title={t('forgotPasswordTitle')}>
       <div className="flex flex-col gap-5">
         <PasswordResetRequestForm api={api} onAccepted={() => setAccepted(true)} />
         <Button type="button" variant="link" className="w-full" onClick={() => void navigate({ to: '/login' })}>{commonT('backToLogin')}</Button>

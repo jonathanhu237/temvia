@@ -42,6 +42,19 @@ type VersionedSessionStore interface {
 	ResolveAndTouchVersioned(context.Context, string) (userID string, authVersion int64, err error)
 }
 
+// ReadOnlySessionStore resolves a session without changing its last activity
+// or expiry. It is used by background status checks and online-user polling.
+type ReadOnlySessionStore interface {
+	Resolve(context.Context, string) (userID string, err error)
+}
+
+// ReadOnlyVersionedSessionStore is the read-only counterpart to
+// VersionedSessionStore. The account's authentication version remains the
+// revocation authority and is checked by Authentication after resolution.
+type ReadOnlyVersionedSessionStore interface {
+	ResolveVersioned(context.Context, string) (userID string, authVersion int64, err error)
+}
+
 type LoginLimiter interface {
 	Allow(context.Context, string) (bool, error)
 	ResetEmail(context.Context, string) error

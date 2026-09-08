@@ -1,7 +1,16 @@
 const english = {
+  onlineUsers: {
+    title: 'Online users', description: 'Users with at least one valid sign-in session, including sessions with no recent activity. Open pages check in every 30 seconds; this list refreshes every 15 seconds.',
+    sessions: 'Valid sessions', lastSeen: 'Last active', you: 'You', forceSignOut: 'Force sign out', refresh: 'Refresh', empty: 'No users online.',
+    confirmTitle: 'Force sign out this user?', confirm: 'Force sign out {{name}} ({{email}}) from all devices. They can sign in again.',
+    confirmSelf: 'You will be force signed out of all devices, including this page. You can sign in again.',
+    working: 'Forcing sign out…', success: '{{name}} was force signed out.', loadFailed: 'Unable to load online users.', forceSignOutFailed: 'Force sign out failed.',
+  },
+
   common: {
     home: 'Home',
     settings: 'System settings',
+    systemMonitoring: 'System monitoring',
     configureSettings: 'Configure settings',
     menu: 'Menu',
     language: 'Language',
@@ -69,6 +78,7 @@ const english = {
     logoutFailedDescription: 'The server did not confirm that your session was revoked. Try again.',
     sessionUnavailableTitle: 'Your session could not be checked',
     sessionUnavailableDescription: 'The API is unavailable or returned an unexpected response. Your current session was kept.',
+    sessionExpired: 'Your session has expired. Sign in again.',
     homeTitle: 'Home',
     welcome: 'Welcome back, {{name}}.',
     operationalWarningTitle: 'Action needed',
@@ -142,7 +152,7 @@ const english = {
     retentionReadUnavailableDescription: 'The API could not load the retention setting. Refresh the page to try again.',
     actionLabels: {
       auth_login: 'Sign in', auth_logout: 'Sign out', auth_password_reset_request: 'Request password reset', auth_password_reset_complete: 'Complete password reset', auth_invitation_accept: 'Accept invitation', auth_setup_complete: 'Complete setup',
-      roles_create: 'Create role', roles_update: 'Update role', roles_delete: 'Delete role', users_roles_update: 'Update user roles', invitations_create: 'Create invitation', invitations_resend: 'Resend invitation', invitations_revoke: 'Revoke invitation',
+      roles_create: 'Create role', roles_update: 'Update role', roles_delete: 'Delete role', users_sessions_revoke: 'Force sign out', users_roles_update: 'Update user roles', invitations_create: 'Create invitation', invitations_resend: 'Resend invitation', invitations_revoke: 'Revoke invitation',
       settings_email_update: 'Update email settings', settings_email_test: 'Test email settings', settings_operation_log_retention_update: 'Update history retention',
     },
     objectLabels: { session: 'Session', account: 'Account', password_reset: 'Password reset', password: 'Password', invitation: 'Invitation', role: 'Role', user: 'User', email_settings: 'Email settings', operation_log_settings: 'History settings' },
@@ -254,6 +264,7 @@ const english = {
     invitationAcceptedDescription: 'Your account is ready. Sign in to continue.',
     invalidInvitationTitle: 'This invitation is invalid',
     invalidInvitationDescription: 'The link may be expired, revoked, or already used. Ask an administrator for a new invitation.',
+    onlineUsers: 'Online users', permissionOnlineUsersRead: 'View online users', permissionOnlineUsersWrite: 'Force sign out', permissionOnlineUsersReadDescription: 'View users with a valid sign-in session.', permissionOnlineUsersWriteDescription: 'Force any user to sign out of all devices, including a Super Admin or yourself.',
     permissionUsersRead: 'View users',
     permissionUsersWrite: 'Assign user roles',
     permissionRolesRead: 'View roles',
@@ -377,9 +388,18 @@ const english = {
 }
 
 const chinese: typeof english = {
+  onlineUsers: {
+    title: '在线用户', description: '显示至少有一个有效登录会话的用户，包括近期没有活动的会话。打开的页面每 30 秒检查一次会话，列表每 15 秒刷新。',
+    sessions: '有效会话数', lastSeen: '最近活动', you: '你', forceSignOut: '强制退出', refresh: '刷新', empty: '暂无在线用户。',
+    confirmTitle: '确认强制退出？', confirm: '将 {{name}}（{{email}}）在所有设备上的登录会话强制退出。该用户可以重新登录。',
+    confirmSelf: '你的所有设备（包括当前页面）都将强制退出。你可以重新登录。',
+    working: '正在强制退出…', success: '已将 {{name}} 强制退出。', loadFailed: '无法加载在线用户。', forceSignOutFailed: '强制退出失败。',
+  },
+
   common: {
     home: '主页',
     settings: '系统设置',
+    systemMonitoring: '系统监控',
     configureSettings: '配置系统设置',
     menu: '菜单',
     language: '语言',
@@ -447,6 +467,7 @@ const chinese: typeof english = {
     logoutFailedDescription: '服务器没有确认会话已经撤销，请重试。',
     sessionUnavailableTitle: '无法检查登录状态',
     sessionUnavailableDescription: 'API 暂时不可用或返回了异常响应。当前会话仍会保留。',
+    sessionExpired: '登录已失效，请重新登录。',
     homeTitle: '主页',
     welcome: '欢迎回来，{{name}}。',
     operationalWarningTitle: '需要处理',
@@ -520,7 +541,7 @@ const chinese: typeof english = {
     retentionReadUnavailableDescription: 'API 暂时无法加载保留设置，请刷新页面后再试。',
     actionLabels: {
       auth_login: '登录', auth_logout: '退出登录', auth_password_reset_request: '请求密码重置', auth_password_reset_complete: '完成密码重置', auth_invitation_accept: '接受邀请', auth_setup_complete: '完成初始化',
-      roles_create: '创建角色', roles_update: '更新角色', roles_delete: '删除角色', users_roles_update: '更新用户角色', invitations_create: '创建邀请', invitations_resend: '重新发送邀请', invitations_revoke: '撤销邀请',
+      roles_create: '创建角色', roles_update: '更新角色', roles_delete: '删除角色', users_sessions_revoke: '强制退出', users_roles_update: '更新用户角色', invitations_create: '创建邀请', invitations_resend: '重新发送邀请', invitations_revoke: '撤销邀请',
       settings_email_update: '更新邮件设置', settings_email_test: '测试邮件设置', settings_operation_log_retention_update: '更新历史保留期限',
     },
     objectLabels: { session: '会话', account: '账户', password_reset: '密码重置', password: '密码', invitation: '邀请', role: '角色', user: '用户', email_settings: '邮件设置', operation_log_settings: '历史设置' },
@@ -632,6 +653,7 @@ const chinese: typeof english = {
     invitationAcceptedDescription: '账户已准备就绪，请登录继续。',
     invalidInvitationTitle: '邀请链接无效',
     invalidInvitationDescription: '链接可能已过期、撤销或使用过，请向管理员索要新的邀请。',
+    onlineUsers: '在线用户', permissionOnlineUsersRead: '查看在线用户', permissionOnlineUsersWrite: '强制退出', permissionOnlineUsersReadDescription: '查看拥有有效登录会话的用户。', permissionOnlineUsersWriteDescription: '将任意用户在所有设备上的登录会话强制退出，包括超级管理员和自己。',
     permissionUsersRead: '查看用户',
     permissionUsersWrite: '分配用户角色',
     permissionRolesRead: '查看角色',

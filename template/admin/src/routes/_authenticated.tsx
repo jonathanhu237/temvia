@@ -1,4 +1,5 @@
 import { createFileRoute, isRedirect, Outlet, redirect } from '@tanstack/react-router'
+import { SessionMonitor } from '@/features/auth/session-monitor'
 import { AuthenticatedShell } from '@/features/auth/authenticated-shell'
 import { SessionError } from '@/features/auth/session-error'
 import { currentUserOptions } from '@/features/auth/queries'
@@ -33,5 +34,5 @@ export const Route = createFileRoute('/_authenticated')({
 function AuthenticatedRoute() {
   const { user } = Route.useLoaderData()
   const { api } = Route.useRouteContext()
-  return <AuthenticatedShell api={api} user={user}><Outlet /></AuthenticatedShell>
+  return <AuthenticatedShell api={api} user={user}><SessionMonitor api={api} userID={user.id} /><Outlet /></AuthenticatedShell>
 }

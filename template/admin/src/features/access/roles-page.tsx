@@ -14,7 +14,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -141,10 +141,9 @@ export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = 
 
   if (query.isPending) return <p role="status">{t('common:loading')}</p>
   return <section className="flex flex-col gap-5" aria-labelledby="roles-title">
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1></div>{canManage && !rolesForbidden ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" data-icon="inline-start" />{t('createRole')}</Button> : null}</div>
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><h1 id="roles-title" className="text-2xl font-semibold tracking-tight">{t('rolesTitle')}</h1>{canManage && !rolesForbidden ? <Button type="button" onClick={openCreate}><Plus aria-hidden="true" data-icon="inline-start" />{t('createRole')}</Button> : null}</div>
     <Card>
-      <CardHeader><CardTitle className="text-lg">{t('roles')}</CardTitle></CardHeader>
-      <CardContent>{query.isError && (rolesForbidden || !query.data) ? <p role="status" className="text-sm text-muted-foreground">{rolesForbidden ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} />}</CardContent>
+      <CardContent className="pt-6">{query.isError && (rolesForbidden || !query.data) ? <p role="status" className="text-sm text-muted-foreground">{rolesForbidden ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <DataTable columns={columns} data={filteredRoles} search={search} onSearchChange={setSearch} searchPlaceholder={t('searchRoles')} clearSearchLabel={t('clearSearch')} emptyMessage={search ? t('noSearchResults') : t('noRoles')} manualFiltering sorting={sorting} onSortingChange={handleSorting} />}</CardContent>
     </Card>
     <Dialog open={detailOpen && !rolesForbidden} onOpenChange={setDetailOpen}>
       <DialogContent forceMount closeLabel={t('common:close')} className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
@@ -355,6 +354,8 @@ function isStaleRevision(error: unknown): boolean {
 }
 
 const permissionLabelKeys: Record<string, string> = {
+ 'online-users.read': 'permissionOnlineUsersRead',
+ 'online-users.write': 'permissionOnlineUsersWrite',
   'users.read': 'permissionUsersRead',
   'users.write': 'permissionUsersWrite',
   'roles.read': 'permissionRolesRead',
@@ -367,6 +368,8 @@ const permissionLabelKeys: Record<string, string> = {
 }
 
 const permissionDescriptionKeys: Record<string, string> = {
+ 'online-users.read': 'permissionOnlineUsersReadDescription',
+ 'online-users.write': 'permissionOnlineUsersWriteDescription',
   'users.read': 'permissionUsersReadDescription',
   'users.write': 'permissionUsersWriteDescription',
   'roles.read': 'permissionRolesReadDescription',
@@ -387,6 +390,7 @@ function localizedPermissionDescription(key: string, t: (key: string) => string,
 }
 
 const resourceLabelKeys: Record<string, string> = {
+ 'online-users': 'onlineUsers',
   users: 'users',
   roles: 'roles',
   invitations: 'invitations',

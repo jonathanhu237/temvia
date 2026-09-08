@@ -191,3 +191,26 @@ the generator. The generic Compose file does not assume public DNS or TLS;
 configure direct Caddy TLS or an external ingress and keep `APP_PUBLIC_URL`
 equal to the public HTTPS origin. Nginx can replace Caddy if it preserves the
 same exact API proxy and SPA fallback behavior.
+
+### Online users
+
+The **System monitoring → Online users** page lists users with at least one valid
+sign-in session, grouped by account. A session remains online while it is valid
+even when its browser page is closed or it has had no recent activity. The page
+shows the user's name, email, valid session count, and last activity. The list
+refreshes every 15 seconds; open authenticated pages check their session every
+30 seconds. Browsers may throttle these checks when suspended.
+
+Grant `online-users.read` to view the list and `online-users.write` to force sign
+users out. The write permission can force sign out any user, including a Super
+Admin or the current user; the read permission remains independent. Force sign
+out revokes all
+existing sessions using the PostgreSQL account version, including inactive
+devices; users may sign in again. Revoked sessions are denied on their next
+request, and open pages show a localized expiry message before returning to
+login after a session check. Successful and failed force sign-out actions appear
+in operation history.
+
+`GET /api/online-users` returns `{ users: [{ id, name, email, lastSeenAt,
+sessionCount }] }`. `POST /api/online-users/{id}/kick` requires a same-origin
+request and returns 204. Session credentials are never exposed in these APIs.

@@ -85,10 +85,48 @@ func (s *Store) ResolveAndTouchVersioned(ctx context.Context, sessionID string) 
 	return s.resolveAndTouch(ctx, sessionID)
 }
 
+func (s *Store) Resolve(ctx context.Context, sessionID string) (string, error) {
+	userID, _, err := s.resolveReadOnly(ctx, sessionID)
+	return userID, err
+}
+
+func (s *Store) ResolveVersioned(ctx context.Context, sessionID string) (string, int64, error) {
+	return s.resolveReadOnly(ctx, sessionID)
+}
+
 func (s *Store) resolveAndTouch(ctx context.Context, sessionID string) (string, int64, error) {
 	operationCtx, cancel := s.operationContext(ctx)
 	defer cancel()
 	values, err := resolveSessionScript.Run(operationCtx, s.client, []string{sessionKey(sessionID)}, s.idleTimeout.Milliseconds()).Slice()
+	if err != nil {
+		return "", 0, err
+	}
+	if len(values) == 0 || asInt64(values[0]) != 1 || len(values) < 2 {
+		return "", 0, nil
+	}
+	var userID string
+	switch value := values[1].(type) {
+	case string:
+		userID = value
+	case []byte:
+		userID = string(value)
+	default:
+		return "", 0, fmt.Errorf("redis returned malformed session value")
+	}
+	if len(values) < 3 {
+		return "", 0, nil
+	}
+	authVersion := asInt64(values[2])
+	if authVersion <= 0 {
+		return "", 0, nil
+	}
+	return userID, authVersion, nil
+}
+
+func (s *Store) resolveReadOnly(ctx context.Context, sessionID string) (string, int64, error) {
+	operationCtx, cancel := s.operationContext(ctx)
+	defer cancel()
+	values, err := resolveSessionReadOnlyScript.Run(operationCtx, s.client, []string{sessionKey(sessionID)}).Slice()
 	if err != nil {
 		return "", 0, err
 	}

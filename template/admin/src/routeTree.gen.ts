@@ -20,6 +20,7 @@ import { Route as AuthenticatedInvitationsRouteImport } from './routes/_authenti
 import { Route as AuthenticatedOperationLogsRouteImport } from './routes/_authenticated/operation-logs'
 import { Route as AuthenticatedRolesRouteImport } from './routes/_authenticated/roles'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedOnlineUsersRouteImport } from './routes/_authenticated/online-users'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
 
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
@@ -78,6 +79,7 @@ const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedOnlineUsersRoute = AuthenticatedOnlineUsersRouteImport.update({ id: '/online-users', path: '/online-users', getParentRoute: () => AuthenticatedRoute } as any)
 const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
   id: '/users',
   path: '/users',
@@ -95,6 +97,7 @@ export interface FileRoutesByFullPath {
   '/operation-logs': typeof AuthenticatedOperationLogsRoute
   '/roles': typeof AuthenticatedRolesRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/online-users': typeof AuthenticatedOnlineUsersRoute
   '/users': typeof AuthenticatedUsersRoute
 }
 export interface FileRoutesByTo {
@@ -107,6 +110,7 @@ export interface FileRoutesByTo {
   '/operation-logs': typeof AuthenticatedOperationLogsRoute
   '/roles': typeof AuthenticatedRolesRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/online-users': typeof AuthenticatedOnlineUsersRoute
   '/users': typeof AuthenticatedUsersRoute
   '/': typeof AuthenticatedIndexRoute
 }
@@ -122,6 +126,7 @@ export interface FileRoutesById {
   '/_authenticated/operation-logs': typeof AuthenticatedOperationLogsRoute
   '/_authenticated/roles': typeof AuthenticatedRolesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/online-users': typeof AuthenticatedOnlineUsersRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
 }
@@ -138,6 +143,7 @@ export interface FileRouteTypes {
     | '/operation-logs'
     | '/roles'
     | '/settings'
+    | '/online-users'
     | '/users'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -150,6 +156,7 @@ export interface FileRouteTypes {
     | '/operation-logs'
     | '/roles'
     | '/settings'
+    | '/online-users'
     | '/users'
     | '/'
   id:
@@ -164,6 +171,7 @@ export interface FileRouteTypes {
     | '/_authenticated/operation-logs'
     | '/_authenticated/roles'
     | '/_authenticated/settings'
+    | '/_authenticated/online-users'
     | '/_authenticated/users'
     | '/_authenticated/'
   fileRoutesById: FileRoutesById
@@ -256,6 +264,7 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/online-users': { id: '/_authenticated/online-users'; path: '/online-users'; fullPath: '/online-users'; preLoaderRoute: typeof AuthenticatedOnlineUsersRouteImport; parentRoute: typeof AuthenticatedRoute }
     '/_authenticated/users': {
       id: '/_authenticated/users'
       path: '/users'
@@ -271,6 +280,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedOperationLogsRoute: typeof AuthenticatedOperationLogsRoute
   AuthenticatedRolesRoute: typeof AuthenticatedRolesRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedOnlineUsersRoute: typeof AuthenticatedOnlineUsersRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
@@ -280,6 +290,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedOperationLogsRoute: AuthenticatedOperationLogsRoute,
   AuthenticatedRolesRoute: AuthenticatedRolesRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedOnlineUsersRoute: AuthenticatedOnlineUsersRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
 }

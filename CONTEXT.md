@@ -100,3 +100,18 @@ The observed condition of saving operation history, including an unknown initial
 
 **Unverified actor**:
 A person whose identity has not been established for an account activity. An account identifier supplied in an unsuccessful login attempt does not establish that the account holder performed it.
+
+# Temvia online user management
+
+## Language
+
+**Online user**:
+A user with at least one valid sign-in session, even when their browser page is closed. Online status does not mean the person is actively using the application.
+_Avoid_: Recently active user
+
+**Force sign-out（强制退出）**:
+An administrative action that ends all existing sign-in sessions for a user across devices. It does not prevent the user from signing in again.
+_Avoid_: 踢下线, disable user, ban user
+
+**Force sign-out permission（强制退出权限）**:
+The administrative capability to force any user to sign out, including a Super Admin or the actor themselves. The target user's role does not restrict this capability.

@@ -48,9 +48,9 @@ function SetupRoute() {
 
   if (error) {
     return (
-      <AuthPage title={t('setupDependencyTitle')} description={t('setupDependencyDescription')}>
+      <AuthPage title={t('setupDependencyTitle')}>
         <div className="flex flex-col gap-5">
-          <AuthAlert title={t('setupDependencyTitle')} description={translateProblem(error, t)} />
+          <AuthAlert description={translateProblem(error, t)} />
           <Button type="button" className="w-full" onClick={() => void router.invalidate()}>{commonT('retry')}</Button>
         </div>
       </AuthPage>

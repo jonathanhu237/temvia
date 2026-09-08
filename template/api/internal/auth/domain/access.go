@@ -123,6 +123,8 @@ func (c PermissionCatalog) Combinations() []PermissionCombination {
 
 func DefaultPermissionCatalog() PermissionCatalog {
 	catalog, _ := NewPermissionCatalog(
+		PermissionDefinition{Key: PermissionOnlineUsersRead, Resource: "online-users", Action: "read", LabelKey: "permissions.onlineUsers.read", Description: "View users with a valid sign-in session."},
+		PermissionDefinition{Key: PermissionOnlineUsersWrite, Resource: "online-users", Action: "write", LabelKey: "permissions.onlineUsers.write", Description: "Sign users out of all devices."},
 		PermissionDefinition{Key: PermissionUsersRead, Resource: "users", Action: "read", LabelKey: "permissions.users.read", Description: "View users and their assigned roles."},
 		PermissionDefinition{Key: PermissionUsersWrite, Resource: "users", Action: "write", LabelKey: "permissions.users.write", Description: "Assign roles to users."},
 		PermissionDefinition{Key: PermissionRolesRead, Resource: "roles", Action: "read", LabelKey: "permissions.roles.read", Description: "View roles and their grants."},
@@ -143,6 +145,8 @@ func DefaultPermissionCatalog() PermissionCatalog {
 }
 
 const (
+	PermissionOnlineUsersRead   PermissionKey = "online-users.read"
+	PermissionOnlineUsersWrite  PermissionKey = "online-users.write"
 	PermissionUsersRead         PermissionKey = "users.read"
 	PermissionUsersWrite        PermissionKey = "users.write"
 	PermissionRolesRead         PermissionKey = "roles.read"

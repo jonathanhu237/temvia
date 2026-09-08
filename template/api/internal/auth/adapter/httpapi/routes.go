@@ -129,6 +129,11 @@ func newHandlerWithOperationLog(setup SetupService, auth AuthenticationService, 
 	h.mux.HandleFunc("POST /api/setup", h.setupComplete)
 	h.mux.HandleFunc("POST /api/auth/login", h.login)
 	h.mux.HandleFunc("GET /api/auth/me", h.me)
+	h.mux.HandleFunc("GET /api/auth/session-status", h.sessionStatus)
+	if _, ok := auth.(onlineService); ok {
+		h.mux.HandleFunc("GET /api/online-users", h.onlineUsers)
+		h.mux.HandleFunc("POST /api/online-users/{id}/kick", h.kickUser)
+	}
 	h.mux.HandleFunc("POST /api/auth/logout", h.logout)
 	if h.recovery != nil {
 		h.mux.HandleFunc("POST /api/auth/password-reset/request", h.passwordResetRequest)
@@ -198,12 +203,14 @@ var knownMethods = map[string]string{
 	"/api/setup":                            "POST",
 	"/api/auth/login":                       "POST",
 	"/api/auth/me":                          "GET",
+	"/api/auth/session-status":              "GET",
 	"/api/auth/logout":                      "POST",
 	"/api/auth/password-reset/request":      "POST",
 	"/api/auth/password-reset/complete":     "POST",
 	"/api/roles":                            "GET, POST",
 	"/api/access/role-options":              "GET",
 	"/api/users":                            "GET",
+	"/api/online-users":                     "GET",
 	"/api/user-invitations":                 "GET, POST",
 	"/api/settings/email":                   "GET, PUT",
 	"/api/settings/email/test":              "POST",
@@ -239,6 +246,9 @@ func expectedMethods(path string) (string, bool) {
 	}
 	if len(parts) == 4 && parts[0] == "api" && parts[1] == "users" && parts[3] == "roles" {
 		return "PUT", true
+	}
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "online-users" && parts[3] == "kick" {
+		return "POST", true
 	}
 	return "", false
 }
@@ -350,6 +360,17 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, userResponse(user))
+}
+
+// sessionStatus is deliberately separate from /api/auth/me. The latter is a
+// normal authenticated request and renews the session; this endpoint is used
+// by the periodic browser probe and must only inspect session state.
+func (h *Handler) sessionStatus(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.currentPrincipalNoTouch(r); err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
@@ -495,6 +516,24 @@ func (h *Handler) currentPrincipal(r *http.Request) (domain.Principal, error) {
 		return domain.Principal{}, err
 	}
 	return domain.Principal{User: user}, nil
+}
+
+func (h *Handler) currentPrincipalNoTouch(r *http.Request) (domain.Principal, error) {
+	cookie, err := r.Cookie(h.cfg.CookieName)
+	if err != nil {
+		return domain.Principal{}, application.ErrUnauthenticated
+	}
+	if enriched, ok := h.auth.(application.NoTouchPrincipalAuthenticationService); ok {
+		return enriched.CurrentPrincipalNoTouch(r.Context(), cookie.Value)
+	}
+	if readOnly, ok := h.auth.(application.NoTouchAuthenticationService); ok {
+		user, err := readOnly.CurrentNoTouch(r.Context(), cookie.Value)
+		if err != nil {
+			return domain.Principal{}, err
+		}
+		return domain.Principal{User: user}, nil
+	}
+	return domain.Principal{}, application.ErrDependencyUnavailable
 }
 
 func (h *Handler) roles(w http.ResponseWriter, r *http.Request) {

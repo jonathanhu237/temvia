@@ -9,7 +9,6 @@ export function SessionError({ error }: { error: unknown }) {
   return (
     <AuthPage
       title={t('sessionUnavailableTitle')}
-      description={t('sessionUnavailableDescription')}
     >
       <p role="status" className="text-sm text-muted-foreground">{t('sessionUnavailableDescription')}</p>
     </AuthPage>

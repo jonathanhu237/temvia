@@ -1,4 +1,7 @@
 import {
+  onlineUsersResponseSchema,
+  sessionStatusSchema,
+  type OnlineUser,
 	authEnvelopeSchema,
 	loginInputSchema,
 	assignmentInputSchema,
@@ -64,10 +67,13 @@ export class ApiTransportError extends Error {
 }
 
 export interface ApiClient {
+  getOnlineUsers?(signal?: AbortSignal): Promise<{ users: OnlineUser[] }>
+  kickUser?(id: string, signal?: AbortSignal): Promise<void>
   getSetupStatus(signal?: AbortSignal): Promise<SetupStatus>
   setup(input: { token: string; name: string; email: string; password: string }, signal?: AbortSignal): Promise<void>
   login(input: { email: string; password: string }, signal?: AbortSignal): Promise<User>
   me(signal?: AbortSignal): Promise<User>
+  checkSession?(signal?: AbortSignal): Promise<void>
 	getRoles?(signal?: AbortSignal): Promise<{ roles: Role[]; permissions: Permission[]; combinations?: Array<{ key: string; labelKey: string; description: string; permissions: string[]; trigger?: string[] }> }>
 	getRoleOptions?(signal?: AbortSignal): Promise<{ roles: RoleOption[] }>
 	getRole?(id: string, signal?: AbortSignal): Promise<Role>
@@ -175,6 +181,9 @@ async function request<T>(path: string, schema: { parse(value: unknown): T }, op
 
 export function createApiClient(): ApiClient {
   return {
+    getOnlineUsers: (signal) => request('/api/online-users', onlineUsersResponseSchema, { signal, expectedStatus: 200 }),
+    kickUser: async (id, signal) => { await request(`/api/online-users/${encodeURIComponent(id)}/kick`, { parse: (value: unknown) => value as undefined }, { method: 'POST', signal, expectedStatus: 204 }) },
+    checkSession: async (signal) => { await request('/api/auth/session-status', sessionStatusSchema, { signal, expectedStatus: 200 }) },
     getSetupStatus: (signal) => request('/api/setup/status', setupStatusSchema, { signal, expectedStatus: 200 }),
     setup: async (input, signal) => {
       const body = setupInputSchema.parse(input)

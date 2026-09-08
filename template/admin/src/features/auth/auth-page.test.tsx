@@ -35,15 +35,15 @@ describe('authentication page shell', () => {
     expect(screen.queryByText('Temvia')).not.toBeInTheDocument()
   })
 
-  it('renders additional context only when the page supplies a description', () => {
+  it('keeps the authentication shell to one page heading', () => {
     render(
-      <AuthPage title="Example page" description="Additional context.">
+      <AuthPage title="Example page">
         <p>Page content</p>
       </AuthPage>,
     )
 
-    expect(screen.getByText('Additional context.')).toBeVisible()
     expect(screen.getByText('Page content')).toBeVisible()
+    expect(screen.getAllByRole('heading')).toHaveLength(1)
   })
 
   it('opens each authentication preference menu directly and keeps selections independent', async () => {

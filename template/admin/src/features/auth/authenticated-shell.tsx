@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Activity, ChevronDown, House, LogOut, Mail, Settings, ShieldCheck, UserRound, Users } from 'lucide-react'
+import { Activity, ChevronDown, History, House, LogOut, Mail, Monitor, Settings, ShieldCheck, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
@@ -30,19 +30,24 @@ import type { User } from '@/shared/api/contracts'
 import { clearAccessDrafts, useAccessDraftStore } from '@/features/access/drafts'
 
 export function AuthenticatedShell({ api, user, children }: { api: ApiClient; user: User; children: React.ReactNode }) {
-  const { t } = useTranslation(['common', 'auth', 'problems', 'access', 'operationLog'])
+  const { t } = useTranslation(['common', 'auth', 'problems', 'access', 'operationLog', 'onlineUsers'])
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
+  const hasOnlineUsersAccess = Boolean(user.superAdmin || user.permissions?.includes('online-users.read'))
   const hasUsersAccess = Boolean(user.superAdmin || user.permissions?.includes('users.read'))
   const hasInvitationsAccess = Boolean(user.superAdmin || user.permissions?.includes('invitations.read'))
   const hasRolesAccess = Boolean(user.superAdmin || user.permissions?.includes('roles.read'))
   const hasSettingsAccess = Boolean(user.superAdmin || user.permissions?.includes('settings.read'))
   const hasOperationLogsAccess = Boolean(user.superAdmin || user.permissions?.includes('operation-logs.read'))
   const hasAccessMenu = hasUsersAccess || hasInvitationsAccess || hasRolesAccess
+  const hasMonitoringMenu = hasOnlineUsersAccess || hasOperationLogsAccess
   const accessMenuActive = location.pathname.startsWith('/users') || location.pathname.startsWith('/invitations') || location.pathname.startsWith('/roles')
+  const monitoringMenuActive = location.pathname.startsWith('/online-users') || location.pathname.startsWith('/operation-logs')
   const [accessMenuOpen, setAccessMenuOpen] = useState(true)
+  const [monitoringMenuOpen, setMonitoringMenuOpen] = useState(true)
   const accessMenuExpanded = accessMenuOpen || accessMenuActive
+  const monitoringMenuExpanded = monitoringMenuOpen || monitoringMenuActive
   useEffect(() => {
     const previousOwnerID = useAccessDraftStore.getState().ownerID
     if (previousOwnerID && previousOwnerID !== user.id) {
@@ -107,7 +112,19 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
                     </SidebarMenuSub> : null}
                   </SidebarMenuItem>
                 ) : null}
-                {hasOperationLogsAccess ? <SidebarMenuItem><SidebarMenuButton asChild isActive={location.pathname.startsWith('/operation-logs')} tooltip={t('operationLog:title')}><Link to="/operation-logs" aria-current={location.pathname.startsWith('/operation-logs') ? 'page' : undefined}><Activity aria-hidden="true" data-icon="inline-start" /><span>{t('operationLog:title')}</span></Link></SidebarMenuButton></SidebarMenuItem> : null}
+                {hasMonitoringMenu ? (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton type="button" isActive={monitoringMenuActive} tooltip={t('systemMonitoring')} aria-expanded={monitoringMenuExpanded} onClick={() => setMonitoringMenuOpen((open) => !open)}>
+                      <Monitor aria-hidden="true" data-icon="inline-start" />
+                      <span>{t('systemMonitoring')}</span>
+                      <ChevronDown aria-hidden="true" className="ml-auto transition-transform data-[open=false]:-rotate-90 group-data-[collapsible=icon]:hidden" data-open={monitoringMenuExpanded} />
+                    </SidebarMenuButton>
+                    {monitoringMenuExpanded ? <SidebarMenuSub>
+                      {hasOnlineUsersAccess ? <SidebarMenuSubItem><SidebarMenuSubButton asChild isActive={location.pathname.startsWith('/online-users')}><Link to="/online-users" aria-current={location.pathname.startsWith('/online-users') ? 'page' : undefined}><Activity aria-hidden="true" /><span>{t('onlineUsers:title')}</span></Link></SidebarMenuSubButton></SidebarMenuSubItem> : null}
+                      {hasOperationLogsAccess ? <SidebarMenuSubItem><SidebarMenuSubButton asChild isActive={location.pathname.startsWith('/operation-logs')}><Link to="/operation-logs" aria-current={location.pathname.startsWith('/operation-logs') ? 'page' : undefined}><History aria-hidden="true" /><span>{t('operationLog:title')}</span></Link></SidebarMenuSubButton></SidebarMenuSubItem> : null}
+                    </SidebarMenuSub> : null}
+                  </SidebarMenuItem>
+                ) : null}
                 {/* Keep system settings last; add new navigation items above it. */}
                 {hasSettingsAccess ? <SidebarMenuItem><SidebarMenuButton asChild isActive={location.pathname.startsWith('/settings')} tooltip={t('settings')}><Link to="/settings" aria-current={location.pathname.startsWith('/settings') ? 'page' : undefined}><Settings aria-hidden="true" data-icon="inline-start" /><span>{t('settings')}</span></Link></SidebarMenuButton></SidebarMenuItem> : null}
               </SidebarMenu>
@@ -146,7 +163,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger aria-label={t('menu')} />
             <div className="h-4 w-px bg-border" aria-hidden="true" />
-            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : location.pathname.startsWith('/settings') ? t('settings') : location.pathname.startsWith('/operation-logs') ? t('operationLog:title') : t('home')}</p>
+            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/online-users') ? t('onlineUsers:title') : location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : location.pathname.startsWith('/settings') ? t('settings') : location.pathname.startsWith('/operation-logs') ? t('operationLog:title') : t('home')}</p>
           </div>
           <PreferencesButtons className="shrink-0" />
         </header>

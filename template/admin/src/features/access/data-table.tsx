@@ -16,6 +16,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
+const EMPTY_SORTING: SortingState = []
+
 export function SortableHeader<T>({ column, children }: { column: Column<T, unknown>; children: React.ReactNode }) {
   const { t } = useTranslation('common')
   const direction = column.getIsSorted()
@@ -52,7 +54,7 @@ export function DataTable<T>({
   searchPlaceholder,
   clearSearchLabel,
   emptyMessage,
-  sorting = [],
+  sorting = EMPTY_SORTING,
   onSortingChange,
   manualFiltering = false,
   manualSorting = false,

@@ -142,11 +142,28 @@ type fakeLimiter struct {
 func (l *fakeLimiter) Allow(context.Context, string) (bool, error) { return l.allow, nil }
 func (l *fakeLimiter) ResetEmail(context.Context, string) error    { l.reset++; return nil }
 
-type fakeSessions struct{ created, deleted string }
+type fakeSessions struct {
+	created, deleted string
+	touchCalls       int
+	noTouchCalls     int
+}
 
-func (s *fakeSessions) Create(_ context.Context, id, _ string) error            { s.created = id; return nil }
-func (s *fakeSessions) ResolveAndTouch(context.Context, string) (string, error) { return "user-1", nil }
-func (s *fakeSessions) Delete(_ context.Context, id string) error               { s.deleted = id; return nil }
+func (s *fakeSessions) Create(_ context.Context, id, _ string) error {
+	s.created = id
+	return nil
+}
+func (s *fakeSessions) ResolveAndTouch(context.Context, string) (string, error) {
+	s.touchCalls++
+	return "user-1", nil
+}
+func (s *fakeSessions) Resolve(context.Context, string) (string, error) {
+	s.noTouchCalls++
+	return "user-1", nil
+}
+func (s *fakeSessions) Delete(_ context.Context, id string) error {
+	s.deleted = id
+	return nil
+}
 
 type versionedFakeSessions struct {
 	fakeSessions
@@ -159,6 +176,12 @@ func (s *versionedFakeSessions) CreateVersioned(_ context.Context, id, _ string,
 }
 
 func (s *versionedFakeSessions) ResolveAndTouchVersioned(context.Context, string) (string, int64, error) {
+	s.touchCalls++
+	return "user-1", s.version, nil
+}
+
+func (s *versionedFakeSessions) ResolveVersioned(context.Context, string) (string, int64, error) {
+	s.noTouchCalls++
 	return "user-1", s.version, nil
 }
 
@@ -221,6 +244,21 @@ func TestCurrentAllowsMatchingVersionedSession(t *testing.T) {
 	user, err := auth.Current(context.Background(), session)
 	if err != nil || user.ID != account.User.ID {
 		t.Fatalf("Current(matching) = %#v, %v", user, err)
+	}
+}
+
+func TestCurrentNoTouchDoesNotRenewVersionedSession(t *testing.T) {
+	account := domain.Account{User: domain.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}, AuthVersion: 2}
+	sessions := &versionedFakeSessions{version: 2}
+	auth := NewAuthentication(versionedFakeAccounts{fakeAccounts{account}}, &fakeHasher{}, sessions, &fakeLimiter{allow: true}, fakeRandom{value: 8})
+	session := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, sessionIDBytes))
+
+	user, err := auth.CurrentNoTouch(context.Background(), session)
+	if err != nil || user.ID != account.User.ID {
+		t.Fatalf("CurrentNoTouch() = %#v, %v", user, err)
+	}
+	if sessions.noTouchCalls != 1 || sessions.touchCalls != 0 {
+		t.Fatalf("session resolver calls = no-touch %d, touch %d", sessions.noTouchCalls, sessions.touchCalls)
 	}
 }
 

@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -141,10 +141,9 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
 
   if (invitations.isPending || (canManage && roleAdministration.isPending)) return <p role="status">{t('common:loading')}</p>
   return <section className="flex flex-col gap-5" aria-labelledby="invitations-title">
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h1 id="invitations-title" className="text-2xl font-semibold tracking-tight">{t('invitationsTitle')}</h1></div>{canManage && !roleAdministrationForbidden ? <Button type="button" onClick={() => setInviteOpen(true)}><UserPlus aria-hidden="true" data-icon="inline-start" />{t('inviteUser')}</Button> : null}</div>
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><h1 id="invitations-title" className="text-2xl font-semibold tracking-tight">{t('invitationsTitle')}</h1>{canManage && !roleAdministrationForbidden ? <Button type="button" onClick={() => setInviteOpen(true)}><UserPlus aria-hidden="true" data-icon="inline-start" />{t('inviteUser')}</Button> : null}</div>
     <Card>
-      <CardHeader><CardTitle className="text-lg">{t('invitations')}</CardTitle></CardHeader>
-      <CardContent>
+      <CardContent className="pt-6">
         {invitations.isError && (invitationsForbidden || !invitations.data) ? <p role="status" className="text-sm text-muted-foreground">{invitationsForbidden ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <>
         <DataTable
           columns={columns}

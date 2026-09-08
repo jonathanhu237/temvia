@@ -59,6 +59,28 @@ redis.call('PEXPIREAT', key, expires)
 return {1, values[1], values[3]}
 `)
 
+// resolveSessionReadOnlyScript deliberately contains no writes. Redis key
+// expiry enforces the idle timeout; the absolute timestamp is checked here so
+// a key whose expiry is being processed at the boundary is not accepted.
+var resolveSessionReadOnlyScript = redis.NewScript(`
+local key = KEYS[1]
+if redis.call('EXISTS', key) == 0 then
+  return {0}
+end
+local values = redis.call('HMGET', key, 'user_id', 'absolute_expires_at_ms', 'auth_version')
+if not values[1] or not values[2] or not values[3] then
+  return {0}
+end
+local nowParts = redis.call('TIME')
+local now = (tonumber(nowParts[1]) * 1000) + math.floor(tonumber(nowParts[2]) / 1000)
+local absolute = tonumber(values[2])
+local authVersion = tonumber(values[3])
+if not absolute or not authVersion or authVersion <= 0 or now >= absolute then
+  return {0}
+end
+return {1, values[1], values[3]}
+`)
+
 var allowLoginScript = redis.NewScript(`
 local nowParts = redis.call('TIME')
 local now = (tonumber(nowParts[1]) * 1000) + math.floor(tonumber(nowParts[2]) / 1000)

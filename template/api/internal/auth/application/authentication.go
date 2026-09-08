@@ -97,6 +97,17 @@ func (a *Authentication) Login(ctx context.Context, input LoginInput) (domain.Us
 }
 
 func (a *Authentication) Current(ctx context.Context, sessionID string) (domain.User, error) {
+	return a.current(ctx, sessionID, true)
+}
+
+// CurrentNoTouch checks a session without updating its activity timestamp or
+// idle expiry. Background status checks must use this path so an open page
+// cannot keep an otherwise idle session alive.
+func (a *Authentication) CurrentNoTouch(ctx context.Context, sessionID string) (domain.User, error) {
+	return a.current(ctx, sessionID, false)
+}
+
+func (a *Authentication) current(ctx context.Context, sessionID string, touch bool) (domain.User, error) {
 	if !isUnpaddedBase64URL(sessionID, sessionIDBytes) {
 		return domain.User{}, ErrUnauthenticated
 	}
@@ -105,9 +116,25 @@ func (a *Authentication) Current(ctx context.Context, sessionID string) (domain.
 	var sessionVersion int64
 	var err error
 	if hasVersionedSession {
-		userID, sessionVersion, err = versioned.ResolveAndTouchVersioned(ctx, sessionID)
+		if touch {
+			userID, sessionVersion, err = versioned.ResolveAndTouchVersioned(ctx, sessionID)
+		} else {
+			readOnly, ok := a.sessions.(ReadOnlyVersionedSessionStore)
+			if !ok {
+				return domain.User{}, ErrDependencyUnavailable
+			}
+			userID, sessionVersion, err = readOnly.ResolveVersioned(ctx, sessionID)
+		}
 	} else {
-		userID, err = a.sessions.ResolveAndTouch(ctx, sessionID)
+		if touch {
+			userID, err = a.sessions.ResolveAndTouch(ctx, sessionID)
+		} else {
+			readOnly, ok := a.sessions.(ReadOnlySessionStore)
+			if !ok {
+				return domain.User{}, ErrDependencyUnavailable
+			}
+			userID, err = readOnly.Resolve(ctx, sessionID)
+		}
 	}
 	if err != nil {
 		return domain.User{}, dependencyError(err)
@@ -159,6 +186,18 @@ type PrincipalAuthenticationService interface {
 	CurrentPrincipal(context.Context, string) (domain.Principal, error)
 }
 
+// NoTouchAuthenticationService is intentionally separate from
+// PrincipalAuthenticationService so existing callers keep the ordinary
+// renewing authentication behavior unless they explicitly opt into a
+// background probe.
+type NoTouchAuthenticationService interface {
+	CurrentNoTouch(context.Context, string) (domain.User, error)
+}
+
+type NoTouchPrincipalAuthenticationService interface {
+	CurrentPrincipalNoTouch(context.Context, string) (domain.Principal, error)
+}
+
 func (a *Authentication) LoginWithPrincipal(ctx context.Context, input LoginInput) (domain.Principal, string, error) {
 	user, sessionID, err := a.Login(ctx, input)
 	if err != nil {
@@ -187,6 +226,17 @@ func (a *Authentication) LoginWithPrincipal(ctx context.Context, input LoginInpu
 
 func (a *Authentication) CurrentPrincipal(ctx context.Context, sessionID string) (domain.Principal, error) {
 	user, err := a.Current(ctx, sessionID)
+	return a.principalForUser(ctx, user, err)
+}
+
+// CurrentPrincipalNoTouch is the read-only authentication path used by
+// session probes and background online-user/operation-status requests.
+func (a *Authentication) CurrentPrincipalNoTouch(ctx context.Context, sessionID string) (domain.Principal, error) {
+	user, err := a.CurrentNoTouch(ctx, sessionID)
+	return a.principalForUser(ctx, user, err)
+}
+
+func (a *Authentication) principalForUser(ctx context.Context, user domain.User, err error) (domain.Principal, error) {
 	if err != nil {
 		return domain.Principal{}, err
 	}

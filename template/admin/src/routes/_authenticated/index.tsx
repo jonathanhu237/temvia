@@ -15,7 +15,7 @@ function HomeRoute() {
   const { user } = useLoaderData({ from: '/_authenticated' })
   const { api } = Route.useRouteContext()
   const warnings = useQuery({ queryKey: ['operational-warnings', user.id], queryFn: ({ signal }) => api.getOperationalWarnings ? api.getOperationalWarnings(signal) : Promise.resolve({ warnings: [] }), retry: false })
-  const operationLogStatus = useQuery({ queryKey: ['operation-log-status', user.id], queryFn: ({ signal }) => api.getOperationLogStatus ? api.getOperationLogStatus(signal) : Promise.resolve({ state: 'unknown' as const, failureCount: 0 }), enabled: Boolean(user.superAdmin || user.permissions?.includes('operation-logs.read')), retry: false, refetchInterval: 30_000, refetchIntervalInBackground: false })
+  const operationLogStatus = useQuery({ queryKey: ['operation-log-status', user.id], queryFn: ({ signal }) => api.getOperationLogStatus ? api.getOperationLogStatus(signal) : Promise.resolve({ state: 'unknown' as const, failureCount: 0 }), enabled: Boolean(user.superAdmin || user.permissions?.includes('operation-logs.read')), retry: false, refetchInterval: 30_000, refetchIntervalInBackground: true })
   const canReadOperationLogs = Boolean(user.superAdmin || user.permissions?.includes('operation-logs.read'))
   const warningsForbidden = warnings.isError && isForbidden(warnings.error)
   const operationLogStatusForbidden = operationLogStatus.isError && isForbidden(operationLogStatus.error)

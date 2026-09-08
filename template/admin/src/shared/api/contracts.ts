@@ -171,6 +171,10 @@ export const passwordResetAcceptedSchema = z
   .object({ status: z.literal('accepted') })
   .strict()
 
+export const sessionStatusSchema = z
+  .object({ status: z.literal('ok') })
+  .strict()
+
 export const fieldProblemSchema = z
   .object({
     pointer: z.string(),
@@ -193,3 +197,9 @@ export const problemDetailsSchema = z
 
 export type ProblemDetails = z.infer<typeof problemDetailsSchema>
 export type FieldProblem = z.infer<typeof fieldProblemSchema>
+
+export const onlineUsersResponseSchema = z.object({ users: z.array(z.object({
+  id: z.string().uuid(), name: z.string(), email: z.string(),
+  lastSeenAt: z.string().datetime(), sessionCount: z.number().int().positive(),
+})) })
+export type OnlineUser = z.infer<typeof onlineUsersResponseSchema>['users'][number]

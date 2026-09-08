@@ -94,7 +94,7 @@ func (h *Handler) operationLogsDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) operationLogsStatus(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.requireOperationLogRead(r); err != nil {
+	if _, err := h.requireOperationLogReadNoTouch(r); err != nil {
 		writeApplicationError(w, err)
 		return
 	}
@@ -177,6 +177,17 @@ func (h *Handler) saveOperationLogRetention(w http.ResponseWriter, r *http.Reque
 
 func (h *Handler) requireOperationLogRead(r *http.Request) (domain.Principal, error) {
 	principal, err := h.currentPrincipal(r)
+	if err != nil {
+		return domain.Principal{}, err
+	}
+	if !principal.SuperAdmin && !principal.Has(domain.PermissionOperationLogsRead) {
+		return domain.Principal{}, application.ErrForbidden
+	}
+	return principal, nil
+}
+
+func (h *Handler) requireOperationLogReadNoTouch(r *http.Request) (domain.Principal, error) {
+	principal, err := h.currentPrincipalNoTouch(r)
 	if err != nil {
 		return domain.Principal{}, err
 	}

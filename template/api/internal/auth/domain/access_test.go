@@ -49,6 +49,9 @@ func TestPermissionCatalogIsStrictAndDeterministic(t *testing.T) {
 
 func TestPermissionCatalogKeepsReadWriteIndependentAndValidatesCombinations(t *testing.T) {
 	catalog := DefaultPermissionCatalog()
+	if _, err := catalog.ValidateFeatureSet([]PermissionKey{PermissionOnlineUsersWrite}); err != nil {
+		t.Fatalf("online-users.write must remain independently grantable: %v", err)
+	}
 	permissions, err := catalog.Validate([]PermissionKey{PermissionInvitationsWrite})
 	if err != nil || !reflect.DeepEqual(permissions, []PermissionKey{PermissionInvitationsWrite}) {
 		t.Fatalf("Validate(invitations.write) = %#v, %v", permissions, err)

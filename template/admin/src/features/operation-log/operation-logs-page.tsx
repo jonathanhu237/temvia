@@ -28,7 +28,7 @@ type Filters = {
 
 const knownActions = [
   'auth.login', 'auth.logout', 'auth.password_reset.request', 'auth.password_reset.complete', 'auth.invitation.accept', 'auth.setup.complete',
-  'roles.create', 'roles.update', 'roles.delete', 'users.roles.update', 'invitations.create', 'invitations.resend', 'invitations.revoke',
+  'roles.create', 'roles.update', 'roles.delete', 'users.roles.update', 'users.sessions.revoke', 'invitations.create', 'invitations.resend', 'invitations.revoke',
   'settings.email.update', 'settings.email.test', 'settings.operation_log_retention.update',
 ]
 const knownObjectTypes = ['session', 'account', 'password_reset', 'password', 'invitation', 'role', 'user', 'email_settings', 'operation_log_settings']
@@ -70,8 +70,8 @@ export function OperationLogsPage({ api, userID }: { api: ApiClient; userID: str
     retry: false,
   })
   const logs = query.data?.logs ?? []
-  return <section className="flex max-w-6xl flex-col gap-5" aria-labelledby="operation-log-title">
-    <div><h1 id="operation-log-title" className="text-2xl font-semibold tracking-tight">{t('operationLog:title')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('operationLog:description')}</p></div>
+  return <section className="mx-auto flex w-full max-w-6xl flex-col gap-5" aria-labelledby="operation-log-title">
+    <h1 id="operation-log-title" className="text-2xl font-semibold tracking-tight">{t('operationLog:title')}</h1>
     <Card>
       <CardHeader><CardTitle>{t('operationLog:filtersTitle')}</CardTitle></CardHeader>
       <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

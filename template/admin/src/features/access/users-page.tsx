@@ -4,7 +4,7 @@ import { Mail, Pencil, Save, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Dialog } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
@@ -93,10 +93,9 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
 
   if (users.isPending || (canManage && roleAdministration.isPending)) return <p role="status">{t('common:loading')}</p>
   return <section className="flex flex-col gap-5" aria-labelledby="users-title">
-    <div><h1 id="users-title" className="text-2xl font-semibold tracking-tight">{t('usersTitle')}</h1></div>
+    <h1 id="users-title" className="text-2xl font-semibold tracking-tight">{t('usersTitle')}</h1>
     <Card>
-      <CardHeader><CardTitle className="text-lg">{t('users')}</CardTitle></CardHeader>
-      <CardContent>
+      <CardContent className="pt-6">
         {users.isError && (usersForbidden || !users.data) ? <p role="status" className="text-sm text-muted-foreground">{usersForbidden ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <>
         <DataTable
           columns={userColumns}
