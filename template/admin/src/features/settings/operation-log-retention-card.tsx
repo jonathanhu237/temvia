@@ -4,8 +4,8 @@ import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Field, FieldError, FieldLabel } from '@/components/ui/field'
+import { SettingsSection } from './settings-section'
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import { isForbidden, translateProblemWithFields } from '@/shared/api/problems'
@@ -75,23 +75,22 @@ export function OperationLogRetentionCard({ api, userID = 'unknown', canWrite = 
     if (!latest || latest.ownerID !== userID || latest.conflict !== true || latest.submissionID !== submissionID) return
     setDraft({ retentionDays: refreshed.data.retentionDays, revision: refreshed.data.revision, submitting: false, conflict: false, authoritative: true, ownerID: userID, submissionID: undefined })
   }
-  return <Card>
-    <CardHeader><CardTitle>{t('operationLog:retentionTitle')}</CardTitle></CardHeader>
-    <CardContent>
+  return <SettingsSection id="retention-settings-title" title={t('operationLog:retentionTitle')}>
       {query.isError ? <Alert variant={forbidden ? 'default' : 'destructive'}><AlertTitle>{forbidden ? t('access:forbiddenTitle') : t('operationLog:retentionReadUnavailableTitle')}</AlertTitle><AlertDescription>{forbidden ? t('access:forbiddenDescription') : t('operationLog:retentionReadUnavailableDescription')}</AlertDescription></Alert> : null}
-      <form className="mt-4 flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (!submitDisabled) save.mutate({ retentionDays: current.retentionDays, revision: current.revision, submissionID: nextDraftSubmissionID() }) }} noValidate>
-        <p className="text-sm text-muted-foreground">{t('operationLog:retentionDescription')}</p>
+      <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); if (!submitDisabled) save.mutate({ retentionDays: current.retentionDays, revision: current.revision, submissionID: nextDraftSubmissionID() }) }} noValidate>
         {current.conflict ? <Alert variant="destructive"><AlertTitle>{t('access:conflictTitle')}</AlertTitle><AlertDescription className="flex flex-wrap items-center justify-between gap-3"><span>{t('access:draftConflictDescription')}</span>{query.data ? <Button type="button" variant="outline" size="sm" onClick={discardConflict}>{t('access:discardDraft')}</Button> : null}</AlertDescription></Alert> : null}
         {rangeWarning ? <Alert variant="destructive"><AlertTitle>{t('operationLog:retentionShorteningTitle')}</AlertTitle><AlertDescription>{t('operationLog:retentionShorteningDescription')}</AlertDescription></Alert> : null}
+        <FieldGroup>
         <Field data-invalid={!currentValid || undefined}>
           <FieldLabel htmlFor="operation-log-retention-days">{t('operationLog:retentionDays')}</FieldLabel>
-          <Input id="operation-log-retention-days" type="number" min={1} max={3650} step={1} value={current.retentionDays} onChange={(event) => update(Number(event.target.value))} disabled={editDisabled} aria-invalid={!currentValid} />
+          <Input id="operation-log-retention-days" className="max-w-32" aria-describedby="retention-description" type="number" min={1} max={3650} step={1} value={current.retentionDays} onChange={(event) => update(Number(event.target.value))} disabled={editDisabled} aria-invalid={!currentValid} />
+          <FieldDescription id="retention-description">{t('operationLog:retentionDescription')}</FieldDescription>
           {!currentValid ? <FieldError>{t('operationLog:retentionDaysError')}</FieldError> : null}
         </Field>
+        </FieldGroup>
         {canWrite ? <div className="flex justify-end"><Button type="submit" disabled={submitDisabled}><Save aria-hidden="true" data-icon="inline-start" />{busy ? t('common:saving') : t('common:save')}</Button></div> : null}
       </form>
-    </CardContent>
-  </Card>
+  </SettingsSection>
 }
 
 function isStaleRetentionError(error: unknown): boolean {

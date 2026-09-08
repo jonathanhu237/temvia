@@ -140,7 +140,7 @@ const english = {
     statusFailedDescription: 'Some recent operations may be missing from history. Review the recording status.',
     statusRecoveredTitle: 'Operation history recording recovered',
     statusRecoveredDescription: 'New operations are being recorded again. Operations during the failure may be missing.',
-    retentionTitle: 'Operation history retention',
+    retentionTitle: 'Operation history',
     retentionDescription: 'Choose how many days operation history is kept before automatic cleanup.',
     retentionDays: 'Retention days',
     retentionDaysError: 'Choose a whole number between 1 and 3650 days.',
@@ -159,6 +159,7 @@ const english = {
     detailLabels: { configured: 'Configured', host: 'SMTP host', port: 'Port', security: 'Connection security', username: 'SMTP username', passwordSet: 'Password configured', fromAddress: 'Sender email', fromName: 'Sender name', defaultLocale: 'Default language', expiresAt: 'Expires at', before: 'Before', after: 'After', target: 'Target', id: 'ID', name: 'Name', email: 'Email', description: 'Description', permissions: 'Permissions', roleIds: 'Role IDs', roles: 'Roles', authVersion: 'Auth version', revision: 'Revision', requestedRevision: 'Requested revision', requestedAuthVersion: 'Requested auth version', retentionDays: 'Retention days', passwordAction: 'Password action', fieldsModified: 'Fields modified', objectLabel: 'Object label', failure: 'Failure', validation: 'Validation', mailQueued: 'Mail queued', accountActivated: 'Account activated', sessionCreated: 'Session created', requestAccepted: 'Request accepted', deleted: 'Deleted', revoked: 'Revoked' },
   },
   settings: {
+    onThisPage: 'On this page',
     title: 'System settings',
     description: 'Configure shared settings for this Temvia installation.',
     email: {
@@ -529,7 +530,7 @@ const chinese: typeof english = {
     statusFailedDescription: '最近的一些操作可能没有写入历史，请查看记录状态。',
     statusRecoveredTitle: '操作历史记录已恢复',
     statusRecoveredDescription: '新的操作已恢复记录。故障期间的操作可能缺少历史记录。',
-    retentionTitle: '操作历史保留期限',
+    retentionTitle: '操作历史',
     retentionDescription: '选择操作历史在自动清理前保留的天数。',
     retentionDays: '保留天数',
     retentionDaysError: '请输入 1 到 3650 之间的整数天数。',
@@ -548,6 +549,7 @@ const chinese: typeof english = {
     detailLabels: { configured: '已配置', host: 'SMTP 服务器', port: '端口', security: '连接安全方式', username: 'SMTP 用户名', passwordSet: '已设置密码', fromAddress: '发件人邮箱', fromName: '发件人名称', defaultLocale: '默认语言', expiresAt: '到期时间', before: '之前', after: '之后', target: '目标', id: 'ID', name: '名称', email: '邮箱', description: '描述', permissions: '权限', roleIds: '角色 ID', roles: '角色', authVersion: '认证版本', revision: '修订版本', requestedRevision: '请求的修订版本', requestedAuthVersion: '请求的认证版本', retentionDays: '保留天数', passwordAction: '密码操作', fieldsModified: '修改的字段', objectLabel: '对象标签', failure: '失败原因', validation: '校验', mailQueued: '邮件已提交', accountActivated: '账户已激活', sessionCreated: '会话已创建', requestAccepted: '请求已接受', deleted: '已删除', revoked: '已撤销' },
   },
   settings: {
+    onThisPage: '页内导航',
     title: '系统设置',
     description: '配置此 Temvia 实例的共享设置。',
     email: {
