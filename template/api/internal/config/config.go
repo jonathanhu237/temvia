@@ -16,6 +16,10 @@ type Config struct {
 	PublicURL   string
 	Origin      string
 	HTTPAddr    string
+	// TrustedProxyCIDRs controls which immediate peers may supply
+	// X-Forwarded-For for operation-log source attribution. It is empty by
+	// default so a direct client cannot spoof its source address.
+	TrustedProxyCIDRs []string
 
 	SetupLinkTTL time.Duration
 
@@ -75,10 +79,11 @@ type Lookup func(string) string
 
 func Load(get Lookup) (Config, error) {
 	c := Config{
-		Environment:  getDefault(get, "APP_ENV", "development"),
-		PublicURL:    getDefault(get, "APP_PUBLIC_URL", "http://localhost:5173"),
-		HTTPAddr:     getDefault(get, "HTTP_ADDR", "127.0.0.1:8080"),
-		SetupLinkTTL: parseDuration(get, "SETUP_LINK_TTL", 30*time.Minute),
+		Environment:       getDefault(get, "APP_ENV", "development"),
+		PublicURL:         getDefault(get, "APP_PUBLIC_URL", "http://localhost:5173"),
+		HTTPAddr:          getDefault(get, "HTTP_ADDR", "127.0.0.1:8080"),
+		TrustedProxyCIDRs: parseCSV(get("TRUSTED_PROXY_CIDRS")),
+		SetupLinkTTL:      parseDuration(get, "SETUP_LINK_TTL", 30*time.Minute),
 
 		PasswordResetTokenKey:       parseTokenKey(get("PASSWORD_RESET_TOKEN_KEY")),
 		InvitationTokenKey:          parseTokenKey(get("INVITATION_TOKEN_KEY")),
@@ -234,6 +239,11 @@ func (c *Config) validate() error {
 	if c.PublicURL == "" {
 		return fmt.Errorf("APP_PUBLIC_URL must not be empty")
 	}
+	for _, value := range c.TrustedProxyCIDRs {
+		if _, _, err := net.ParseCIDR(value); err != nil {
+			return fmt.Errorf("TRUSTED_PROXY_CIDRS contains invalid CIDR %q", value)
+		}
+	}
 	if c.SetupLinkTTL <= 0 || c.SetupLinkTTL > 24*time.Hour {
 		return fmt.Errorf("SETUP_LINK_TTL must be between 0 and 24h")
 	}
@@ -317,6 +327,17 @@ func (c *Config) validate() error {
 		c.CookieName = "temvia_session"
 	}
 	return nil
+}
+
+func parseCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func canonicalOrigin(value *url.URL) (string, error) {

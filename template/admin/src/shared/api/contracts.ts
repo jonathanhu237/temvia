@@ -148,6 +148,25 @@ export type EmailSettings = z.infer<typeof emailSettingsSchema>
 export const emailSettingsResponseSchema = z.object({ email: emailSettingsSchema }).strict()
 export const operationalWarningsSchema = z.object({ warnings: z.array(z.object({ key: z.string(), severity: z.string() }).strict()) }).strict()
 
+export const operationActorSchema = z.object({ id: z.string().optional(), name: z.string().optional(), email: z.string().optional(), kind: z.string().optional(), label: z.string().optional() }).strict()
+export const operationLogSchema = z.object({
+  id: z.string().uuid(),
+  actor: operationActorSchema,
+  action: z.string(),
+  objectType: z.string(),
+  objectId: z.string().optional(),
+  result: z.enum(['success', 'failure']),
+  occurredAt: z.string(),
+  sourceIp: z.string().optional(),
+  attemptedAccount: z.string().optional(),
+  details: z.record(z.string(), z.unknown()),
+}).strict()
+export type OperationLog = z.infer<typeof operationLogSchema>
+export const operationLogsResponseSchema = z.object({ logs: z.array(operationLogSchema), nextCursor: z.string().optional() }).strict()
+export const operationLogResponseSchema = z.object({ log: operationLogSchema }).strict()
+export const operationLogStatusSchema = z.object({ state: z.enum(['unknown', 'healthy', 'failed', 'recovered']), failureCount: z.number().int().nonnegative(), lastFailureAt: z.string().optional(), lastSuccessAt: z.string().optional() }).strict()
+export const operationLogRetentionSchema = z.object({ retentionDays: z.number().int(), revision: z.number().int().nonnegative(), updatedAt: z.string().optional() }).strict()
+
 export const passwordResetAcceptedSchema = z
   .object({ status: z.literal('accepted') })
   .strict()

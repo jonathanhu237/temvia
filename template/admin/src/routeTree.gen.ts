@@ -17,6 +17,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedInvitationsRouteImport } from './routes/_authenticated/invitations'
+import { Route as AuthenticatedOperationLogsRouteImport } from './routes/_authenticated/operation-logs'
 import { Route as AuthenticatedRolesRouteImport } from './routes/_authenticated/roles'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
@@ -61,6 +62,12 @@ const AuthenticatedInvitationsRoute =
     path: '/invitations',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedOperationLogsRoute =
+  AuthenticatedOperationLogsRouteImport.update({
+    id: '/operation-logs',
+    path: '/operation-logs',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedRolesRoute = AuthenticatedRolesRouteImport.update({
   id: '/roles',
   path: '/roles',
@@ -85,6 +92,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/invitations': typeof AuthenticatedInvitationsRoute
+  '/operation-logs': typeof AuthenticatedOperationLogsRoute
   '/roles': typeof AuthenticatedRolesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -96,6 +104,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/invitations': typeof AuthenticatedInvitationsRoute
+  '/operation-logs': typeof AuthenticatedOperationLogsRoute
   '/roles': typeof AuthenticatedRolesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -110,6 +119,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/_authenticated/invitations': typeof AuthenticatedInvitationsRoute
+  '/_authenticated/operation-logs': typeof AuthenticatedOperationLogsRoute
   '/_authenticated/roles': typeof AuthenticatedRolesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
@@ -125,6 +135,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/setup'
     | '/invitations'
+    | '/operation-logs'
     | '/roles'
     | '/settings'
     | '/users'
@@ -136,6 +147,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/setup'
     | '/invitations'
+    | '/operation-logs'
     | '/roles'
     | '/settings'
     | '/users'
@@ -149,6 +161,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/setup'
     | '/_authenticated/invitations'
+    | '/_authenticated/operation-logs'
     | '/_authenticated/roles'
     | '/_authenticated/settings'
     | '/_authenticated/users'
@@ -222,6 +235,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedInvitationsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/operation-logs': {
+      id: '/_authenticated/operation-logs'
+      path: '/operation-logs'
+      fullPath: '/operation-logs'
+      preLoaderRoute: typeof AuthenticatedOperationLogsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/roles': {
       id: '/_authenticated/roles'
       path: '/roles'
@@ -248,6 +268,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteChildren {
   AuthenticatedInvitationsRoute: typeof AuthenticatedInvitationsRoute
+  AuthenticatedOperationLogsRoute: typeof AuthenticatedOperationLogsRoute
   AuthenticatedRolesRoute: typeof AuthenticatedRolesRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
@@ -256,6 +277,7 @@ interface AuthenticatedRouteChildren {
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedInvitationsRoute: AuthenticatedInvitationsRoute,
+  AuthenticatedOperationLogsRoute: AuthenticatedOperationLogsRoute,
   AuthenticatedRolesRoute: AuthenticatedRolesRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,

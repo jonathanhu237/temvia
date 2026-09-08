@@ -363,6 +363,7 @@ const permissionLabelKeys: Record<string, string> = {
   'invitations.write': 'permissionInvitationsWrite',
   'settings.read': 'permissionSettingsRead',
   'settings.write': 'permissionSettingsWrite',
+  'operation-logs.read': 'permissionOperationLogsRead',
 }
 
 const permissionDescriptionKeys: Record<string, string> = {
@@ -374,6 +375,7 @@ const permissionDescriptionKeys: Record<string, string> = {
   'invitations.write': 'permissionInvitationsWriteDescription',
   'settings.read': 'permissionSettingsReadDescription',
   'settings.write': 'permissionSettingsWriteDescription',
+  'operation-logs.read': 'permissionOperationLogsReadDescription',
 }
 
 function localizedPermission(key: string, t: (key: string) => string): string {
@@ -389,6 +391,7 @@ const resourceLabelKeys: Record<string, string> = {
   roles: 'roles',
   invitations: 'invitations',
   settings: 'settings',
+  'operation-logs': 'operationLog',
 }
 
 function localizedResource(resource: string, t: (key: string) => string): string {

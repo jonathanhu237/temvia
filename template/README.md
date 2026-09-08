@@ -66,7 +66,9 @@ invalidates pending reset-mail jobs (already delivered links remain consumable
 because PostgreSQL stores their digest); affected users can request a fresh
 link. Keep `INVITATION_TOKEN_KEY` stable as well; it is intentionally separate
 from the reset key. Invitation links expire after 72 hours by default and may
-be configured with `INVITATION_LINK_TTL` up to seven days. Run migration 4
+be configured with `INVITATION_LINK_TTL` up to seven days. Run the current
+migrations, including migration 6 which adds immutable actor snapshots to
+operation history,
 before deploying this API. To roll back, stop the new API, apply one
 migration down, then deploy the previous API; passwords already changed by the
 feature are not reverted.
@@ -79,6 +81,24 @@ docker compose stop api
 make migrate-up
 make up
 ```
+
+## Operation history
+
+Administrators with the `operation-logs.read` permission can open Operation
+history from the authenticated navigation. The page supports time, actor UUID,
+action, result, object type, and object ID filters, cursor pagination, and a
+localized detail view. Successful and failed in-scope actions each produce one
+best-effort result record; a storage outage can leave a gap, and the home page
+shows the recorder state when the current user can read it. History is retained
+for 180 days by default. Super Admins or users with `settings.write` can change
+the value between 1 and 3650 days in System settings; cleanup runs hourly and
+uses a bounded database operation.
+
+`Source IP` records the direct peer address by default. In a reverse-proxy
+deployment, set `TRUSTED_PROXY_CIDRS` to the proxy's immediate peer network so
+the API can safely use its `X-Forwarded-For` or `X-Real-IP` value. Headers from
+untrusted peers are ignored. Never include a public client network in this
+setting.
 
 ## Requirements
 

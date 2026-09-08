@@ -15,6 +15,11 @@ export const Route = createFileRoute('/_authenticated')({
         clearAccessDrafts()
         context.queryClient.removeQueries({ queryKey: ['auth', 'current-user'] })
         context.queryClient.removeQueries({ queryKey: ['access'] })
+        context.queryClient.removeQueries({ queryKey: ['operational-warnings'] })
+        context.queryClient.removeQueries({ queryKey: ['operation-log-status'] })
+        context.queryClient.removeQueries({ queryKey: ['operation-logs'] })
+        context.queryClient.removeQueries({ queryKey: ['operation-log'] })
+        context.queryClient.removeQueries({ queryKey: ['settings', 'operation-log-retention'] })
         throw redirect({ to: '/login', replace: true })
       }
       if (isRedirect(error)) throw error

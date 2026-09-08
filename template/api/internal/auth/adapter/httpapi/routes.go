@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"example.com/temvia/api/internal/auth/application"
 	"example.com/temvia/api/internal/auth/domain"
@@ -26,6 +27,10 @@ type AuthenticationService interface {
 type PasswordRecoveryService interface {
 	Request(context.Context, application.PasswordResetRequestInput) error
 	Complete(context.Context, application.PasswordResetCompleteInput) error
+}
+
+type PasswordRecoveryAuditService interface {
+	CompleteWithTarget(context.Context, application.PasswordResetCompleteInput) (domain.User, error)
 }
 
 type AccessService interface {
@@ -50,6 +55,15 @@ type SettingsService interface {
 	OperationalWarnings(context.Context) ([]application.OperationalWarning, error)
 }
 
+type OperationLogService interface {
+	Record(context.Context, application.OperationLogInput) error
+	List(context.Context, application.OperationLogListOptions) (application.OperationLogPage, error)
+	Detail(context.Context, string) (application.OperationLog, error)
+	RecordingStatus(time.Time) application.OperationLogRecordingStatus
+	Retention(context.Context) (application.OperationLogRetention, error)
+	SaveRetention(context.Context, int64, int) (application.OperationLogRetention, error)
+}
+
 type QueryableAccessService interface {
 	UsersWithOptions(context.Context, string, application.AccessListOptions) (application.UserPage, error)
 	InvitationsWithOptions(context.Context, string, application.AccessListOptions) (application.InvitationPage, error)
@@ -59,6 +73,10 @@ type InvitationAcceptanceService interface {
 	Complete(context.Context, string, string) error
 }
 
+type InvitationAcceptanceAuditService interface {
+	CompleteWithTarget(context.Context, string, string) (domain.Invitation, error)
+}
+
 type Handler struct {
 	setup            SetupService
 	auth             AuthenticationService
@@ -66,6 +84,7 @@ type Handler struct {
 	access           AccessService
 	acceptInvitation InvitationAcceptanceService
 	settings         SettingsService
+	operationLogs    OperationLogService
 	cfg              config.Config
 	mux              *http.ServeMux
 }
@@ -82,6 +101,12 @@ func NewHandlerWithAccess(setup SetupService, auth AuthenticationService, cfg co
 	return newHandler(setup, auth, cfg, recovery, access, accept, service)
 }
 
+// NewHandlerWithAccessAndOperationLog extends the access handler without
+// changing the constructor used by embedders that do not persist history.
+func NewHandlerWithAccessAndOperationLog(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService) http.Handler {
+	return newHandlerWithOperationLog(setup, auth, cfg, recovery, access, accept, settings, operations)
+}
+
 func firstRecovery(recovery []PasswordRecoveryService) PasswordRecoveryService {
 	var passwordRecovery PasswordRecoveryService
 	if len(recovery) > 0 {
@@ -95,7 +120,11 @@ func newHandler(setup SetupService, auth AuthenticationService, cfg config.Confi
 	if len(settings) > 0 {
 		settingsService = settings[0]
 	}
-	h := &Handler{setup: setup, auth: auth, recovery: recovery, access: access, acceptInvitation: accept, settings: settingsService, cfg: cfg, mux: http.NewServeMux()}
+	return newHandlerWithOperationLog(setup, auth, cfg, recovery, access, accept, settingsService, nil)
+}
+
+func newHandlerWithOperationLog(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService) http.Handler {
+	h := &Handler{setup: setup, auth: auth, recovery: recovery, access: access, acceptInvitation: accept, settings: settings, operationLogs: operations, cfg: cfg, mux: http.NewServeMux()}
 	h.mux.HandleFunc("GET /api/setup/status", h.setupStatus)
 	h.mux.HandleFunc("POST /api/setup", h.setupComplete)
 	h.mux.HandleFunc("POST /api/auth/login", h.login)
@@ -124,6 +153,17 @@ func newHandler(setup SetupService, auth AuthenticationService, cfg config.Confi
 		h.mux.HandleFunc("PUT /api/settings/email", h.saveEmailSettings)
 		h.mux.HandleFunc("POST /api/settings/email/test", h.testEmailSettings)
 		h.mux.HandleFunc("GET /api/operational-warnings", h.operationalWarnings)
+	}
+	if h.operationLogs != nil {
+		h.mux.HandleFunc("GET /api/operation-logs", h.operationLogsList)
+		h.mux.HandleFunc("GET /api/operation-logs/{id}", h.operationLogsDetail)
+		h.mux.HandleFunc("GET /api/operation-logs/status", h.operationLogsStatus)
+	}
+	if h.operationLogs != nil && h.settings != nil {
+		h.mux.HandleFunc("GET /api/settings/operation-log", h.operationLogRetention)
+		h.mux.HandleFunc("PUT /api/settings/operation-log", h.saveOperationLogRetention)
+		h.mux.HandleFunc("GET /api/settings/operation-log-retention", h.operationLogRetention)
+		h.mux.HandleFunc("PUT /api/settings/operation-log-retention", h.saveOperationLogRetention)
 	}
 	if h.acceptInvitation != nil {
 		h.mux.HandleFunc("POST /api/auth/invitations/accept", h.acceptInvitationHandler)
@@ -154,21 +194,25 @@ func methodMatches(expected, actual string) bool {
 }
 
 var knownMethods = map[string]string{
-	"/api/setup/status":                 "GET",
-	"/api/setup":                        "POST",
-	"/api/auth/login":                   "POST",
-	"/api/auth/me":                      "GET",
-	"/api/auth/logout":                  "POST",
-	"/api/auth/password-reset/request":  "POST",
-	"/api/auth/password-reset/complete": "POST",
-	"/api/roles":                        "GET, POST",
-	"/api/access/role-options":          "GET",
-	"/api/users":                        "GET",
-	"/api/user-invitations":             "GET, POST",
-	"/api/settings/email":               "GET, PUT",
-	"/api/settings/email/test":          "POST",
-	"/api/operational-warnings":         "GET",
-	"/api/auth/invitations/accept":      "POST",
+	"/api/setup/status":                     "GET",
+	"/api/setup":                            "POST",
+	"/api/auth/login":                       "POST",
+	"/api/auth/me":                          "GET",
+	"/api/auth/logout":                      "POST",
+	"/api/auth/password-reset/request":      "POST",
+	"/api/auth/password-reset/complete":     "POST",
+	"/api/roles":                            "GET, POST",
+	"/api/access/role-options":              "GET",
+	"/api/users":                            "GET",
+	"/api/user-invitations":                 "GET, POST",
+	"/api/settings/email":                   "GET, PUT",
+	"/api/settings/email/test":              "POST",
+	"/api/operational-warnings":             "GET",
+	"/api/operation-logs":                   "GET",
+	"/api/operation-logs/status":            "GET",
+	"/api/settings/operation-log":           "GET, PUT",
+	"/api/settings/operation-log-retention": "GET, PUT",
+	"/api/auth/invitations/accept":          "POST",
 }
 
 func expectedMethods(path string) (string, bool) {
@@ -183,6 +227,12 @@ func expectedMethods(path string) (string, bool) {
 		case "user-invitations":
 			return "DELETE", true
 		}
+	}
+	if len(parts) == 3 && parts[0] == "api" && parts[1] == "operation-logs" {
+		return "GET", true
+	}
+	if len(parts) == 3 && parts[0] == "api" && parts[1] == "settings" && (parts[2] == "operation-log" || parts[2] == "operation-log-retention") {
+		return "GET, PUT", true
 	}
 	if len(parts) == 4 && parts[0] == "api" && parts[1] == "user-invitations" && parts[3] == "resend" {
 		return "POST", true
@@ -212,35 +262,42 @@ func (h *Handler) setupStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) setupComplete(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "auth.setup.complete", "account") {
 		return
 	}
 	var input application.SetupInput
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"token": {}, "name": {}, "email": {}, "password": {}}); err != nil {
 		var fieldErr fieldValueError
 		if errors.As(err, &fieldErr) && fieldErr.field == "token" {
+			h.recordOperation(r, unverifiedFailure("auth.setup.complete", "account", "", "", err))
 			writeProblem(w, http.StatusForbidden, "invalid-setup-token")
 			return
 		}
+		h.recordOperation(r, unverifiedFailure("auth.setup.complete", "account", "", "", err))
 		writeDecodeError(w, err)
 		return
 	}
-	_, err := h.setup.Complete(r.Context(), input)
+	created, err := h.setup.Complete(r.Context(), input)
 	if err != nil {
+		h.recordOperation(r, application.OperationLogInput{Action: "auth.setup.complete", ObjectType: "account", Result: application.OperationLogFailure, AttemptedAccount: input.Email, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	details := map[string]any{"accountCreated": true}
+	if created.ID != "" {
+		details["target"] = map[string]any{"id": created.ID, "name": created.Name, "email": created.Email}
+	}
+	h.recordOperation(r, application.OperationLogInput{ActorKind: "system", Action: "auth.setup.complete", ObjectType: "account", ObjectID: created.ID, Result: application.OperationLogSuccess, Details: details})
 	writeJSON(w, http.StatusCreated, map[string]string{"status": string(application.SetupComplete)})
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "auth.login", "session") {
 		return
 	}
 	var input application.LoginInput
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"email": {}, "password": {}}); err != nil {
+		h.recordOperation(r, unverifiedFailure("auth.login", "session", "", "", err))
 		writeDecodeError(w, err)
 		return
 	}
@@ -255,9 +312,15 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		user, sessionID, err = h.auth.Login(r.Context(), input)
 	}
 	if err != nil {
+		h.recordOperation(r, application.OperationLogInput{Action: "auth.login", ObjectType: "session", Result: application.OperationLogFailure, AttemptedAccount: input.Email, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	actorID := user.ID
+	if principal.User.ID != "" {
+		actorID = principal.User.ID
+	}
+	h.recordOperation(r, application.OperationLogInput{ActorID: actorID, ActorName: user.Name, ActorEmail: user.Email, ActorKind: "authenticated", Action: "auth.login", ObjectType: "session", Result: application.OperationLogSuccess, Details: map[string]any{"sessionCreated": true}})
 	h.setSessionCookie(w, sessionID)
 	if principal.User.ID != "" {
 		writeJSON(w, http.StatusOK, principalResponse(principal))
@@ -290,57 +353,91 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "auth.logout", "session") {
 		return
 	}
 	cookie, err := r.Cookie(h.cfg.CookieName)
 	if err == nil {
+		actor := domain.User{}
+		verifiedActor := false
+		if principal, principalErr := h.currentPrincipal(r); principalErr == nil {
+			actor = principal.User
+			verifiedActor = true
+		}
 		if err := h.auth.Logout(r.Context(), cookie.Value); err != nil {
+			input := unverifiedFailure("auth.logout", "session", "", "", err)
+			if verifiedActor {
+				input = operationFailure(actor, "auth.logout", "session", "", err, nil)
+			}
+			h.recordOperation(r, input)
 			writeApplicationError(w, err)
 			return
 		}
+		input := application.OperationLogInput{ActorKind: "unverified", Action: "auth.logout", ObjectType: "session", Result: application.OperationLogSuccess, Details: map[string]any{"sessionRevoked": true}}
+		if verifiedActor {
+			input = application.OperationLogInput{ActorID: actor.ID, ActorName: actor.Name, ActorEmail: actor.Email, ActorKind: "authenticated", Action: "auth.logout", ObjectType: "session", Result: application.OperationLogSuccess, Details: map[string]any{"sessionRevoked": true}}
+		}
+		h.recordOperation(r, input)
+	}
+	if err != nil {
+		h.recordOperation(r, unverifiedFailure("auth.logout", "session", "", "", application.ErrUnauthenticated))
 	}
 	h.clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) passwordResetRequest(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "auth.password_reset.request", "password_reset") {
 		return
 	}
 	var input application.PasswordResetRequestInput
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"email": {}}); err != nil {
+		h.recordOperation(r, unverifiedFailure("auth.password_reset.request", "password_reset", "", "", err))
 		writeDecodeError(w, err)
 		return
 	}
 	if err := h.recovery.Request(r.Context(), input); err != nil {
+		h.recordOperation(r, application.OperationLogInput{Action: "auth.password_reset.request", ObjectType: "password_reset", Result: application.OperationLogFailure, AttemptedAccount: input.Email, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	h.recordOperation(r, application.OperationLogInput{Action: "auth.password_reset.request", ObjectType: "password_reset", Result: application.OperationLogSuccess, AttemptedAccount: input.Email, Details: map[string]any{"requestAccepted": true}})
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 
 func (h *Handler) passwordResetComplete(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "auth.password_reset.complete", "password") {
 		return
 	}
 	var input application.PasswordResetCompleteInput
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"token": {}, "password": {}}); err != nil {
 		var fieldErr fieldValueError
 		if errors.As(err, &fieldErr) && fieldErr.field == "token" {
+			h.recordOperation(r, unverifiedFailure("auth.password_reset.complete", "password", "", "", err))
 			writeProblem(w, http.StatusForbidden, "invalid-password-reset-token")
 			return
 		}
+		h.recordOperation(r, unverifiedFailure("auth.password_reset.complete", "password", "", "", err))
 		writeDecodeError(w, err)
 		return
 	}
-	if err := h.recovery.Complete(r.Context(), input); err != nil {
-		writeApplicationError(w, err)
+	var target domain.User
+	var completeErr error
+	if audited, ok := h.recovery.(PasswordRecoveryAuditService); ok {
+		target, completeErr = audited.CompleteWithTarget(r.Context(), input)
+	} else {
+		completeErr = h.recovery.Complete(r.Context(), input)
+	}
+	if completeErr != nil {
+		h.recordOperation(r, application.OperationLogInput{Action: "auth.password_reset.complete", ObjectType: "password", Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(completeErr)}})
+		writeApplicationError(w, completeErr)
 		return
 	}
+	details := map[string]any{"passwordAction": "updated"}
+	if target.ID != "" {
+		details["target"] = map[string]any{"id": target.ID, "name": target.Name, "email": target.Email}
+	}
+	h.recordOperation(r, application.OperationLogInput{Action: "auth.password_reset.complete", ObjectType: "password", ObjectID: target.ID, Result: application.OperationLogSuccess, Details: details})
 	h.clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -360,6 +457,29 @@ func (h *Handler) validOrigin(r *http.Request) bool {
 	}
 	origin, err := config.CanonicalOrigin(value)
 	return err == nil && origin == h.cfg.Origin
+}
+
+// operationOriginFailure and operationPrincipal keep the write-handler audit
+// boundary in one place. A request which was rejected before identity could be
+// verified is still an attempted operation, but is recorded as unverified and
+// never copies a caller-controlled identity into actor fields.
+func (h *Handler) operationOriginFailure(w http.ResponseWriter, r *http.Request, action, objectType string) bool {
+	if h.validOrigin(r) {
+		return false
+	}
+	h.recordOperation(r, unverifiedFailure(action, objectType, "", "", application.ErrForbidden))
+	writeProblem(w, http.StatusForbidden, "forbidden")
+	return true
+}
+
+func (h *Handler) operationPrincipal(w http.ResponseWriter, r *http.Request, action, objectType, objectID string) (domain.Principal, bool) {
+	principal, err := h.currentPrincipal(r)
+	if err != nil {
+		h.recordOperation(r, unverifiedFailure(action, objectType, objectID, "", err))
+		writeApplicationError(w, err)
+		return domain.Principal{}, false
+	}
+	return principal, true
 }
 
 func (h *Handler) currentPrincipal(r *http.Request) (domain.Principal, error) {
@@ -460,40 +580,42 @@ type roleMutationRequest struct {
 }
 
 func (h *Handler) createRole(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "roles.create", "role") {
 		return
 	}
-	principal, err := h.currentPrincipal(r)
-	if err != nil {
-		writeApplicationError(w, err)
+	principal, ok := h.operationPrincipal(w, r, "roles.create", "role", "")
+	if !ok {
 		return
 	}
+	var err error
 	var input roleMutationRequest
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"name": {}, "description": {}, "permissions": {}}); err != nil {
+		h.recordOperation(r, operationFailure(principal.User, "roles.create", "role", "", err, nil))
 		writeDecodeError(w, err)
 		return
 	}
 	item, err := h.access.CreateRole(r.Context(), principal.User.ID, application.RoleMutationInput{Name: input.Name, Description: input.Description, Permissions: input.Permissions})
 	if err != nil {
+		h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "roles.create", ObjectType: "role", Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "roles.create", ObjectType: "role", ObjectID: item.ID, Result: application.OperationLogSuccess, Details: map[string]any{"before": nil, "after": roleSnapshot(item)}})
 	writeJSON(w, http.StatusCreated, roleEnvelope{Role: roleResponse(item)})
 }
 
 func (h *Handler) replaceRole(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "roles.update", "role") {
 		return
 	}
-	principal, err := h.currentPrincipal(r)
-	if err != nil {
-		writeApplicationError(w, err)
+	principal, ok := h.operationPrincipal(w, r, "roles.update", "role", r.PathValue("id"))
+	if !ok {
 		return
 	}
+	var err error
 	var input roleMutationRequest
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"name": {}, "description": {}, "permissions": {}, "revision": {}}); err != nil {
+		h.recordOperation(r, operationFailure(principal.User, "roles.update", "role", r.PathValue("id"), err, nil))
 		writeDecodeError(w, err)
 		return
 	}
@@ -503,36 +625,59 @@ func (h *Handler) replaceRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.Revision == nil {
+		h.recordOperation(r, operationFailure(principal.User, "roles.update", "role", id, application.ErrStaleRevision, map[string]any{"validation": "revision_required"}))
 		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "validation_failed", "", []domain.FieldError{{Field: "revision", Code: "required"}})
 		return
 	}
+	before, hasBefore := h.snapshotRole(r, principal.User.ID, id)
 	item, err := h.access.ReplaceRole(r.Context(), principal.User.ID, id, application.RoleMutationInput{Name: input.Name, Description: input.Description, Permissions: input.Permissions, Revision: *input.Revision})
 	if err != nil {
+		h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "roles.update", ObjectType: "role", ObjectID: id, Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	details := map[string]any{"after": roleSnapshot(item), "requestedRevision": *input.Revision}
+	if hasBefore {
+		details["before"] = roleSnapshot(before)
+	}
+	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "roles.update", ObjectType: "role", ObjectID: id, Result: application.OperationLogSuccess, Details: details})
 	writeJSON(w, http.StatusOK, roleEnvelope{Role: roleResponse(item)})
 }
 
 func (h *Handler) deleteRole(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "roles.delete", "role") {
 		return
 	}
-	principal, err := h.currentPrincipal(r)
-	if err != nil {
-		writeApplicationError(w, err)
+	principal, ok := h.operationPrincipal(w, r, "roles.delete", "role", r.PathValue("id"))
+	if !ok {
 		return
 	}
+	var err error
 	id := r.PathValue("id")
 	if !domain.IsCanonicalUUID(id) {
 		writeProblem(w, http.StatusNotFound, "not-found")
 		return
 	}
-	if err := h.access.DeleteRole(r.Context(), principal.User.ID, id); err != nil {
+	var before domain.Role
+	hasBefore := false
+	if audited, ok := h.access.(application.OperationAuditMutationService); ok {
+		before, err = audited.DeleteRoleWithSnapshot(r.Context(), principal.User.ID, id)
+		hasBefore = err == nil
+	} else {
+		before, hasBefore = h.snapshotRole(r, principal.User.ID, id)
+		err = h.access.DeleteRole(r.Context(), principal.User.ID, id)
+	}
+	if err != nil {
+		h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "roles.delete", ObjectType: "role", ObjectID: id, Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	details := map[string]any{"deleted": true}
+	if hasBefore {
+		details["before"] = roleSnapshot(before)
+		details["objectLabel"] = before.Name
+	}
+	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "roles.delete", ObjectType: "role", ObjectID: id, Result: application.OperationLogSuccess, Details: details})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -613,17 +758,17 @@ type assignmentRequest struct {
 }
 
 func (h *Handler) replaceUserRoles(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "users.roles.update", "user") {
 		return
 	}
-	principal, err := h.currentPrincipal(r)
-	if err != nil {
-		writeApplicationError(w, err)
+	principal, ok := h.operationPrincipal(w, r, "users.roles.update", "user", r.PathValue("id"))
+	if !ok {
 		return
 	}
+	var err error
 	var input assignmentRequest
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"roleIds": {}, "authVersion": {}}); err != nil {
+		h.recordOperation(r, operationFailure(principal.User, "users.roles.update", "user", r.PathValue("id"), err, nil))
 		writeDecodeError(w, err)
 		return
 	}
@@ -633,14 +778,22 @@ func (h *Handler) replaceUserRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.AuthVersion == nil {
+		h.recordOperation(r, operationFailure(principal.User, "users.roles.update", "user", id, application.ErrStaleRevision, map[string]any{"validation": "auth_version_required"}))
 		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "validation_failed", "", []domain.FieldError{{Field: "authVersion", Code: "required"}})
 		return
 	}
+	before, hasBefore := h.snapshotUser(r, principal.User.ID, id)
 	item, err := h.access.ReplaceUserRoles(r.Context(), principal.User.ID, id, application.AssignmentInput{RoleIDs: input.RoleIDs, AuthVersion: *input.AuthVersion})
 	if err != nil {
+		h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "users.roles.update", ObjectType: "user", ObjectID: id, Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	details := map[string]any{"after": accessUserSnapshot(item), "requestedAuthVersion": *input.AuthVersion}
+	if hasBefore {
+		details["before"] = accessUserSnapshot(before)
+	}
+	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "users.roles.update", ObjectType: "user", ObjectID: id, Result: application.OperationLogSuccess, Details: details})
 	writeJSON(w, http.StatusOK, map[string]accessUserResponseBody{"user": accessUserResponse(item)})
 }
 
@@ -680,76 +833,105 @@ type invitationRequest struct {
 }
 
 func (h *Handler) createInvitation(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "invitations.create", "invitation") {
 		return
 	}
-	principal, err := h.currentPrincipal(r)
-	if err != nil {
-		writeApplicationError(w, err)
+	principal, ok := h.operationPrincipal(w, r, "invitations.create", "invitation", "")
+	if !ok {
 		return
 	}
+	var err error
 	var input invitationRequest
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"name": {}, "email": {}, "roleIds": {}}); err != nil {
+		h.recordOperation(r, operationFailure(principal.User, "invitations.create", "invitation", "", err, nil))
 		writeDecodeError(w, err)
 		return
 	}
 	item, err := h.access.CreateInvitation(r.Context(), principal.User.ID, application.InvitationInput{Name: input.Name, Email: input.Email, RoleIDs: input.RoleIDs})
 	if err != nil {
+		h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "invitations.create", ObjectType: "invitation", Result: application.OperationLogFailure, AttemptedAccount: input.Email, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "invitations.create", ObjectType: "invitation", ObjectID: item.ID, Result: application.OperationLogSuccess, Details: map[string]any{"before": nil, "after": invitationSnapshot(item), "mailQueued": true}})
 	writeJSON(w, http.StatusCreated, map[string]invitationResponseBody{"invitation": invitationResponse(item)})
 }
 
 func (h *Handler) resendInvitation(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "invitations.resend", "invitation") {
 		return
 	}
-	principal, err := h.currentPrincipal(r)
-	if err != nil {
-		writeApplicationError(w, err)
+	principal, ok := h.operationPrincipal(w, r, "invitations.resend", "invitation", r.PathValue("id"))
+	if !ok {
 		return
 	}
+	var err error
 	id := r.PathValue("id")
 	if !domain.IsCanonicalUUID(id) {
 		writeProblem(w, http.StatusNotFound, "not-found")
 		return
 	}
-	item, err := h.access.ResendInvitation(r.Context(), principal.User.ID, id)
+	var before, item domain.Invitation
+	hasBefore := false
+	if audited, ok := h.access.(application.OperationAuditMutationService); ok {
+		before, item, err = audited.ResendInvitationWithSnapshot(r.Context(), principal.User.ID, id)
+		hasBefore = err == nil
+	} else {
+		before, hasBefore = h.snapshotInvitation(r, principal.User.ID, id)
+		item, err = h.access.ResendInvitation(r.Context(), principal.User.ID, id)
+	}
 	if err != nil {
+		h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "invitations.resend", ObjectType: "invitation", ObjectID: id, Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	details := map[string]any{"after": invitationSnapshot(item), "mailQueued": true}
+	if hasBefore {
+		details["before"] = invitationSnapshot(before)
+	}
+	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "invitations.resend", ObjectType: "invitation", ObjectID: id, Result: application.OperationLogSuccess, Details: details})
 	writeJSON(w, http.StatusAccepted, map[string]invitationResponseBody{"invitation": invitationResponse(item)})
 }
 
 func (h *Handler) revokeInvitation(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "invitations.revoke", "invitation") {
 		return
 	}
-	principal, err := h.currentPrincipal(r)
-	if err != nil {
-		writeApplicationError(w, err)
+	principal, ok := h.operationPrincipal(w, r, "invitations.revoke", "invitation", r.PathValue("id"))
+	if !ok {
 		return
 	}
+	var err error
 	id := r.PathValue("id")
 	if !domain.IsCanonicalUUID(id) {
 		writeProblem(w, http.StatusNotFound, "not-found")
 		return
 	}
-	if err := h.access.RevokeInvitation(r.Context(), principal.User.ID, id); err != nil {
+	var before domain.Invitation
+	hasBefore := false
+	if audited, ok := h.access.(application.OperationAuditMutationService); ok {
+		before, err = audited.RevokeInvitationWithSnapshot(r.Context(), principal.User.ID, id)
+		hasBefore = err == nil
+	} else {
+		before, hasBefore = h.snapshotInvitation(r, principal.User.ID, id)
+		err = h.access.RevokeInvitation(r.Context(), principal.User.ID, id)
+	}
+	if err != nil {
+		h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "invitations.revoke", ObjectType: "invitation", ObjectID: id, Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	details := map[string]any{"revoked": true}
+	if hasBefore {
+		details["before"] = invitationSnapshot(before)
+		details["objectLabel"] = before.Email
+	}
+	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "invitations.revoke", ObjectType: "invitation", ObjectID: id, Result: application.OperationLogSuccess, Details: details})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) acceptInvitationHandler(w http.ResponseWriter, r *http.Request) {
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "auth.invitation.accept", "invitation") {
 		return
 	}
 	var input struct {
@@ -759,16 +941,32 @@ func (h *Handler) acceptInvitationHandler(w http.ResponseWriter, r *http.Request
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"token": {}, "password": {}}); err != nil {
 		var fieldErr fieldValueError
 		if errors.As(err, &fieldErr) && strings.EqualFold(fieldErr.field, "token") {
+			h.recordOperation(r, unverifiedFailure("auth.invitation.accept", "invitation", "", "", err))
 			writeProblem(w, http.StatusForbidden, "invalid-invitation")
 			return
 		}
+		h.recordOperation(r, unverifiedFailure("auth.invitation.accept", "invitation", "", "", err))
 		writeDecodeError(w, err)
 		return
 	}
-	if err := h.acceptInvitation.Complete(r.Context(), input.Token, input.Password); err != nil {
-		writeApplicationError(w, err)
+	var target domain.Invitation
+	var completeErr error
+	if audited, ok := h.acceptInvitation.(InvitationAcceptanceAuditService); ok {
+		target, completeErr = audited.CompleteWithTarget(r.Context(), input.Token, input.Password)
+	} else {
+		completeErr = h.acceptInvitation.Complete(r.Context(), input.Token, input.Password)
+	}
+	if completeErr != nil {
+		h.recordOperation(r, application.OperationLogInput{Action: "auth.invitation.accept", ObjectType: "invitation", Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(completeErr)}})
+		writeApplicationError(w, completeErr)
 		return
 	}
+	details := map[string]any{"accountActivated": true}
+	if target.ID != "" {
+		details["target"] = map[string]any{"id": target.ID, "name": target.Name, "email": target.Email}
+		details["objectLabel"] = target.Email
+	}
+	h.recordOperation(r, application.OperationLogInput{Action: "auth.invitation.accept", ObjectType: "invitation", ObjectID: target.ID, Result: application.OperationLogSuccess, Details: details})
 	h.clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -813,21 +1011,23 @@ func (h *Handler) saveEmailSettings(w http.ResponseWriter, r *http.Request) {
 		h.notFound(w, r)
 		return
 	}
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "settings.email.update", "email_settings") {
 		return
 	}
-	principal, err := h.currentPrincipal(r)
-	if err != nil {
-		writeApplicationError(w, err)
+	principal, ok := h.operationPrincipal(w, r, "settings.email.update", "email_settings", "")
+	if !ok {
 		return
 	}
+	var err error
 	if !principal.SuperAdmin && !principal.Has(domain.PermissionSettingsWrite) {
+		h.recordOperation(r, operationFailure(principal.User, "settings.email.update", "email_settings", "", application.ErrForbidden, nil))
 		writeProblem(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	before, beforeErr := h.settings.GetEmailSettings(r.Context())
 	var input emailSettingsRequest
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"host": {}, "port": {}, "security": {}, "username": {}, "password": {}, "clearPassword": {}, "fromAddress": {}, "fromName": {}, "defaultLocale": {}, "revision": {}}); err != nil {
+		h.recordOperation(r, operationFailure(principal.User, "settings.email.update", "email_settings", "", err, nil))
 		writeDecodeError(w, err)
 		return
 	}
@@ -837,9 +1037,19 @@ func (h *Handler) saveEmailSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := h.settings.SaveEmailSettings(r.Context(), application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, Revision: revision})
 	if err != nil {
+		details := map[string]any{}
+		if beforeErr == nil {
+			details["before"] = emailSettingsSnapshot(before)
+		}
+		h.recordOperation(r, operationFailure(principal.User, "settings.email.update", "email_settings", "", err, details))
 		writeApplicationError(w, err)
 		return
 	}
+	details := map[string]any{"before": nil, "after": emailSettingsSnapshot(view), "passwordAction": emailPasswordAction(input), "fieldsModified": []string{"smtp", "sender", "locale"}}
+	if beforeErr == nil {
+		details["before"] = emailSettingsSnapshot(before)
+	}
+	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "settings.email.update", ObjectType: "email_settings", Result: application.OperationLogSuccess, Details: details})
 	writeJSON(w, http.StatusOK, emailSettingsEnvelope{Email: emailSettingsResponseBody(view)})
 }
 
@@ -848,16 +1058,16 @@ func (h *Handler) testEmailSettings(w http.ResponseWriter, r *http.Request) {
 		h.notFound(w, r)
 		return
 	}
-	if !h.validOrigin(r) {
-		writeProblem(w, http.StatusForbidden, "forbidden")
+	if h.operationOriginFailure(w, r, "settings.email.test", "email_settings") {
 		return
 	}
-	principal, err := h.currentPrincipal(r)
-	if err != nil {
-		writeApplicationError(w, err)
+	principal, ok := h.operationPrincipal(w, r, "settings.email.test", "email_settings", "")
+	if !ok {
 		return
 	}
+	var err error
 	if !principal.SuperAdmin && !principal.Has(domain.PermissionSettingsWrite) {
+		h.recordOperation(r, operationFailure(principal.User, "settings.email.test", "email_settings", "", application.ErrForbidden, nil))
 		writeProblem(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -866,14 +1076,17 @@ func (h *Handler) testEmailSettings(w http.ResponseWriter, r *http.Request) {
 		Recipient string `json:"recipient"`
 	}
 	if err := decodeJSONObject(r, &input, map[string]struct{}{"host": {}, "port": {}, "security": {}, "username": {}, "password": {}, "clearPassword": {}, "fromAddress": {}, "fromName": {}, "defaultLocale": {}, "revision": {}, "recipient": {}}); err != nil {
+		h.recordOperation(r, operationFailure(principal.User, "settings.email.test", "email_settings", "", err, nil))
 		writeDecodeError(w, err)
 		return
 	}
 	err = h.settings.TestEmailSettings(r.Context(), application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, Revision: input.RevisionValue()}, input.Recipient)
 	if err != nil {
+		h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "settings.email.test", ObjectType: "email_settings", Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
+	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "settings.email.test", ObjectType: "email_settings", Result: application.OperationLogSuccess, Details: map[string]any{"recipientProvided": input.Recipient != ""}})
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 

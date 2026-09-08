@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EmailSettingsPage } from './email-settings-page'
+import { OperationLogRetentionCard } from './operation-log-retention-card'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import { clearAccessDrafts } from '@/features/access/drafts'
 import { i18n, initializeI18n } from '@/shared/i18n'
@@ -165,5 +166,106 @@ describe('email settings page', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Discard draft and reload' })).not.toBeInTheDocument()
     expect(toast.error).toHaveBeenCalledWith('This record changed', { description: 'Another administrator changed this record. Refresh the page before trying again. Refreshing will discard unsaved changes.' })
+  })
+})
+
+describe('operation log retention settings', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    await initializeI18n()
+    await i18n.changeLanguage('en')
+    clearAccessDrafts()
+  })
+
+  it('keeps an invalid value editable until it is corrected', async () => {
+    const saveOperationLogRetention = vi.fn().mockResolvedValue({ retentionDays: 30, revision: 2 })
+    const api = mockApi({
+      getOperationLogRetention: vi.fn().mockResolvedValue({ retentionDays: 180, revision: 1 }),
+      saveOperationLogRetention,
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<OperationLogRetentionCard api={api} userID="user-1" />)
+
+    const input = await screen.findByLabelText('Retention days')
+    await waitFor(() => expect(input).toBeEnabled())
+    await user.clear(input)
+    await user.type(input, '0')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await user.clear(input)
+    await user.type(input, '30')
+    expect(input).toHaveAttribute('aria-invalid', 'false')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveOperationLogRetention).toHaveBeenCalledWith({ retentionDays: 30, revision: 1 }))
+  })
+
+  it('does not enable editing or saving before the authoritative read succeeds', async () => {
+    const api = mockApi({
+      getOperationLogRetention: vi.fn().mockRejectedValue(new ApiProblemError({ type: '/problems/dependency-unavailable', title: 'unavailable', status: 503 })),
+      saveOperationLogRetention: vi.fn(),
+    })
+    renderWithQueryClient(<OperationLogRetentionCard api={api} userID="user-1" />)
+
+    const input = await screen.findByLabelText('Retention days')
+    expect(input).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(await screen.findByText('The API could not load the retention setting. Refresh the page to try again.')).toBeVisible()
+  })
+
+  it('reloads the authoritative revision before discarding a conflict and saving again', async () => {
+    const saveOperationLogRetention = vi.fn()
+      .mockRejectedValueOnce(new ApiProblemError({ type: '/problems/stale-revision', title: 'stale', status: 409, code: 'stale_revision' }))
+      .mockResolvedValueOnce({ retentionDays: 90, revision: 6 })
+    const getOperationLogRetention = vi.fn()
+      .mockResolvedValueOnce({ retentionDays: 180, revision: 4 })
+      .mockResolvedValueOnce({ retentionDays: 120, revision: 5 })
+      .mockResolvedValue({ retentionDays: 90, revision: 6 })
+    const api = mockApi({
+      getOperationLogRetention,
+      saveOperationLogRetention,
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<OperationLogRetentionCard api={api} userID="user-1" />)
+
+    const input = await screen.findByLabelText('Retention days')
+    await waitFor(() => expect(input).toBeEnabled())
+    await user.clear(input)
+    await user.type(input, '90')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Discard draft and reload' })).toBeVisible())
+    expect(input).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Discard draft and reload' }))
+    await waitFor(() => expect(input).toHaveValue(120))
+    expect(getOperationLogRetention).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('button', { name: 'Discard draft and reload' })).not.toBeInTheDocument()
+    await user.clear(input)
+    await user.type(input, '90')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveOperationLogRetention).toHaveBeenLastCalledWith({ retentionDays: 90, revision: 5 }))
+  })
+
+  it('keeps the conflict and save disabled when the authoritative reload fails', async () => {
+    const stale = new ApiProblemError({ type: '/problems/stale-revision', title: 'stale', status: 409, code: 'stale_revision' })
+    const getOperationLogRetention = vi.fn()
+      .mockResolvedValueOnce({ retentionDays: 180, revision: 4 })
+      .mockRejectedValueOnce(new ApiProblemError({ type: '/problems/dependency-unavailable', title: 'unavailable', status: 503 }))
+    const saveOperationLogRetention = vi.fn().mockRejectedValue(stale)
+    const api = mockApi({ getOperationLogRetention, saveOperationLogRetention })
+    const user = userEvent.setup()
+    renderWithQueryClient(<OperationLogRetentionCard api={api} userID="user-1" />)
+
+    const input = await screen.findByLabelText('Retention days')
+    await waitFor(() => expect(input).toBeEnabled())
+    await user.clear(input)
+    await user.type(input, '90')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Discard draft and reload' })).toBeVisible())
+    await user.click(screen.getByRole('button', { name: 'Discard draft and reload' }))
+
+    await waitFor(() => expect(getOperationLogRetention).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Discard draft and reload' })).toBeVisible()
+    expect(saveOperationLogRetention).toHaveBeenCalledOnce()
   })
 })

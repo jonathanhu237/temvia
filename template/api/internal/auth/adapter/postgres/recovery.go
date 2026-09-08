@@ -9,6 +9,20 @@ import (
 	"example.com/temvia/api/internal/auth/domain"
 )
 
+func (s *Store) FindPasswordResetTarget(ctx context.Context, selector, verifierDigest []byte) (domain.User, error) {
+	var user domain.User
+	err := s.db.QueryRowContext(ctx, `
+		SELECT u.id::text, u.name, u.email, u.created_at
+		FROM auth_password_resets AS r
+		JOIN auth_users AS u ON u.id = r.user_id
+		WHERE r.selector = $1 AND r.verifier_digest = $2 AND r.expires_at > clock_timestamp()`, selector, verifierDigest).
+		Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt)
+	if err == sql.ErrNoRows {
+		return domain.User{}, application.ErrInvalidPasswordResetToken
+	}
+	return user, err
+}
+
 func (s *Store) RequestPasswordReset(ctx context.Context, canonical string, selector, verifierDigest []byte, ttl time.Duration, locale domain.Locale) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

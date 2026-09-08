@@ -131,6 +131,7 @@ func DefaultPermissionCatalog() PermissionCatalog {
 		PermissionDefinition{Key: PermissionInvitationsWrite, Resource: "invitations", Action: "write", LabelKey: "permissions.invitations.write", Description: "Create, resend, and revoke invitations."},
 		PermissionDefinition{Key: PermissionSettingsRead, Resource: "settings", Action: "read", LabelKey: "permissions.settings.read", Description: "View system settings."},
 		PermissionDefinition{Key: PermissionSettingsWrite, Resource: "settings", Action: "write", LabelKey: "permissions.settings.write", Description: "Update system settings."},
+		PermissionDefinition{Key: PermissionOperationLogsRead, Resource: "operation-logs", Action: "read", LabelKey: "permissions.operationLogs.read", Description: "View operation history and recording status."},
 	)
 	return catalog.WithCombinations(
 		PermissionCombination{Key: "invitations.create", LabelKey: "permissions.combinations.invitationsCreate", Description: "Create invitations and choose an assignable role.", Permissions: []PermissionKey{PermissionInvitationsWrite, PermissionRolesRead}, Trigger: []PermissionKey{PermissionInvitationsWrite}},
@@ -142,14 +143,15 @@ func DefaultPermissionCatalog() PermissionCatalog {
 }
 
 const (
-	PermissionUsersRead        PermissionKey = "users.read"
-	PermissionUsersWrite       PermissionKey = "users.write"
-	PermissionRolesRead        PermissionKey = "roles.read"
-	PermissionRolesWrite       PermissionKey = "roles.write"
-	PermissionInvitationsRead  PermissionKey = "invitations.read"
-	PermissionInvitationsWrite PermissionKey = "invitations.write"
-	PermissionSettingsRead     PermissionKey = "settings.read"
-	PermissionSettingsWrite    PermissionKey = "settings.write"
+	PermissionUsersRead         PermissionKey = "users.read"
+	PermissionUsersWrite        PermissionKey = "users.write"
+	PermissionRolesRead         PermissionKey = "roles.read"
+	PermissionRolesWrite        PermissionKey = "roles.write"
+	PermissionInvitationsRead   PermissionKey = "invitations.read"
+	PermissionInvitationsWrite  PermissionKey = "invitations.write"
+	PermissionSettingsRead      PermissionKey = "settings.read"
+	PermissionSettingsWrite     PermissionKey = "settings.write"
+	PermissionOperationLogsRead PermissionKey = "operation-logs.read"
 )
 
 func (c PermissionCatalog) Has(key PermissionKey) bool { _, ok := c.items[key]; return ok }

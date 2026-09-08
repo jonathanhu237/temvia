@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, House, LogOut, Mail, Settings, ShieldCheck, UserRound, Users } from 'lucide-react'
+import { Activity, ChevronDown, House, LogOut, Mail, Settings, ShieldCheck, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
@@ -30,7 +30,7 @@ import type { User } from '@/shared/api/contracts'
 import { clearAccessDrafts, useAccessDraftStore } from '@/features/access/drafts'
 
 export function AuthenticatedShell({ api, user, children }: { api: ApiClient; user: User; children: React.ReactNode }) {
-  const { t } = useTranslation(['common', 'auth', 'problems', 'access'])
+  const { t } = useTranslation(['common', 'auth', 'problems', 'access', 'operationLog'])
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
@@ -38,13 +38,21 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
   const hasInvitationsAccess = Boolean(user.superAdmin || user.permissions?.includes('invitations.read'))
   const hasRolesAccess = Boolean(user.superAdmin || user.permissions?.includes('roles.read'))
   const hasSettingsAccess = Boolean(user.superAdmin || user.permissions?.includes('settings.read'))
+  const hasOperationLogsAccess = Boolean(user.superAdmin || user.permissions?.includes('operation-logs.read'))
   const hasAccessMenu = hasUsersAccess || hasInvitationsAccess || hasRolesAccess
   const accessMenuActive = location.pathname.startsWith('/users') || location.pathname.startsWith('/invitations') || location.pathname.startsWith('/roles')
   const [accessMenuOpen, setAccessMenuOpen] = useState(true)
   const accessMenuExpanded = accessMenuOpen || accessMenuActive
   useEffect(() => {
     const previousOwnerID = useAccessDraftStore.getState().ownerID
-    if (previousOwnerID !== user.id) queryClient.removeQueries({ queryKey: ['access'] })
+    if (previousOwnerID && previousOwnerID !== user.id) {
+      queryClient.removeQueries({ queryKey: ['access'] })
+      queryClient.removeQueries({ queryKey: ['operational-warnings', previousOwnerID] })
+      queryClient.removeQueries({ queryKey: ['operation-log-status', previousOwnerID] })
+      queryClient.removeQueries({ queryKey: ['operation-logs', previousOwnerID] })
+      queryClient.removeQueries({ queryKey: ['operation-log', previousOwnerID] })
+      queryClient.removeQueries({ queryKey: ['settings', 'operation-log-retention', previousOwnerID] })
+    }
     useAccessDraftStore.getState().setOwner(user.id)
   }, [queryClient, user.id])
   const logout = useMutation({
@@ -52,9 +60,17 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
     meta: { preserveAccessDraftsOnError: true },
     mutationFn: () => api.logout(),
     onSuccess: () => {
+      const ownerID = useAccessDraftStore.getState().ownerID
       clearAccessDrafts()
       queryClient.removeQueries({ queryKey: currentUserQueryKey })
       queryClient.removeQueries({ queryKey: ['access'] })
+      if (ownerID) {
+        queryClient.removeQueries({ queryKey: ['operational-warnings', ownerID] })
+        queryClient.removeQueries({ queryKey: ['operation-log-status', ownerID] })
+        queryClient.removeQueries({ queryKey: ['operation-logs', ownerID] })
+        queryClient.removeQueries({ queryKey: ['operation-log', ownerID] })
+        queryClient.removeQueries({ queryKey: ['settings', 'operation-log-retention', ownerID] })
+      }
       notifySuccess(t('auth:logoutSuccess'))
       void navigate({ to: '/login', replace: true })
     },
@@ -92,6 +108,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
                   </SidebarMenuItem>
                 ) : null}
                 {hasSettingsAccess ? <SidebarMenuItem><SidebarMenuButton asChild isActive={location.pathname.startsWith('/settings')} tooltip={t('settings')}><Link to="/settings" aria-current={location.pathname.startsWith('/settings') ? 'page' : undefined}><Settings aria-hidden="true" data-icon="inline-start" /><span>{t('settings')}</span></Link></SidebarMenuButton></SidebarMenuItem> : null}
+                {hasOperationLogsAccess ? <SidebarMenuItem><SidebarMenuButton asChild isActive={location.pathname.startsWith('/operation-logs')} tooltip={t('operationLog:title')}><Link to="/operation-logs" aria-current={location.pathname.startsWith('/operation-logs') ? 'page' : undefined}><Activity aria-hidden="true" data-icon="inline-start" /><span>{t('operationLog:title')}</span></Link></SidebarMenuButton></SidebarMenuItem> : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -128,7 +145,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger aria-label={t('menu')} />
             <div className="h-4 w-px bg-border" aria-hidden="true" />
-            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : location.pathname.startsWith('/settings') ? t('settings') : t('home')}</p>
+            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : location.pathname.startsWith('/settings') ? t('settings') : location.pathname.startsWith('/operation-logs') ? t('operationLog:title') : t('home')}</p>
           </div>
           <PreferencesButtons className="shrink-0" />
         </header>

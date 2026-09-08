@@ -170,6 +170,9 @@ func TestStoreIntegrationRejectsNonExactSchemaVersions(t *testing.T) {
 }
 
 func resetAuthState(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `DELETE FROM auth_operation_logs`); err != nil {
+		return err
+	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM auth_user_invitations`); err != nil {
 		return err
 	}
@@ -179,8 +182,93 @@ func resetAuthState(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, `DELETE FROM auth_roles WHERE system_key IS NULL`); err != nil {
 		return err
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE auth_operation_log_settings SET retention_days = 180, revision = 1 WHERE singleton = true`); err != nil {
+		return err
+	}
 	_, err := db.ExecContext(ctx, `UPDATE auth_setup SET token_digest = NULL, token_expires_at = NULL, completed_at = NULL WHERE singleton = true`)
 	return err
+}
+
+func TestStoreIntegrationOperationLogPersistenceAndRetention(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not set")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	store := NewStore(db)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if err := resetAuthState(cleanupCtx, db); err != nil {
+			t.Errorf("reset auth state: %v", err)
+		}
+		_ = db.Close()
+	})
+	if err := resetAuthState(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CheckSchema(ctx); err != nil {
+		t.Fatalf("CheckSchema() error = %v", err)
+	}
+	var actorID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO auth_users (name, email, email_canonical, password_hash)
+		VALUES ('Log Actor', 'log-actor@example.com', 'log-actor@example.com', 'hash')
+		RETURNING id::text`).Scan(&actorID); err != nil {
+		t.Fatal(err)
+	}
+	createdAt := time.Now().UTC().Add(-2 * time.Hour)
+	if err := store.CreateOperationLog(ctx, application.OperationLogInput{ActorID: actorID, ActorKind: "authenticated", Action: "roles.create", ObjectType: "role", ObjectID: actorID, Result: application.OperationLogSuccess, OccurredAt: createdAt, SourceIP: "127.0.0.1", Details: map[string]any{"after": map[string]any{"name": "Auditor"}}}); err != nil {
+		t.Fatalf("CreateOperationLog(success) error = %v", err)
+	}
+	if err := store.CreateOperationLog(ctx, application.OperationLogInput{ActorID: actorID, ActorKind: "authenticated", Action: "roles.delete", ObjectType: "role", ObjectID: actorID, Result: application.OperationLogSuccess, OccurredAt: createdAt.Add(-time.Minute), Details: map[string]any{"deleted": true}}); err != nil {
+		t.Fatalf("CreateOperationLog(second success) error = %v", err)
+	}
+	if err := store.CreateOperationLog(ctx, application.OperationLogInput{ActorKind: "unverified", ActorLabel: "unverified actor", Action: "auth.login", ObjectType: "session", Result: application.OperationLogFailure, AttemptedAccount: "unknown@example.com", Details: map[string]any{"failure": "invalid_credentials"}}); err != nil {
+		t.Fatalf("CreateOperationLog(failure) error = %v", err)
+	}
+	page, err := store.ListOperationLogs(ctx, application.OperationLogListOptions{Limit: 1, Result: application.OperationLogSuccess})
+	if err != nil {
+		t.Fatalf("ListOperationLogs() error = %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ActorID != actorID || page.Items[0].Details["after"].(map[string]any)["name"] != "Auditor" || page.NextCursor == "" {
+		t.Fatalf("ListOperationLogs() = %#v", page)
+	}
+	detail, err := store.FindOperationLog(ctx, page.Items[0].ID)
+	if err != nil || detail.Action != "roles.create" {
+		t.Fatalf("FindOperationLog() = %#v, %v", detail, err)
+	}
+	retention, err := store.GetOperationLogRetention(ctx)
+	if err != nil || retention.Days != application.DefaultOperationLogRetentionDays {
+		t.Fatalf("GetOperationLogRetention() = %#v, %v", retention, err)
+	}
+	saved, err := store.SaveOperationLogRetention(ctx, retention.Revision, 30)
+	if err != nil || saved.Days != 30 || saved.Revision != retention.Revision+1 {
+		t.Fatalf("SaveOperationLogRetention() = %#v, %v", saved, err)
+	}
+	if _, err := store.SaveOperationLogRetention(ctx, retention.Revision, 31); !errors.Is(err, application.ErrStaleRevision) {
+		t.Fatalf("SaveOperationLogRetention(stale) = %v", err)
+	}
+	var oldID string
+	if err := db.QueryRowContext(ctx, `INSERT INTO auth_operation_logs (action, object_type, result, occurred_at) VALUES ('test.old', 'test', 'success', clock_timestamp() - interval '40 days') RETURNING id::text`).Scan(&oldID); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := store.DeleteExpiredOperationLogs(ctx, 30)
+	if err != nil || deleted != 1 {
+		t.Fatalf("DeleteExpiredOperationLogs() = %d, %v", deleted, err)
+	}
+	if _, err := store.FindOperationLog(ctx, oldID); !errors.Is(err, application.ErrOperationLogNotFound) {
+		t.Fatalf("FindOperationLog(deleted) = %v", err)
+	}
 }
 
 func TestStoreIntegrationPasswordRecoveryOutboxAndVersionedSessions(t *testing.T) {

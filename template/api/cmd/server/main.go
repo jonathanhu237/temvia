@@ -47,6 +47,10 @@ func newApplicationHandler(cfg config.Config, setup application.SetupStore, auth
 }
 
 func newApplicationHandlerWithSettings(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery httpapi.PasswordRecoveryService, settingsService *application.SettingsManagement) http.Handler {
+	return newApplicationHandlerWithOperationLog(cfg, setup, auth, hasher, sessions, limiter, random, recovery, settingsService, nil)
+}
+
+func newApplicationHandlerWithOperationLog(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery httpapi.PasswordRecoveryService, settingsService *application.SettingsManagement, operationLogs *application.OperationLogService) http.Handler {
 	setupService := application.NewSetup(setup, hasher, random, cfg.SetupLinkTTL)
 	catalog := domain.DefaultPermissionCatalog()
 	authService := application.NewAuthentication(auth, hasher, sessions, limiter, random, catalog)
@@ -63,9 +67,17 @@ func newApplicationHandlerWithSettings(cfg config.Config, setup application.Setu
 			accept := application.NewInvitationAcceptance(store, hasher, cfg.InvitationTokenKey)
 			var authHandler http.Handler
 			if settingsService != nil {
-				authHandler = httpapi.NewHandlerWithAccess(setupService, authService, cfg, recovery, access, accept, settingsService)
+				if operationLogs != nil {
+					authHandler = httpapi.NewHandlerWithAccessAndOperationLog(setupService, authService, cfg, recovery, access, accept, settingsService, operationLogs)
+				} else {
+					authHandler = httpapi.NewHandlerWithAccess(setupService, authService, cfg, recovery, access, accept, settingsService)
+				}
 			} else {
-				authHandler = httpapi.NewHandlerWithAccess(setupService, authService, cfg, recovery, access, accept)
+				if operationLogs != nil {
+					authHandler = httpapi.NewHandlerWithAccessAndOperationLog(setupService, authService, cfg, recovery, access, accept, nil, operationLogs)
+				} else {
+					authHandler = httpapi.NewHandlerWithAccess(setupService, authService, cfg, recovery, access, accept)
+				}
 			}
 			mux.Handle("/api", authHandler)
 			mux.Handle("/api/", authHandler)
@@ -118,6 +130,7 @@ func main() {
 		}
 	}
 	runtimeMailer := application.NewReloadableMailer()
+	operationLogs := application.NewOperationLogService(postgresStore)
 	settingsService := application.NewSettingsManagement(postgresStore, secretBox, func(settings application.SMTPSettings) (application.Mailer, error) {
 		return mailadapter.NewSMTPMailerFromSettingsWithTimeout(settings, cfg.SMTPTimeout)
 	}, runtimeMailer)
@@ -148,7 +161,7 @@ func main() {
 		cfg.MailOutboxRetryMax,
 		cfg.InvitationTokenKey,
 	)
-	handler := newApplicationHandlerWithSettings(cfg, postgresStore, postgresStore, hasher, redisStore, redisStore, random, recovery, settingsService)
+	handler := newApplicationHandlerWithOperationLog(cfg, postgresStore, postgresStore, hasher, redisStore, redisStore, random, recovery, settingsService, operationLogs)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,
@@ -164,6 +177,7 @@ func main() {
 		defer close(dispatcherDone)
 		dispatcher.Run(shutdownContext)
 	}()
+	go operationLogs.RunCleanup(shutdownContext, time.Hour)
 	go func() {
 		<-shutdownContext.Done()
 		gracefulContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)

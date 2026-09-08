@@ -105,6 +105,39 @@ type QueryableAccessStore interface {
 	ListInvitationsWithOptions(context.Context, AccessListOptions) (InvitationPage, error)
 }
 
+// AccessSnapshotStore is an optional read seam used only to capture the
+// target state that an access mutation is about to replace. It is deliberately
+// separate from AccessStore so existing embedders and test stores remain
+// source-compatible.
+type AccessSnapshotStore interface {
+	FindAccessUser(context.Context, string) (domain.AccessUser, error)
+}
+
+// OperationAuditAccessService exposes safe, permission-checked snapshots for
+// the HTTP audit boundary. Implementations must return business fields only;
+// credentials and invitation tokens are never part of a snapshot.
+type OperationAuditAccessService interface {
+	SnapshotRole(context.Context, string, string) (domain.Role, error)
+	SnapshotUser(context.Context, string, string) (domain.AccessUser, error)
+	SnapshotInvitation(context.Context, string, string) (domain.Invitation, error)
+}
+
+// OperationAuditMutationService returns the state observed under the same
+// row locks as a mutation. HTTP records the returned snapshot after the
+// business transaction commits, so an audit write never joins that business
+// transaction while still describing the exact row that changed.
+type OperationAuditMutationService interface {
+	DeleteRoleWithSnapshot(context.Context, string, string) (domain.Role, error)
+	ResendInvitationWithSnapshot(context.Context, string, string) (domain.Invitation, domain.Invitation, error)
+	RevokeInvitationWithSnapshot(context.Context, string, string) (domain.Invitation, error)
+}
+
+type OperationAuditMutationStore interface {
+	DeleteRoleWithSnapshot(context.Context, string, string) (domain.Role, error)
+	ResendInvitationWithSnapshot(context.Context, string, string, domain.Locale, []byte, []byte, time.Duration) (domain.Invitation, domain.Invitation, error)
+	RevokeInvitationWithSnapshot(context.Context, string, string) (domain.Invitation, error)
+}
+
 type AccessManagement struct {
 	store         AccessStore
 	principals    PrincipalStore
@@ -131,6 +164,36 @@ func NewAccessManagementWithInvitations(store AccessStore, principals PrincipalS
 		manager.mailSettings = mailSettings[0]
 	}
 	return manager
+}
+
+func (m *AccessManagement) SnapshotRole(ctx context.Context, actorID, roleID string) (domain.Role, error) {
+	return m.Role(ctx, actorID, roleID)
+}
+
+func (m *AccessManagement) SnapshotUser(ctx context.Context, actorID, userID string) (domain.AccessUser, error) {
+	if _, err := m.principal(ctx, actorID); err != nil {
+		return domain.AccessUser{}, err
+	}
+	snapshotStore, ok := m.store.(AccessSnapshotStore)
+	if !ok {
+		return domain.AccessUser{}, ErrDependencyUnavailable
+	}
+	user, err := snapshotStore.FindAccessUser(ctx, userID)
+	if err != nil {
+		return domain.AccessUser{}, normalizeAccessError(err)
+	}
+	return normalizeAccessUser(m.catalog, user)
+}
+
+func (m *AccessManagement) SnapshotInvitation(ctx context.Context, actorID, invitationID string) (domain.Invitation, error) {
+	if _, err := m.principal(ctx, actorID); err != nil {
+		return domain.Invitation{}, err
+	}
+	invitation, err := m.store.FindInvitation(ctx, invitationID)
+	if err != nil {
+		return domain.Invitation{}, normalizeAccessError(err)
+	}
+	return normalizeInvitation(m.catalog, invitation)
 }
 
 func (m *AccessManagement) principal(ctx context.Context, actorID string) (domain.Principal, error) {
@@ -317,6 +380,45 @@ func (m *AccessManagement) DeleteRole(ctx context.Context, actorID, roleID strin
 		return normalizeAccessError(deleteErr)
 	}
 	return nil
+}
+
+// DeleteRoleWithSnapshot is the audit-aware delete path. PostgreSQL returns
+// the locked row from the same transaction that removes it; compatibility
+// stores keep the legacy delete semantics and return the preflight value.
+func (m *AccessManagement) DeleteRoleWithSnapshot(ctx context.Context, actorID, roleID string) (domain.Role, error) {
+	principal, err := m.principal(ctx, actorID)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	if !principal.SuperAdmin && (!principal.Has(domain.PermissionRolesWrite) || !principal.Has(domain.PermissionRolesRead)) {
+		return domain.Role{}, ErrForbidden
+	}
+	role, err := m.store.FindRole(ctx, roleID)
+	if err != nil {
+		return domain.Role{}, normalizeAccessError(err)
+	}
+	if role.IsSystem() {
+		return domain.Role{}, ErrImmutableRole
+	}
+	if err := m.ensureGrantable(principal, role.Permissions); err != nil {
+		return domain.Role{}, err
+	}
+	if audited, ok := m.store.(OperationAuditMutationStore); ok {
+		before, deleteErr := audited.DeleteRoleWithSnapshot(ctx, actorID, roleID)
+		if deleteErr != nil {
+			return domain.Role{}, normalizeAccessError(deleteErr)
+		}
+		return normalizeRole(m.catalog, before)
+	}
+	if scoped, ok := m.store.(ScopedRoleStore); ok {
+		err = scoped.DeleteRoleWithinScope(ctx, actorID, roleID)
+	} else {
+		err = m.store.DeleteRole(ctx, roleID)
+	}
+	if err != nil {
+		return domain.Role{}, normalizeAccessError(err)
+	}
+	return normalizeRole(m.catalog, role)
 }
 
 func (m *AccessManagement) Users(ctx context.Context, actorID, cursor string, limit int) (UserPage, error) {
@@ -543,6 +645,70 @@ func (m *AccessManagement) ResendInvitation(ctx context.Context, actorID, invita
 	return normalizeInvitation(m.catalog, invitation)
 }
 
+// ResendInvitationWithSnapshot keeps the invitation and its role descriptors
+// from the mutation transaction, avoiding an HTTP-side read racing a resend.
+func (m *AccessManagement) ResendInvitationWithSnapshot(ctx context.Context, actorID, invitationID string) (domain.Invitation, domain.Invitation, error) {
+	principal, err := m.invitationManager(ctx, actorID)
+	if err != nil {
+		return domain.Invitation{}, domain.Invitation{}, err
+	}
+	if err := m.authorizeExistingInvitation(ctx, principal, invitationID); err != nil {
+		return domain.Invitation{}, domain.Invitation{}, err
+	}
+	locale, err := m.defaultMailLocale(ctx)
+	if err != nil {
+		return domain.Invitation{}, domain.Invitation{}, err
+	}
+	if m.random == nil || len(m.invitationKey) != 32 || m.invitationTTL <= 0 {
+		return domain.Invitation{}, domain.Invitation{}, ErrDependencyUnavailable
+	}
+	selector := make([]byte, 16)
+	if err := m.random.Read(selector); err != nil {
+		return domain.Invitation{}, domain.Invitation{}, dependencyError(err)
+	}
+	material, err := domain.NewInvitationMaterial(m.invitationKey, selector)
+	if err != nil {
+		return domain.Invitation{}, domain.Invitation{}, dependencyError(err)
+	}
+	if audited, ok := m.store.(OperationAuditMutationStore); ok {
+		before, after, resendErr := audited.ResendInvitationWithSnapshot(ctx, actorID, invitationID, locale, material.Selector, material.VerifierDigest, m.invitationTTL)
+		if resendErr != nil {
+			return domain.Invitation{}, domain.Invitation{}, normalizeAccessError(resendErr)
+		}
+		before, err = normalizeInvitation(m.catalog, before)
+		if err != nil {
+			return domain.Invitation{}, domain.Invitation{}, err
+		}
+		after, err = normalizeInvitation(m.catalog, after)
+		if err != nil {
+			return domain.Invitation{}, domain.Invitation{}, err
+		}
+		return before, after, nil
+	}
+	before, beforeErr := m.store.FindInvitation(ctx, invitationID)
+	if beforeErr != nil {
+		return domain.Invitation{}, domain.Invitation{}, normalizeAccessError(beforeErr)
+	}
+	var after domain.Invitation
+	if scoped, ok := m.store.(ScopedInvitationStore); ok {
+		after, err = scoped.ResendInvitationWithinScope(ctx, actorID, invitationID, locale, material.Selector, material.VerifierDigest, m.invitationTTL)
+	} else {
+		after, err = m.store.ResendInvitation(ctx, invitationID, locale, material.Selector, material.VerifierDigest, m.invitationTTL)
+	}
+	if err != nil {
+		return domain.Invitation{}, domain.Invitation{}, normalizeAccessError(err)
+	}
+	before, err = normalizeInvitation(m.catalog, before)
+	if err != nil {
+		return domain.Invitation{}, domain.Invitation{}, err
+	}
+	after, err = normalizeInvitation(m.catalog, after)
+	if err != nil {
+		return domain.Invitation{}, domain.Invitation{}, err
+	}
+	return before, after, nil
+}
+
 func (m *AccessManagement) RevokeInvitation(ctx context.Context, actorID, invitationID string) error {
 	principal, err := m.invitationManager(ctx, actorID)
 	if err != nil {
@@ -561,6 +727,37 @@ func (m *AccessManagement) RevokeInvitation(ctx context.Context, actorID, invita
 		return normalizeAccessError(revokeErr)
 	}
 	return nil
+}
+
+// RevokeInvitationWithSnapshot returns the locked invitation before deletion.
+func (m *AccessManagement) RevokeInvitationWithSnapshot(ctx context.Context, actorID, invitationID string) (domain.Invitation, error) {
+	principal, err := m.invitationManager(ctx, actorID)
+	if err != nil {
+		return domain.Invitation{}, err
+	}
+	if err := m.authorizeExistingInvitation(ctx, principal, invitationID); err != nil {
+		return domain.Invitation{}, err
+	}
+	if audited, ok := m.store.(OperationAuditMutationStore); ok {
+		before, revokeErr := audited.RevokeInvitationWithSnapshot(ctx, actorID, invitationID)
+		if revokeErr != nil {
+			return domain.Invitation{}, normalizeAccessError(revokeErr)
+		}
+		return normalizeInvitation(m.catalog, before)
+	}
+	before, beforeErr := m.store.FindInvitation(ctx, invitationID)
+	if beforeErr != nil {
+		return domain.Invitation{}, normalizeAccessError(beforeErr)
+	}
+	if scoped, ok := m.store.(ScopedInvitationStore); ok {
+		err = scoped.RevokeInvitationWithinScope(ctx, actorID, invitationID)
+	} else {
+		err = m.store.RevokeInvitation(ctx, invitationID)
+	}
+	if err != nil {
+		return domain.Invitation{}, normalizeAccessError(err)
+	}
+	return normalizeInvitation(m.catalog, before)
 }
 
 func (m *AccessManagement) invitationManager(ctx context.Context, actorID string) (domain.Principal, error) {
@@ -656,42 +853,62 @@ type InvitationAcceptance struct {
 	key    []byte
 }
 
+type InvitationTargetStore interface {
+	FindInvitationTarget(context.Context, []byte, []byte) (domain.Invitation, error)
+}
+
 func NewInvitationAcceptance(store AccessStore, hasher PasswordHasher, key []byte) *InvitationAcceptance {
 	return &InvitationAcceptance{store: store, hasher: hasher, key: append([]byte(nil), key...)}
 }
 
 func (a *InvitationAcceptance) Complete(ctx context.Context, token, password string) error {
+	_, err := a.CompleteWithTarget(ctx, token, password)
+	return err
+}
+
+func (a *InvitationAcceptance) CompleteWithTarget(ctx context.Context, token, password string) (domain.Invitation, error) {
 	selector, digest, ok := domain.ParseInvitationToken(token)
 	if !ok {
-		return ErrInvitationInvalid
+		return domain.Invitation{}, ErrInvitationInvalid
+	}
+	var err error
+	var target domain.Invitation
+	if targetStore, ok := a.store.(InvitationTargetStore); ok {
+		target, err = targetStore.FindInvitationTarget(ctx, selector, digest)
+		if err != nil {
+			if errors.Is(err, ErrInvitationInvalid) {
+				return domain.Invitation{}, ErrInvitationInvalid
+			}
+			return domain.Invitation{}, dependencyError(err)
+		}
 	}
 	if a.store == nil || a.hasher == nil || len(a.key) != 32 {
-		return ErrDependencyUnavailable
+		return domain.Invitation{}, ErrDependencyUnavailable
 	}
 	if err := a.store.PreflightInvitation(ctx, selector, digest); err != nil {
 		if errors.Is(err, ErrInvitationInvalid) {
-			return ErrInvitationInvalid
+			return domain.Invitation{}, ErrInvitationInvalid
 		}
-		return dependencyError(err)
+		return domain.Invitation{}, dependencyError(err)
 	}
 	value, err := domain.NewPassword(password)
 	if err != nil {
-		return err
+		return domain.Invitation{}, err
 	}
 	hash, err := a.hasher.Hash(ctx, string(value))
 	if err != nil {
 		if errors.Is(err, ErrPasswordHashBusy) {
-			return ErrDependencyUnavailable
+			return domain.Invitation{}, ErrDependencyUnavailable
 		}
-		return dependencyError(err)
+		return domain.Invitation{}, dependencyError(err)
 	}
 	if err := a.store.CompleteInvitation(ctx, selector, digest, hash); err != nil {
 		if errors.Is(err, ErrInvitationInvalid) || errors.Is(err, ErrEmailAlreadyRegistered) {
-			return ErrInvitationInvalid
+			return domain.Invitation{}, ErrInvitationInvalid
 		}
-		return dependencyError(err)
+		return domain.Invitation{}, dependencyError(err)
 	}
-	return nil
+	return target, nil
 }
 
 func validateRoleInput(catalog domain.PermissionCatalog, input RoleMutationInput) (string, string, []domain.PermissionKey, error) {

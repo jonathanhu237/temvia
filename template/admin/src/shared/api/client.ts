@@ -11,6 +11,10 @@ import {
 	passwordResetRequestInputSchema,
 	emailSettingsResponseSchema,
 	operationalWarningsSchema,
+	operationLogRetentionSchema,
+	operationLogResponseSchema,
+	operationLogsResponseSchema,
+	operationLogStatusSchema,
 	problemDetailsSchema,
 	roleMutationInputSchema,
 	roleResponseSchema,
@@ -28,7 +32,8 @@ import {
   type Permission,
   type Invitation,
 	  type RoleOption,
-	  type EmailSettings,
+  type EmailSettings,
+  type OperationLog,
 } from './contracts'
 
 export class ApiProblemError extends Error {
@@ -83,6 +88,11 @@ export interface ApiClient {
 	saveEmailSettings?(input: { host: string; port: number; security: 'none' | 'starttls' | 'tls'; username: string; password?: string; clearPassword?: boolean; fromAddress: string; fromName: string; defaultLocale: 'en' | 'zh-CN'; revision: number }, signal?: AbortSignal): Promise<EmailSettings>
 	testEmailSettings?(input: { host: string; port: number; security: 'none' | 'starttls' | 'tls'; username: string; password?: string; clearPassword?: boolean; fromAddress: string; fromName: string; defaultLocale: 'en' | 'zh-CN'; revision?: number; recipient: string }, signal?: AbortSignal): Promise<void>
 	getOperationalWarnings?(signal?: AbortSignal): Promise<{ warnings: Array<{ key: string; severity: string }> }>
+	getOperationLogStatus?(signal?: AbortSignal): Promise<{ state: 'unknown' | 'healthy' | 'failed' | 'recovered'; failureCount: number; lastFailureAt?: string; lastSuccessAt?: string }>
+	getOperationLogs?(options?: { cursor?: string; limit?: number; from?: string; to?: string; actorId?: string; action?: string; objectType?: string; objectId?: string; result?: 'success' | 'failure' }, signal?: AbortSignal): Promise<{ logs: OperationLog[]; nextCursor?: string }>
+	getOperationLog?(id: string, signal?: AbortSignal): Promise<OperationLog>
+	getOperationLogRetention?(signal?: AbortSignal): Promise<{ retentionDays: number; revision: number; updatedAt?: string }>
+	saveOperationLogRetention?(input: { retentionDays: number; revision: number }, signal?: AbortSignal): Promise<{ retentionDays: number; revision: number; updatedAt?: string }>
 }
 
 interface RequestOptions {
@@ -213,5 +223,13 @@ export function createApiClient(): ApiClient {
 		saveEmailSettings: async (input, signal) => (await request('/api/settings/email', emailSettingsResponseSchema, { method: 'PUT', body: input, signal, expectedStatus: 200 })).email,
 		testEmailSettings: async (input, signal) => { await request('/api/settings/email/test', passwordResetAcceptedSchema, { method: 'POST', body: input, signal, expectedStatus: 202 }) },
 		getOperationalWarnings: async (signal) => request('/api/operational-warnings', operationalWarningsSchema, { signal, expectedStatus: 200 }),
+		getOperationLogStatus: async (signal) => request('/api/operation-logs/status', operationLogStatusSchema, { signal, expectedStatus: 200 }),
+		getOperationLogs: async (options, signal) => {
+			const query = new URLSearchParams(); if (options?.cursor) query.set('cursor', options.cursor); if (options?.limit !== undefined) query.set('limit', String(options.limit)); if (options?.from) query.set('from', options.from); if (options?.to) query.set('to', options.to); if (options?.actorId) query.set('actorId', options.actorId); if (options?.action) query.set('action', options.action); if (options?.objectType) query.set('objectType', options.objectType); if (options?.objectId) query.set('objectId', options.objectId); if (options?.result) query.set('result', options.result)
+			return request(`/api/operation-logs${query.size ? `?${query.toString()}` : ''}`, operationLogsResponseSchema, { signal, expectedStatus: 200 })
+		},
+		getOperationLog: async (id, signal) => (await request(`/api/operation-logs/${encodeURIComponent(id)}`, operationLogResponseSchema, { signal, expectedStatus: 200 })).log,
+		getOperationLogRetention: async (signal) => request('/api/settings/operation-log', operationLogRetentionSchema, { signal, expectedStatus: 200 }),
+		saveOperationLogRetention: async (input, signal) => (await request('/api/settings/operation-log', operationLogRetentionSchema, { method: 'PUT', body: input, signal, expectedStatus: 200 })),
   }
 }

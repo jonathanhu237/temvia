@@ -19,6 +19,13 @@ type PasswordResetCompleteInput struct {
 	Password string
 }
 
+// PasswordResetTargetStore is an optional audit seam. It returns only the
+// account identity bound to a valid reset digest; the reset token and password
+// material never leave the recovery service.
+type PasswordResetTargetStore interface {
+	FindPasswordResetTarget(context.Context, []byte, []byte) (domain.User, error)
+}
+
 type PasswordRecovery struct {
 	store        PasswordResetStore
 	limiter      PasswordResetLimiter
@@ -104,48 +111,64 @@ func (r *PasswordRecovery) Request(ctx context.Context, input PasswordResetReque
 }
 
 func (r *PasswordRecovery) Complete(ctx context.Context, input PasswordResetCompleteInput) error {
+	_, err := r.CompleteWithTarget(ctx, input)
+	return err
+}
+
+func (r *PasswordRecovery) CompleteWithTarget(ctx context.Context, input PasswordResetCompleteInput) (domain.User, error) {
 	selector, verifierDigest, ok := domain.ParsePasswordResetToken(input.Token)
 	if !ok {
-		return ErrInvalidPasswordResetToken
+		return domain.User{}, ErrInvalidPasswordResetToken
+	}
+	var err error
+	var target domain.User
+	if targetStore, ok := r.store.(PasswordResetTargetStore); ok {
+		target, err = targetStore.FindPasswordResetTarget(ctx, selector, verifierDigest)
+		if err != nil {
+			if isPasswordResetTokenError(err) {
+				return domain.User{}, ErrInvalidPasswordResetToken
+			}
+			return domain.User{}, dependencyError(err)
+		}
 	}
 	locale, err := r.mailLocale(ctx)
 	if err != nil {
-		return err
+		return domain.User{}, err
 	}
 	if r.store == nil {
-		return ErrDependencyUnavailable
+		return domain.User{}, ErrDependencyUnavailable
 	}
 	// Preflight is deliberately cheap and happens before Argon2 work. The
 	// transaction revalidates the same digest under a row lock after hashing.
 	if err := r.store.PreflightPasswordReset(ctx, selector, verifierDigest); err != nil {
 		switch {
 		case isPasswordResetTokenError(err):
-			return ErrInvalidPasswordResetToken
+			return domain.User{}, ErrInvalidPasswordResetToken
 		default:
-			return dependencyError(err)
+			return domain.User{}, dependencyError(err)
 		}
 	}
 	password, err := domain.NewPassword(input.Password)
 	if err != nil {
-		return err
+		return domain.User{}, err
 	}
 	if r.hasher == nil {
-		return ErrDependencyUnavailable
+		return domain.User{}, ErrDependencyUnavailable
 	}
 	hash, err := r.hasher.Hash(ctx, string(password))
 	if err != nil {
 		if errors.Is(err, ErrPasswordHashBusy) {
-			return ErrDependencyUnavailable
+			return domain.User{}, ErrDependencyUnavailable
 		}
-		return dependencyError(err)
+		return domain.User{}, dependencyError(err)
 	}
 	if _, err := r.store.CompletePasswordReset(ctx, selector, verifierDigest, hash, locale, r.noticeTTL); err != nil {
 		if isPasswordResetTokenError(err) {
-			return ErrInvalidPasswordResetToken
+			return domain.User{}, ErrInvalidPasswordResetToken
 		}
-		return dependencyError(err)
+		return domain.User{}, dependencyError(err)
 	}
-	return nil
+	return target, nil
 }
 
 func (r *PasswordRecovery) mailLocale(ctx context.Context) (domain.Locale, error) {

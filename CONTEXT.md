@@ -83,3 +83,20 @@ The ability to change shared system settings, which can be granted through a cus
 
 **Assignable role**:
 A role whose permissions do not exceed those of the administrator assigning roles to a user or creating or managing an invitation. Only a Super Admin can assign the Super Admin role.
+
+# Temvia operation history
+
+## Language
+
+**Operation log**:
+A historical record of the outcome of an administrative action or account activity, identifying what happened, when, and who initiated it when known. One operation has one result record, whether successful or failed; additional kinds of operations can join this history as the application grows.
+_Avoid_: API request log, operational warning
+
+**Operation log retention**:
+The configurable period for which operation history is kept before it is automatically removed.
+
+**Operation log recording status**:
+The observed condition of saving operation history, including an unknown initial condition, recording failures, and recovery. A recovered condition does not mean that missing historical records have been restored.
+
+**Unverified actor**:
+A person whose identity has not been established for an account activity. An account identifier supplied in an unsuccessful login attempt does not establish that the account holder performed it.

@@ -52,6 +52,16 @@ export type EmailSettingsDraft = {
   conflict: boolean
 }
 
+export type OperationLogRetentionDraft = {
+  ownerID?: string
+  retentionDays: number
+  revision: number
+  submitting: boolean
+  conflict: boolean
+  authoritative?: boolean
+  submissionID?: string
+}
+
 type DraftState = {
   ownerID?: string
   roleCreate?: RoleDraft
@@ -59,19 +69,21 @@ type DraftState = {
   invitation?: InvitationDraft
   assignments: Record<string, AssignmentDraft>
   emailSettings?: EmailSettingsDraft
+  operationLogRetention?: OperationLogRetentionDraft
   setOwner: (ownerID: string) => void
   setRoleCreate: (draft: RoleDraft | undefined) => void
   setRoleEdit: (id: string, draft: RoleDraft | undefined) => void
   setInvitation: (draft: InvitationDraft | undefined) => void
   setAssignment: (id: string, draft: AssignmentDraft | undefined) => void
   setEmailSettings: (draft: EmailSettingsDraft | undefined) => void
+  setOperationLogRetention: (draft: OperationLogRetentionDraft | undefined) => void
   clearAll: () => void
 }
 
 export const useAccessDraftStore = create<DraftState>((set) => ({
   roleEdits: {},
   assignments: {},
-  setOwner: (ownerID) => set((state) => state.ownerID === undefined || state.ownerID === ownerID ? { ownerID } : { ownerID, roleCreate: undefined, roleEdits: {}, invitation: undefined, assignments: {}, emailSettings: undefined }),
+  setOwner: (ownerID) => set((state) => state.ownerID === undefined || state.ownerID === ownerID ? { ownerID } : { ownerID, roleCreate: undefined, roleEdits: {}, invitation: undefined, assignments: {}, emailSettings: undefined, operationLogRetention: undefined }),
   setRoleCreate: (roleCreate) => set({ roleCreate }),
   setRoleEdit: (id, draft) => set((state) => {
     const roleEdits = { ...state.roleEdits }
@@ -87,7 +99,8 @@ export const useAccessDraftStore = create<DraftState>((set) => ({
     return { assignments }
   }),
   setEmailSettings: (emailSettings) => set({ emailSettings }),
-  clearAll: () => set({ ownerID: undefined, roleCreate: undefined, roleEdits: {}, invitation: undefined, assignments: {}, emailSettings: undefined }),
+  setOperationLogRetention: (operationLogRetention) => set({ operationLogRetention }),
+  clearAll: () => set({ ownerID: undefined, roleCreate: undefined, roleEdits: {}, invitation: undefined, assignments: {}, emailSettings: undefined, operationLogRetention: undefined }),
 }))
 
 let submissionSequence = 0

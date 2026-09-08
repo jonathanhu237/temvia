@@ -109,7 +109,7 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "invalid_mail_settings", "", nil)
 	case applicationError(err, application.ErrForbidden):
 		writeProblem(w, http.StatusForbidden, "forbidden")
-	case applicationError(err, application.ErrRoleNotFound), applicationError(err, application.ErrUserNotFound), applicationError(err, application.ErrInvitationNotFound):
+	case applicationError(err, application.ErrRoleNotFound), applicationError(err, application.ErrUserNotFound), applicationError(err, application.ErrInvitationNotFound), applicationError(err, application.ErrOperationLogNotFound):
 		writeProblem(w, http.StatusNotFound, "not-found")
 	case applicationError(err, application.ErrRoleInUse):
 		writeProblemWithCode(w, http.StatusConflict, "role-in-use", "role_in_use", "", nil)
