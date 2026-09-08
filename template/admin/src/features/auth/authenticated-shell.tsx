@@ -107,8 +107,9 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
                     </SidebarMenuSub> : null}
                   </SidebarMenuItem>
                 ) : null}
-                {hasSettingsAccess ? <SidebarMenuItem><SidebarMenuButton asChild isActive={location.pathname.startsWith('/settings')} tooltip={t('settings')}><Link to="/settings" aria-current={location.pathname.startsWith('/settings') ? 'page' : undefined}><Settings aria-hidden="true" data-icon="inline-start" /><span>{t('settings')}</span></Link></SidebarMenuButton></SidebarMenuItem> : null}
                 {hasOperationLogsAccess ? <SidebarMenuItem><SidebarMenuButton asChild isActive={location.pathname.startsWith('/operation-logs')} tooltip={t('operationLog:title')}><Link to="/operation-logs" aria-current={location.pathname.startsWith('/operation-logs') ? 'page' : undefined}><Activity aria-hidden="true" data-icon="inline-start" /><span>{t('operationLog:title')}</span></Link></SidebarMenuButton></SidebarMenuItem> : null}
+                {/* Keep system settings last; add new navigation items above it. */}
+                {hasSettingsAccess ? <SidebarMenuItem><SidebarMenuButton asChild isActive={location.pathname.startsWith('/settings')} tooltip={t('settings')}><Link to="/settings" aria-current={location.pathname.startsWith('/settings') ? 'page' : undefined}><Settings aria-hidden="true" data-icon="inline-start" /><span>{t('settings')}</span></Link></SidebarMenuButton></SidebarMenuItem> : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
