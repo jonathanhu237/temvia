@@ -16,9 +16,9 @@ macOS 缺少 Make 时安装 Xcode Command Line Tools。
 
 ## 首次启动
 
-在生成项目根目录复制环境变量示例，填写全部五项秘密配置：
-`POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`PASSWORD_RESET_TOKEN_KEY`、
-`INVITATION_TOKEN_KEY`、`EMAIL_SETTINGS_ENCRYPTION_KEY`。
+在生成项目根目录复制环境变量示例，填写全部四项秘密配置：
+`POSTGRES_PASSWORD`、`PASSWORD_RESET_TOKEN_KEY`、`INVITATION_TOKEN_KEY`、
+`EMAIL_SETTINGS_ENCRYPTION_KEY`。
 
 ```sh
 cp .env.example .env
@@ -27,7 +27,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'
 ```
 
 重复执行密钥生成命令，为每个值使用不同的输出，将结果填入 `.env`，不要提交或共享该文件。
-后三项密钥必须是 32 个随机字节的不带填充 Base64URL 编码；上述命令同时适用于前两项密码。
+后三项密钥必须是 32 个随机字节的不带填充 Base64URL 编码；上述命令也适用于 PostgreSQL 密码。
 确认配置完成后：
 
 ```sh
@@ -47,16 +47,16 @@ URL fragment 移除，仅在初始化请求正文中发送。链接过期时重�
 端口冲突时在 `.env` 调整对应端口；修改 `ADMIN_PORT` 时同步修改 `APP_PUBLIC_URL`。
 更改环境变量后用 `docker compose up -d api` 重建 API 容器；单纯 restart 不会载入新值。
 
-`make down` 不删除 PostgreSQL 数据卷。Redis 是临时会话存储，重启会使所有用户退出，
-但 PostgreSQL 中的账号和初始化状态保留。除非明确要删除数据库，不要执行
-`docker compose down -v`。
+PostgreSQL 保存账号、会话和限流状态。API 或数据库重启后，仍有效的会话继续保留；
+请求会立即检查过期与撤销状态，后台任务只负责分批回收状态。`make down` 不删除
+PostgreSQL 数据卷。除非明确要删除数据库，不要执行 `docker compose down -v`。
 
 ## 配置与邮件
 
 `.env.example` 是完整环境变量清单：包括浏览器 origin、服务地址与映射端口、
-数据库连接池、Redis 限额、会话过期时间、登录及密码找回限流、邀请与重置链接时效、
+数据库连接池、会话过期时间、登录及密码找回限流、邀请与重置链接时效、
 邮件派送超时和重试设置。Compose 读取 `.env`；Go API 仅读取进程环境变量，
-不会自行解析 `.env`。在容器外运行时需要将这些值导入进程，并将数据库及 Redis
+不会自行解析 `.env`。在容器外运行时需要将这些值导入进程，并将数据库
 地址改为宿主机可达的地址。
 
 `make up` 启用仅供开发的 Mailpit。界面为 `http://127.0.0.1:8025`，
@@ -81,7 +81,7 @@ Message-ID 和一次性重置权限处理至少一次投递。
 
 ### API
 
-在准备好进程环境变量、可访问的 PostgreSQL 和 Redis 并完成迁移后：
+在准备好进程环境变量、可访问的 PostgreSQL 并完成迁移后：
 
 ```sh
 cd api
@@ -134,7 +134,7 @@ preview 只检查本地构建，生产由 Caddy 提供 `/api` 代理与 SPA 路�
 
 使用 `APP_ENV=production`，`APP_PUBLIC_URL` 设置为公开 HTTPS origin。
 通过外部 ingress 或自定义 Caddy 提供 TLS；默认 Compose 网关只绑定本机 HTTP，
-不自动配置公网 DNS 或 TLS。后端、数据库和 Redis 端口保持私有。
+不自动配置公网 DNS 或 TLS。后端和数据库端口保持私有。
 Nginx 可替代 Caddy，但必须保留相同的 API 代理及 SPA 回退行为。
 
 ```sh
@@ -153,7 +153,7 @@ docker compose up -d api admin
 ```
 
 回滚前检查受影响的每项迁移并匹配 API 版本，不要把执行一次 down 当成通用回滚方案。
-数据库与加密／签名密钥分别备份；Redis 不是持久会话备份。
+数据库与加密／签名密钥分别备份。
 
 ## 账号、权限和邀请
 

@@ -16,23 +16,19 @@ import (
 
 	"example.com/temvia/api/internal/auth/adapter/password"
 	postgresadapter "example.com/temvia/api/internal/auth/adapter/postgres"
-	redisadapter "example.com/temvia/api/internal/auth/adapter/redis"
 	"example.com/temvia/api/internal/auth/application"
 	"example.com/temvia/api/internal/auth/domain"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // TestOnlineHTTPIntegration exercises the real authentication application,
-// PostgreSQL account/version authority, Redis session store, HTTP handlers,
-// and operation log persistence through one request boundary. It is gated so
-// the normal unit suite stays self-contained; run it with a disposable
-// migrated database and Redis instance.
+// PostgreSQL account, session, limiter, and version authority through the HTTP
+// handlers and operation log persistence. It is gated so the normal unit suite
+// stays self-contained; run it with a disposable migrated database.
 func TestOnlineHTTPIntegration(t *testing.T) {
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	redisAddr := os.Getenv("TEST_REDIS_ADDR")
-	redisPassword := os.Getenv("TEST_REDIS_PASSWORD")
-	if dsn == "" || redisAddr == "" || redisPassword == "" {
-		t.Skip("isolated PostgreSQL and Redis are required")
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL is required")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -47,23 +43,19 @@ func TestOnlineHTTPIntegration(t *testing.T) {
 	}
 
 	cfg := testConfig()
-	cfg.RedisAddr = redisAddr
-	cfg.RedisPassword = redisPassword
-	cfg.RedisOperationTimeout = time.Second
 	cfg.SessionIdleTimeout = time.Hour
 	cfg.SessionAbsoluteTimeout = 2 * time.Hour
 	cfg.LoginGlobalCapacity = 100
 	cfg.LoginGlobalRefillInterval = time.Millisecond
 	cfg.LoginEmailCapacity = 100
 	cfg.LoginEmailRefillInterval = time.Millisecond
-	sessions := redisadapter.NewStore(cfg)
-	t.Cleanup(func() { _ = sessions.Close() })
+	sessions := postgresadapter.NewStore(db, cfg)
 
 	hasher, err := password.NewHasher(2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	accounts := postgresadapter.NewStore(db)
+	accounts := sessions
 	fixture := createOnlineHTTPFixture(t, ctx, db, hasher)
 	var sessionCookies []*http.Cookie
 	t.Cleanup(func() {
@@ -120,6 +112,12 @@ func TestOnlineHTTPIntegration(t *testing.T) {
 	if response := onlineHTTPRequest(handler, http.MethodGet, "/api/auth/me", ``, newTargetCookie); response.Code != http.StatusOK {
 		t.Fatalf("target relogin /me = %d, want 200", response.Code)
 	}
+	if response := onlineHTTPRequest(handler, http.MethodPost, "/api/auth/logout", ``, newTargetCookie); response.Code != http.StatusNoContent {
+		t.Fatalf("logout status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if response := onlineHTTPRequest(handler, http.MethodGet, "/api/auth/session-status", ``, newTargetCookie); response.Code != http.StatusUnauthorized {
+		t.Fatalf("logged-out session status = %d, want 401", response.Code)
+	}
 
 	logsResponse := onlineHTTPRequest(handler, http.MethodGet, "/api/operation-logs?action=users.sessions.revoke&objectId="+fixture.targetID, ``, managerCookie)
 	if logsResponse.Code != http.StatusOK {
@@ -162,10 +160,8 @@ func TestOnlineHTTPIntegration(t *testing.T) {
 
 func TestOnlineHTTPNoTouchIntegration(t *testing.T) {
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	redisAddr := os.Getenv("TEST_REDIS_ADDR")
-	redisPassword := os.Getenv("TEST_REDIS_PASSWORD")
-	if dsn == "" || redisAddr == "" || redisPassword == "" {
-		t.Skip("isolated PostgreSQL and Redis are required")
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL is required")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -187,9 +183,6 @@ func TestOnlineHTTPNoTouchIntegration(t *testing.T) {
 	fixture := createOnlineHTTPFixture(t, ctx, db, hasher)
 
 	baseConfig := testConfig()
-	baseConfig.RedisAddr = redisAddr
-	baseConfig.RedisPassword = redisPassword
-	baseConfig.RedisOperationTimeout = time.Second
 	baseConfig.SessionAbsoluteTimeout = 5 * time.Second
 	baseConfig.LoginGlobalCapacity = 100
 	baseConfig.LoginGlobalRefillInterval = time.Millisecond
@@ -197,10 +190,10 @@ func TestOnlineHTTPNoTouchIntegration(t *testing.T) {
 	baseConfig.LoginEmailRefillInterval = time.Millisecond
 	shortConfig := baseConfig
 	shortConfig.SessionIdleTimeout = 800 * time.Millisecond
-	shortSessions := redisadapter.NewStore(shortConfig)
+	shortSessions := postgresadapter.NewStore(db, shortConfig)
 	longConfig := baseConfig
 	longConfig.SessionIdleTimeout = time.Hour
-	longSessions := redisadapter.NewStore(longConfig)
+	longSessions := postgresadapter.NewStore(db, longConfig)
 	shortCookies := make([]*http.Cookie, 0, 2)
 	longCookies := make([]*http.Cookie, 0, 1)
 	t.Cleanup(func() {
@@ -210,8 +203,6 @@ func TestOnlineHTTPNoTouchIntegration(t *testing.T) {
 		if err := cleanupSessionCookies(longSessions, longCookies); err != nil {
 			t.Errorf("clean no-touch observer sessions: %v", err)
 		}
-		_ = longSessions.Close()
-		_ = shortSessions.Close()
 		_ = db.Close()
 	})
 
@@ -271,10 +262,8 @@ func TestOnlineHTTPNoTouchIntegration(t *testing.T) {
 
 func TestOnlineHTTPConcurrentKickRejectsStaleLogin(t *testing.T) {
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	redisAddr := os.Getenv("TEST_REDIS_ADDR")
-	redisPassword := os.Getenv("TEST_REDIS_PASSWORD")
-	if dsn == "" || redisAddr == "" || redisPassword == "" {
-		t.Skip("isolated PostgreSQL and Redis are required")
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL is required")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -296,22 +285,18 @@ func TestOnlineHTTPConcurrentKickRejectsStaleLogin(t *testing.T) {
 	fixture := createOnlineHTTPFixture(t, ctx, db, hasher)
 
 	cfg := testConfig()
-	cfg.RedisAddr = redisAddr
-	cfg.RedisPassword = redisPassword
-	cfg.RedisOperationTimeout = time.Second
 	cfg.SessionIdleTimeout = time.Hour
 	cfg.SessionAbsoluteTimeout = 2 * time.Hour
 	cfg.LoginGlobalCapacity = 100
 	cfg.LoginGlobalRefillInterval = time.Millisecond
 	cfg.LoginEmailCapacity = 100
 	cfg.LoginEmailRefillInterval = time.Millisecond
-	sessions := redisadapter.NewStore(cfg)
+	sessions := postgresadapter.NewStore(db, cfg)
 	var sessionCookies []*http.Cookie
 	t.Cleanup(func() {
 		if err := cleanupOnlineHTTPFixture(db, sessions, fixture, sessionCookies); err != nil {
 			t.Errorf("clean concurrent online HTTP fixture: %v", err)
 		}
-		_ = sessions.Close()
 		_ = db.Close()
 	})
 
@@ -374,7 +359,7 @@ func TestOnlineHTTPConcurrentKickRejectsStaleLogin(t *testing.T) {
 }
 
 type blockingVersionedSessionStore struct {
-	*redisadapter.Store
+	*postgresadapter.Store
 	createStarted chan struct{}
 	releaseCreate chan struct{}
 	startOnce     sync.Once
@@ -457,7 +442,7 @@ func createOnlineHTTPFixture(t *testing.T, ctx context.Context, db *sql.DB, hash
 	return fixture
 }
 
-func cleanupOnlineHTTPFixture(db *sql.DB, sessions *redisadapter.Store, fixture onlineHTTPFixture, cookies []*http.Cookie) error {
+func cleanupOnlineHTTPFixture(db *sql.DB, sessions *postgresadapter.Store, fixture onlineHTTPFixture, cookies []*http.Cookie) error {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var cleanupErr error
@@ -491,13 +476,13 @@ func cleanupOnlineHTTPFixture(db *sql.DB, sessions *redisadapter.Store, fixture 
 	return cleanupErr
 }
 
-func cleanupSessionCookies(sessions *redisadapter.Store, cookies []*http.Cookie) error {
+func cleanupSessionCookies(sessions *postgresadapter.Store, cookies []*http.Cookie) error {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return cleanupSessionCookiesWithContext(cleanupCtx, sessions, cookies)
 }
 
-func cleanupSessionCookiesWithContext(ctx context.Context, sessions *redisadapter.Store, cookies []*http.Cookie) error {
+func cleanupSessionCookiesWithContext(ctx context.Context, sessions *postgresadapter.Store, cookies []*http.Cookie) error {
 	var cleanupErr error
 	for _, cookie := range cookies {
 		if cookie != nil {

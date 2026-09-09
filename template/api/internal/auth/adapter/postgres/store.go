@@ -14,12 +14,25 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-const ExpectedMigrationVersion int64 = 7
+const ExpectedMigrationVersion int64 = 8
+
+const stateOperationTimeout = time.Second
 
 var ErrSchemaNotReady = errors.New("database schema is not ready")
 
 type Store struct {
-	db *sql.DB
+	db                  *sql.DB
+	operationTimeout    time.Duration
+	idleTimeout         time.Duration
+	absoluteTimeout     time.Duration
+	globalCapacity      int
+	globalRefill        time.Duration
+	emailCapacity       int
+	emailRefill         time.Duration
+	resetGlobalCapacity int
+	resetGlobalRefill   time.Duration
+	resetEmailCapacity  int
+	resetEmailRefill    time.Duration
 }
 
 func Open(ctx context.Context, cfg config.Config) (*sql.DB, error) {
@@ -38,7 +51,67 @@ func Open(ctx context.Context, cfg config.Config) (*sql.DB, error) {
 	return db, nil
 }
 
-func NewStore(db *sql.DB) *Store { return &Store{db: db} }
+func NewStore(db *sql.DB, configs ...config.Config) *Store {
+	settings := config.Config{
+		SessionIdleTimeout:          30 * time.Minute,
+		SessionAbsoluteTimeout:      12 * time.Hour,
+		LoginGlobalCapacity:         10,
+		LoginGlobalRefillInterval:   6 * time.Second,
+		LoginEmailCapacity:          5,
+		LoginEmailRefillInterval:    time.Minute,
+		PasswordResetGlobalCapacity: 10,
+		PasswordResetGlobalRefill:   6 * time.Second,
+		PasswordResetEmailCapacity:  3,
+		PasswordResetEmailRefill:    20 * time.Minute,
+	}
+	if len(configs) > 0 {
+		settings = configs[0]
+		if settings.SessionIdleTimeout <= 0 {
+			settings.SessionIdleTimeout = 30 * time.Minute
+		}
+		if settings.SessionAbsoluteTimeout <= 0 {
+			settings.SessionAbsoluteTimeout = 12 * time.Hour
+		}
+		if settings.LoginGlobalCapacity <= 0 {
+			settings.LoginGlobalCapacity = 10
+		}
+		if settings.LoginGlobalRefillInterval <= 0 {
+			settings.LoginGlobalRefillInterval = 6 * time.Second
+		}
+		if settings.LoginEmailCapacity <= 0 {
+			settings.LoginEmailCapacity = 5
+		}
+		if settings.LoginEmailRefillInterval <= 0 {
+			settings.LoginEmailRefillInterval = time.Minute
+		}
+		if settings.PasswordResetGlobalCapacity <= 0 {
+			settings.PasswordResetGlobalCapacity = 10
+		}
+		if settings.PasswordResetGlobalRefill <= 0 {
+			settings.PasswordResetGlobalRefill = 6 * time.Second
+		}
+		if settings.PasswordResetEmailCapacity <= 0 {
+			settings.PasswordResetEmailCapacity = 3
+		}
+		if settings.PasswordResetEmailRefill <= 0 {
+			settings.PasswordResetEmailRefill = 20 * time.Minute
+		}
+	}
+	return &Store{
+		db:                  db,
+		operationTimeout:    stateOperationTimeout,
+		idleTimeout:         settings.SessionIdleTimeout,
+		absoluteTimeout:     settings.SessionAbsoluteTimeout,
+		globalCapacity:      settings.LoginGlobalCapacity,
+		globalRefill:        settings.LoginGlobalRefillInterval,
+		emailCapacity:       settings.LoginEmailCapacity,
+		emailRefill:         settings.LoginEmailRefillInterval,
+		resetGlobalCapacity: settings.PasswordResetGlobalCapacity,
+		resetGlobalRefill:   settings.PasswordResetGlobalRefill,
+		resetEmailCapacity:  settings.PasswordResetEmailCapacity,
+		resetEmailRefill:    settings.PasswordResetEmailRefill,
+	}
+}
 
 func (s *Store) CheckSchema(ctx context.Context) error {
 	var version int64

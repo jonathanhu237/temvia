@@ -25,7 +25,7 @@ identity. The generator does not install dependencies, generate secrets, run
 migrations, start services, or create commits.
 
 Continue with the generated [first-run guide](template/README.md#first-run):
-configure five secret values, build containers, run migrations, start the stack,
+configure four secret values, build containers, run migrations, start the stack,
 then use the setup link from the API logs to create an administrator and log in.
 Docker Compose is the main first-run route; the same guide covers development
 and production configuration separately.

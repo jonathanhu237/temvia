@@ -145,7 +145,7 @@ func (a *Authentication) current(ctx context.Context, sessionID string, touch bo
 	if hasVersionedSession {
 		versionedAccounts, ok := a.accounts.(VersionedAccountStore)
 		if !ok {
-			// Falling back to FindPublicByID would authorize a versioned Redis
+			// Falling back to FindPublicByID would authorize a versioned
 			// session without checking the PostgreSQL revocation authority.
 			return domain.User{}, ErrDependencyUnavailable
 		}
@@ -157,7 +157,7 @@ func (a *Authentication) current(ctx context.Context, sessionID string, touch bo
 			return domain.User{}, dependencyError(err)
 		}
 		if account.AuthVersion <= 0 || sessionVersion != account.AuthVersion {
-			// PostgreSQL auth_version is the revocation authority. Redis
+			// PostgreSQL auth_version is the revocation authority. Session
 			// deletion is only cleanup and cannot turn this into a 503.
 			_ = a.sessions.Delete(ctx, sessionID)
 			return domain.User{}, ErrUnauthenticated

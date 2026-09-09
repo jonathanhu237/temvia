@@ -8,7 +8,7 @@ import type { Git, RepositoryState } from './git.js';
 const templateDirectory = fileURLToPath(new URL('../template/', import.meta.url));
 const ignoredNames = new Set([
   'node_modules', 'dist', 'dist-ssr', 'bin', 'coverage', 'playwright-report', 'test-results', '.playwright',
-  'postgres-data', 'redis-data', '.git', '.gitignore', '.npmignore', '.DS_Store',
+  'postgres-data', '.git', '.gitignore', '.npmignore', '.DS_Store',
   'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock',
   '.mise.local.toml',
 ]);
@@ -122,8 +122,8 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
     'api/internal/auth/adapter/postgres/store.go', 'api/internal/auth/adapter/postgres/accounts.go', 'api/internal/auth/adapter/postgres/identity.go',
     'api/internal/auth/adapter/postgres/store_test.go', 'api/internal/auth/adapter/postgres/store_integration_test.go',
     'api/internal/auth/adapter/postgres/recovery.go', 'api/internal/auth/adapter/postgres/access.go', 'api/internal/auth/adapter/postgres/outbox.go',
-    'api/internal/auth/adapter/redis/scripts.go', 'api/internal/auth/adapter/redis/store.go',
-    'api/internal/auth/adapter/redis/store_test.go', 'api/internal/auth/adapter/redis/store_integration_test.go',
+    'api/internal/auth/adapter/postgres/sessions.go', 'api/internal/auth/adapter/postgres/limiter.go', 'api/internal/auth/adapter/postgres/cleanup.go', 'api/internal/auth/adapter/postgres/state_integration_test.go',
+    'api/migrations/000008_postgres_state.up.sql', 'api/migrations/000008_postgres_state.down.sql',
     'api/internal/auth/adapter/mail/smtp.go', 'api/internal/auth/adapter/mail/smtp_test.go',
     'api/internal/auth/adapter/httpapi/problem.go', 'api/internal/auth/adapter/httpapi/json.go',
     'api/internal/auth/adapter/httpapi/routes.go', 'api/internal/auth/adapter/httpapi/response.go', 'api/internal/auth/adapter/httpapi/system_identity.go', 'api/internal/auth/adapter/httpapi/system_identity_http_test.go',

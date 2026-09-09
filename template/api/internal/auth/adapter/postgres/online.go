@@ -33,8 +33,9 @@ func (s *Store) RevokeUserSessions(ctx context.Context, actorID, userID string) 
 	if !actorSuper && !permissions[domain.PermissionOnlineUsersWrite] {
 		return application.ErrForbidden
 	}
-	// PostgreSQL is the revocation authority. Old Redis sessions are rejected
-	// even if cleanup fails or an in-flight login creates an old-version session.
+	// PostgreSQL is the revocation authority. Sessions carrying the old
+	// version are rejected even if cleanup fails or an in-flight login creates
+	// an old-version row.
 	result, err := tx.ExecContext(ctx, `UPDATE auth_users SET auth_version = auth_version + 1 WHERE id = $1::uuid`, userID)
 	if err != nil {
 		return err

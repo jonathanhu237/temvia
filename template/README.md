@@ -16,13 +16,13 @@ not fully verified; native Windows PowerShell is outside this route.
 
 ## First run
 
-Copy the environment inventory and fill all five secret values before
+Copy the environment inventory and fill all four secret values before
 starting the containers:
 
 ```sh
 cp .env.example .env
 chmod 600 .env
-# edit .env and set POSTGRES_PASSWORD, REDIS_PASSWORD, PASSWORD_RESET_TOKEN_KEY, INVITATION_TOKEN_KEY, and EMAIL_SETTINGS_ENCRYPTION_KEY
+# edit .env and set POSTGRES_PASSWORD, PASSWORD_RESET_TOKEN_KEY, INVITATION_TOKEN_KEY, and EMAIL_SETTINGS_ENCRYPTION_KEY
 # node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"  # use the output for PASSWORD_RESET_TOKEN_KEY
 # node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"  # generate a separate value for INVITATION_TOKEN_KEY
 # node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"  # generate a separate value for EMAIL_SETTINGS_ENCRYPTION_KEY
@@ -32,8 +32,8 @@ make up
 ```
 
 Run the Node command separately for each token key and use a different output
-for every secret. The same command produces suitable random values for the two
-database passwords; do not reuse a value across variables or commit `.env`.
+for every secret. The same command also produces a suitable random value for the
+PostgreSQL password; do not reuse a value across variables or commit `.env`.
 
 The API prints a temporary setup link in its logs while initialization is
 incomplete. Open that link in the browser-visible admin origin. The token is
@@ -50,9 +50,10 @@ Open `http://localhost:5173` after the first setup, or use the URL printed by
 relative `/api` path through Vite or Caddy, so `APP_PUBLIC_URL` must match the
 origin in the address bar exactly.
 
-Redis is intentionally ephemeral: restarting it logs out all users, while the
-PostgreSQL volume keeps the account and completed setup state. `make down`
-does not remove that PostgreSQL volume.
+PostgreSQL stores accounts, sessions, and rate-limit state. Valid sessions survive
+an API or database restart; expired and revoked state is checked at request time
+and reclaimed by a bounded background cleanup. `make down` does not remove the
+PostgreSQL volume.
 
 Password recovery is handled by the API's PostgreSQL transactional outbox.
 The request endpoint only commits reset state and returns; the in-process mail
@@ -231,8 +232,8 @@ request and returns 204. Session credentials are never exposed in these APIs.
 
 Use `APP_ENV=production` and set `APP_PUBLIC_URL` to the public HTTPS origin.
 Provide TLS through an ingress or a customized Caddy configuration; the supplied
-Compose gateway only listens on loopback HTTP. Keep backend, database and Redis
-ports private. Run `make build`, `make migrate-up`, then
+Compose gateway only listens on loopback HTTP. Keep backend and database ports
+private. Run `make build`, `make migrate-up`, then
 `docker compose up -d api admin` without the development profile. Do not use
 `make up` for production, because it enables Mailpit. Configure real SMTP through
 System settings. For local Mailpit use host `mailpit`, port `1025`, security
@@ -245,9 +246,8 @@ and follow the Admin section. Recreate the API after changing `.env` using
 `docker compose up -d api`; restarting alone does not reload environment values.
 The API must retain the same public origin used by your browser.
 
-Back up PostgreSQL and the encryption/signing keys separately. Redis is not a
-durable session backup. Avoid `docker compose down -v` unless you intend to
-remove the project's database volume.
+Back up PostgreSQL and the encryption/signing keys separately. Avoid `docker
+compose down -v` unless you intend to remove the project's database volume.
 
 ## License and updates
 

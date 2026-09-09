@@ -14,7 +14,6 @@ import (
 	mailadapter "example.com/temvia/api/internal/auth/adapter/mail"
 	"example.com/temvia/api/internal/auth/adapter/password"
 	"example.com/temvia/api/internal/auth/adapter/postgres"
-	redisadapter "example.com/temvia/api/internal/auth/adapter/redis"
 	"example.com/temvia/api/internal/auth/application"
 	"example.com/temvia/api/internal/auth/domain"
 	"example.com/temvia/api/internal/config"
@@ -113,7 +112,7 @@ func main() {
 		log.Fatalf("database startup failed: %v", err)
 	}
 	defer db.Close()
-	postgresStore := postgres.NewStore(db)
+	postgresStore := postgres.NewStore(db, cfg)
 	if err := postgresStore.CheckSchema(startupContext); err != nil {
 		log.Fatalf("database schema is not ready: %v", err)
 	}
@@ -121,8 +120,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("password hashing configuration failed: %v", err)
 	}
-	redisStore := redisadapter.NewStore(cfg)
-	defer redisStore.Close()
 	random := application.CryptoRandom()
 	setupService := application.NewSetup(postgresStore, hasher, random, cfg.SetupLinkTTL)
 	if token, required, err := setupService.IssueStartupToken(startupContext); err != nil {
@@ -150,7 +147,7 @@ func main() {
 	}
 	recovery := application.NewPasswordRecovery(
 		postgresStore,
-		redisStore,
+		postgresStore,
 		hasher,
 		random,
 		cfg.PasswordResetTokenKey,
@@ -172,7 +169,7 @@ func main() {
 		cfg.InvitationTokenKey,
 	)
 	dispatcher.SetSystemIdentityProvider(identityService)
-	handler := newApplicationHandlerWithOperationLogAndIdentity(cfg, postgresStore, postgresStore, hasher, redisStore, redisStore, random, recovery, settingsService, operationLogs, identityService)
+	handler := newApplicationHandlerWithOperationLogAndIdentity(cfg, postgresStore, postgresStore, hasher, postgresStore, postgresStore, random, recovery, settingsService, operationLogs, identityService)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,
@@ -189,6 +186,7 @@ func main() {
 		dispatcher.Run(shutdownContext)
 	}()
 	go operationLogs.RunCleanup(shutdownContext, time.Hour)
+	go postgresStore.RunStateCleanup(shutdownContext, time.Minute)
 	go func() {
 		<-shutdownContext.Done()
 		gracefulContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -20,7 +20,7 @@ export const templateContaminants = [
   'admin/debug.log', 'admin/temp.tmp', 'admin/archive.tgz', 'admin/.DS_Store',
   'admin/.mise.local.toml',
   '.env', '.env.local', 'api/.env', 'api/.env.production',
-  'postgres-data/PG_VERSION', 'redis-data/dump.rdb',
+  'postgres-data/PG_VERSION',
 ];
 
 export async function contaminateTemplate(directory) {

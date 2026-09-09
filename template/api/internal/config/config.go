@@ -54,12 +54,6 @@ type Config struct {
 	DBConnMaxIdleTime time.Duration
 	DBConnMaxLifetime time.Duration
 
-	RedisAddr             string
-	RedisPassword         string
-	RedisMaxMemory        int64
-	RedisContainerMemory  int64
-	RedisOperationTimeout time.Duration
-
 	SessionIdleTimeout     time.Duration
 	SessionAbsoluteTimeout time.Duration
 
@@ -116,12 +110,6 @@ func Load(get Lookup) (Config, error) {
 		DBConnMaxIdleTime: parseDuration(get, "DB_CONN_MAX_IDLE_TIME", 5*time.Minute),
 		DBConnMaxLifetime: parseDuration(get, "DB_CONN_MAX_LIFETIME", 0),
 
-		RedisAddr:             getDefault(get, "REDIS_ADDR", "redis:6379"),
-		RedisPassword:         get("REDIS_PASSWORD"),
-		RedisMaxMemory:        parseBytes(get, "REDIS_MAXMEMORY", 128*1024*1024),
-		RedisContainerMemory:  parseBytes(get, "REDIS_CONTAINER_MEMORY_LIMIT", 256*1024*1024),
-		RedisOperationTimeout: parseDuration(get, "REDIS_OPERATION_TIMEOUT", time.Second),
-
 		SessionIdleTimeout:     parseDuration(get, "SESSION_IDLE_TIMEOUT", 30*time.Minute),
 		SessionAbsoluteTimeout: parseDuration(get, "SESSION_ABSOLUTE_TIMEOUT", 12*time.Hour),
 
@@ -168,33 +156,6 @@ func parseInt(get Lookup, key string, fallback int) int {
 		return -1
 	}
 	return parsed
-}
-
-func parseBytes(get Lookup, key string, fallback int64) int64 {
-	value := strings.TrimSpace(strings.ToLower(get(key)))
-	if value == "" {
-		return fallback
-	}
-	units := []struct {
-		suffix string
-		factor int64
-	}{
-		{"gib", 1024 * 1024 * 1024}, {"gb", 1000 * 1000 * 1000}, {"g", 1024 * 1024 * 1024},
-		{"mib", 1024 * 1024}, {"mb", 1000 * 1000}, {"m", 1024 * 1024},
-		{"kib", 1024}, {"kb", 1000}, {"k", 1024}, {"b", 1},
-	}
-	for _, unit := range units {
-		if !strings.HasSuffix(value, unit.suffix) {
-			continue
-		}
-		number := strings.TrimSpace(strings.TrimSuffix(value, unit.suffix))
-		parsed, err := strconv.ParseInt(number, 10, 32)
-		if err != nil || parsed <= 0 {
-			return -1
-		}
-		return parsed * unit.factor
-	}
-	return -1
 }
 
 func parseTokenKey(value string) []byte {
@@ -296,20 +257,6 @@ func (c *Config) validate() error {
 	}
 	if c.DBMaxOpenConns <= 0 || c.DBMaxIdleConns < 0 || c.DBMaxIdleConns > c.DBMaxOpenConns || c.DBConnMaxIdleTime < 0 || c.DBConnMaxLifetime < 0 {
 		return fmt.Errorf("database pool settings are invalid")
-	}
-	if c.RedisAddr == "" || c.RedisPassword == "" {
-		return fmt.Errorf("REDIS_ADDR and REDIS_PASSWORD must not be empty")
-	}
-	redisHost, redisPort, redisErr := net.SplitHostPort(c.RedisAddr)
-	parsedRedisPort, parsedRedisErr := strconv.Atoi(redisPort)
-	if redisErr != nil || redisHost == "" || parsedRedisErr != nil || parsedRedisPort < 1 || parsedRedisPort > 65535 {
-		return fmt.Errorf("REDIS_ADDR must be a host and valid port")
-	}
-	if c.RedisMaxMemory <= 0 || c.RedisContainerMemory <= 0 || c.RedisContainerMemory < c.RedisMaxMemory {
-		return fmt.Errorf("Redis memory settings are invalid")
-	}
-	if c.RedisOperationTimeout < time.Millisecond {
-		return fmt.Errorf("REDIS_OPERATION_TIMEOUT must be at least 1ms")
 	}
 	if c.SessionIdleTimeout < time.Millisecond || c.SessionAbsoluteTimeout < time.Millisecond || c.SessionIdleTimeout >= c.SessionAbsoluteTimeout {
 		return fmt.Errorf("session idle timeout must be at least 1ms and less than absolute timeout")
