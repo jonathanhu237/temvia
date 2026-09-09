@@ -9,10 +9,16 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"sync"
 	"time"
 
 	"example.com/temvia/api/internal/auth/domain"
 )
+
+type activeMailDelivery struct {
+	cancel context.CancelFunc
+	stop   func() bool
+}
 
 type MailDispatcher struct {
 	outbox        MailOutboxStore
@@ -28,6 +34,12 @@ type MailDispatcher struct {
 	maxAttempts   int
 	now           func() time.Time
 	identity      SystemIdentityProvider
+
+	mu              sync.Mutex
+	stopping        bool
+	stopCh          chan struct{}
+	shutdownContext context.Context
+	active          *activeMailDelivery
 }
 
 func (d *MailDispatcher) SetSystemIdentityProvider(identity SystemIdentityProvider) {
@@ -49,6 +61,7 @@ func NewMailDispatcher(outbox MailOutboxStore, mailer Mailer, random RandomSourc
 		retryMax:     retryMax,
 		maxAttempts:  10,
 		now:          time.Now,
+		stopCh:       make(chan struct{}),
 	}
 	if len(invitationKeys) > 0 {
 		dispatcher.invitationKey = append([]byte(nil), invitationKeys[0]...)
@@ -56,18 +69,68 @@ func NewMailDispatcher(outbox MailOutboxStore, mailer Mailer, random RandomSourc
 	return dispatcher
 }
 
+// BeginShutdown stops new claims while allowing the currently claimed job to
+// finish until the supplied context ends. The context should carry the shared
+// shutdown deadline; it is deliberately not canceled at the moment the
+// dispatcher is told to stop claiming.
+func (d *MailDispatcher) BeginShutdown(ctx context.Context) {
+	if d == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	d.mu.Lock()
+	if d.stopping {
+		d.mu.Unlock()
+		return
+	}
+	d.stopping = true
+	if d.stopCh == nil {
+		d.stopCh = make(chan struct{})
+	}
+	close(d.stopCh)
+	d.shutdownContext = ctx
+	active := d.active
+	d.mu.Unlock()
+	if active != nil {
+		d.linkActiveDelivery(active, ctx)
+	}
+}
+
+func (d *MailDispatcher) isStopping() bool {
+	if d == nil {
+		return true
+	}
+	d.mu.Lock()
+	stopping := d.stopping
+	d.mu.Unlock()
+	return stopping
+}
+
 func (d *MailDispatcher) Run(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if d.pollInterval <= 0 {
 		d.pollInterval = time.Second
 	}
 	ticker := time.NewTicker(d.pollInterval)
 	defer ticker.Stop()
 	for {
+		if ctx.Err() != nil || d.isStopping() {
+			return
+		}
 		if err := d.ProcessOnce(ctx); err != nil && ctx.Err() != nil {
+			return
+		}
+		if ctx.Err() != nil || d.isStopping() {
 			return
 		}
 		select {
 		case <-ctx.Done():
+			return
+		case <-d.stopCh:
 			return
 		case <-ticker.C:
 		}
@@ -77,6 +140,15 @@ func (d *MailDispatcher) Run(ctx context.Context) {
 // ProcessOnce performs one bounded claim/send/ack cycle. SMTP is called only
 // after the claim transaction has committed.
 func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if d.isStopping() {
+		return context.Canceled
+	}
 	if d.outbox == nil || d.mailer == nil || d.random == nil {
 		return ErrDependencyUnavailable
 	}
@@ -85,6 +157,12 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 	}
 	if err := d.outbox.CleanupMail(ctx); err != nil {
 		return dependencyError(err)
+	}
+	if err := ctx.Err(); err != nil || d.isStopping() {
+		if err != nil {
+			return err
+		}
+		return context.Canceled
 	}
 	leaseToken, err := newLeaseToken(d.random)
 	if err != nil {
@@ -97,8 +175,10 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 	if job == nil {
 		return nil
 	}
+	jobCtx, releaseJob := d.activeJobContext(ctx)
+	defer releaseJob()
 	if !d.now().Before(job.ExpiresAt) {
-		ackCtx, cancel := d.deliveryContext(ctx)
+		ackCtx, cancel := d.deliveryContext(jobCtx)
 		defer cancel()
 		discarded, discardErr := d.outbox.DiscardMail(ackCtx, job.ID, job.LeaseToken, "expired")
 		if discardErr != nil {
@@ -109,9 +189,9 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 		}
 		return nil
 	}
-	message, err := d.compose(ctx, *job)
+	message, err := d.compose(jobCtx, *job)
 	if err != nil {
-		ackCtx, cancel := d.deliveryContext(ctx)
+		ackCtx, cancel := d.deliveryContext(jobCtx)
 		defer cancel()
 		switch {
 		case errors.Is(err, ErrInvalidPasswordResetToken):
@@ -138,10 +218,10 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 			return d.handleDeliveryFailure(ackCtx, *job, &MailDeliveryError{Code: "dependency", Temporary: true})
 		}
 	}
-	deliveryCtx, cancelDelivery := d.deliveryContext(ctx)
+	deliveryCtx, cancelDelivery := d.deliveryContext(jobCtx)
 	defer cancelDelivery()
 	sendErr := d.mailer.Send(deliveryCtx, message)
-	ackCtx, cancelAck := d.deliveryContext(ctx)
+	ackCtx, cancelAck := d.deliveryContext(jobCtx)
 	defer cancelAck()
 	if sendErr == nil {
 		marked, err := d.outbox.MarkMailSent(ackCtx, job.ID, job.LeaseToken)
@@ -159,18 +239,90 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 	return d.handleDeliveryFailure(ackCtx, *job, sendErr)
 }
 
-// deliveryContext deliberately detaches a claimed SMTP operation and its
-// conditional ack from the signal context. Once a job is leased, shutdown
-// must stop new claims while allowing this active operation to drain within
-// the lease window. A lease is always longer than the configured SMTP timeout
-// in production configuration, so this also gives abandoned sends a bound.
-func (d *MailDispatcher) deliveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	base := context.WithoutCancel(ctx)
+// activeJobContext detaches a claimed operation from the claim-loop
+// cancellation. The active job remains bounded by its lease, and
+// BeginShutdown links it to the shared shutdown deadline so a first signal does
+// not interrupt the send while a deadline still allows it to drain.
+func (d *MailDispatcher) activeJobContext(ctx context.Context) (context.Context, func()) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	lease := d.lease
 	if lease <= 0 {
 		lease = 30 * time.Second
 	}
-	return context.WithTimeout(base, lease)
+	jobCtx, cancel := boundedDetachedTimeout(ctx, lease)
+	active := &activeMailDelivery{cancel: cancel}
+	d.mu.Lock()
+	d.active = active
+	shutdownContext := d.shutdownContext
+	d.mu.Unlock()
+	if shutdownContext != nil {
+		d.linkActiveDelivery(active, shutdownContext)
+	}
+	return jobCtx, func() { d.releaseActiveDelivery(active) }
+}
+
+func (d *MailDispatcher) linkActiveDelivery(active *activeMailDelivery, shutdownContext context.Context) {
+	if active == nil || shutdownContext == nil {
+		return
+	}
+	stop := context.AfterFunc(shutdownContext, active.cancel)
+	d.mu.Lock()
+	if d.active == active {
+		active.stop = stop
+		d.mu.Unlock()
+		return
+	}
+	d.mu.Unlock()
+	stop()
+}
+
+func (d *MailDispatcher) releaseActiveDelivery(active *activeMailDelivery) {
+	if active == nil {
+		return
+	}
+	d.mu.Lock()
+	if d.active != active {
+		d.mu.Unlock()
+		return
+	}
+	d.active = nil
+	stop := active.stop
+	d.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+	active.cancel()
+}
+
+// deliveryContext bounds SMTP and outbox acknowledgement work by both the
+// existing lease and any earlier common deadline. The active job context is
+// already detached from stop-claim cancellation, so this child must retain
+// its cancellation rather than detaching it a second time.
+func (d *MailDispatcher) deliveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	lease := d.lease
+	if lease <= 0 {
+		lease = 30 * time.Second
+	}
+	return context.WithTimeout(ctx, lease)
+}
+
+func boundedDetachedTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	if parentDeadline, ok := ctx.Deadline(); ok && parentDeadline.Before(deadline) {
+		deadline = parentDeadline
+	}
+	return context.WithDeadline(context.WithoutCancel(ctx), deadline)
 }
 
 func (d *MailDispatcher) compose(ctx context.Context, job MailJob) (OutgoingMail, error) {

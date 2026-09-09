@@ -18,6 +18,14 @@ func TestLoadDefaultsAndModes(t *testing.T) {
 	if c.CookieName != "temvia_session" || c.SecureCookie || c.Origin != "http://localhost:5173" {
 		t.Fatalf("development config = %#v", c)
 	}
+	if c.ShutdownTimeout != 30*time.Second {
+		t.Fatalf("shutdown timeout = %s, want 30s", c.ShutdownTimeout)
+	}
+	values["SHUTDOWN_TIMEOUT"] = "7s"
+	c, err = Load(env(values))
+	if err != nil || c.ShutdownTimeout != 7*time.Second {
+		t.Fatalf("shutdown timeout override = %s, %v", c.ShutdownTimeout, err)
+	}
 	values["APP_PUBLIC_URL"] = "http://LOCALHOST:05173/"
 	c, err = Load(env(values))
 	if err != nil || c.PublicURL != "http://LOCALHOST:05173" || c.Origin != "http://localhost:5173" {
@@ -46,6 +54,9 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		"missing invitation secret":    func(v map[string]string) { delete(v, "INVITATION_TOKEN_KEY") },
 		"production http":              func(v map[string]string) { v["APP_ENV"] = "production" },
 		"bad duration":                 func(v map[string]string) { v["SETUP_LINK_TTL"] = "nope" },
+		"bad shutdown duration":        func(v map[string]string) { v["SHUTDOWN_TIMEOUT"] = "nope" },
+		"zero shutdown duration":       func(v map[string]string) { v["SHUTDOWN_TIMEOUT"] = "0s" },
+		"negative shutdown duration":   func(v map[string]string) { v["SHUTDOWN_TIMEOUT"] = "-1s" },
 		"idle after absolute":          func(v map[string]string) { v["SESSION_IDLE_TIMEOUT"] = "13h" },
 		"idle pool above open":         func(v map[string]string) { v["DB_MAX_IDLE_CONNS"] = "11" },
 		"bad port":                     func(v map[string]string) { v["POSTGRES_PORT"] = "postgres" },

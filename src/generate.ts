@@ -104,8 +104,8 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
   await visit(root);
   for (const required of [
     '.env.example', '.gitignore', 'Makefile', 'README.md', 'compose.yaml',
-    'api/Dockerfile', 'api/go.mod', 'api/go.sum', 'api/cmd/server/main.go',
-    'api/cmd/server/main_test.go', 'api/migrations/Dockerfile',
+    'api/Dockerfile', 'api/go.mod', 'api/go.sum', 'api/cmd/server/main.go', 'api/cmd/server/shutdown.go',
+    'api/cmd/server/main_test.go', 'api/cmd/server/shutdown_test.go', 'api/migrations/Dockerfile',
     'api/migrations/000001_auth.up.sql', 'api/migrations/000001_auth.down.sql',
     'api/migrations/000002_password_recovery.up.sql', 'api/migrations/000002_password_recovery.down.sql',
     'api/migrations/000003_rbac.up.sql', 'api/migrations/000003_rbac.down.sql', 'api/migrations/000004_system_settings.up.sql', 'api/migrations/000004_system_settings.down.sql', 'api/migrations/000005_operation_logs.up.sql', 'api/migrations/000005_operation_logs.down.sql', 'api/migrations/000006_operation_log_snapshots.up.sql', 'api/migrations/000006_operation_log_snapshots.down.sql', 'api/migrations/000007_system_identity.up.sql', 'api/migrations/000007_system_identity.down.sql', 'api/migrations/migrate-entrypoint.sh',

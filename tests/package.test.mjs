@@ -49,6 +49,10 @@ test('actual npm tarball installs without dev dependencies and its mapped bin ge
   assert.match(stdout, /Initialized Git/);
   assert.deepEqual((await fs.readdir(output)).sort(), ['.env.example', '.git', '.gitignore', 'LICENSE', 'Makefile', 'README.md', 'README.zh-CN.md', 'admin', 'api', 'compose.yaml']);
   assert.match(await fs.readFile(join(output, 'api/go.mod'), 'utf8'), new RegExp(`^module ${modulePath.replaceAll('/', '\\/')}\\n\\ngo 1\\.27\\.0\\n`));
+  assert.match(await fs.readFile(join(output, '.env.example'), 'utf8'), /^SHUTDOWN_TIMEOUT=30s$/m);
+  const compose = await fs.readFile(join(output, 'compose.yaml'), 'utf8');
+  assert.match(compose, /stop_grace_period: \$\{SHUTDOWN_TIMEOUT:-30s\}/);
+  assert.match(compose, /SHUTDOWN_TIMEOUT: \$\{SHUTDOWN_TIMEOUT:-30s\}/);
   for (const asset of requiredAssets) {
     const relative = asset.slice('template/'.length);
     const generated = join(output, generatedPath(relative));

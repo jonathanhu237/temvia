@@ -55,6 +55,14 @@ an API or database restart; expired and revoked state is checked at request time
 and reclaimed by a bounded background cleanup. `make down` does not remove the
 PostgreSQL volume.
 
+`SHUTDOWN_TIMEOUT` is the single graceful-shutdown budget. It defaults to 30s,
+is read by the API, and is also used as Compose's `stop_grace_period`; the
+budget starts at the first SIGINT/SIGTERM and includes a small internal exit
+reserve. The API stops accepting new HTTP requests, drains in-flight requests
+and already claimed mail in parallel, cancels maintenance, and closes the
+database only after those workers finish. A timeout or a second termination
+signal exits nonzero; invalid or non-positive values are rejected at startup.
+
 Password recovery is handled by the API's PostgreSQL transactional outbox.
 The request endpoint only commits reset state and returns; the in-process mail
 dispatcher claims jobs with a short lease and sends them over SMTP afterwards.

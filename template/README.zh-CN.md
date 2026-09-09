@@ -51,6 +51,11 @@ PostgreSQL 保存账号、会话和限流状态。API 或数据库重启后，�
 请求会立即检查过期与撤销状态，后台任务只负责分批回收状态。`make down` 不删除
 PostgreSQL 数据卷。除非明确要删除数据库，不要执行 `docker compose down -v`。
 
+`SHUTDOWN_TIMEOUT` 是唯一的优雅停机预算，默认 30s。API 与 Compose 的
+`stop_grace_period` 读取同一个值；预算从首次 SIGINT/SIGTERM 开始，并包含内部退出预留。
+API 会停止接受新的 HTTP 请求，并行排空在途请求和已领取邮件，取消后台维护，只有这些任务
+结束后才关闭数据库。预算耗尽或第二次终止信号会以非零状态退出；非法或非正值会在启动时拒绝。
+
 ## 配置与邮件
 
 `.env.example` 是完整环境变量清单：包括浏览器 origin、服务地址与映射端口、

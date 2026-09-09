@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -98,6 +98,10 @@ func newApplicationHandlerWithOperationLogAndIdentity(cfg config.Config, setup a
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		log.Fatalf("configuration error: %v", err)
@@ -111,7 +115,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("database startup failed: %v", err)
 	}
-	defer db.Close()
 	postgresStore := postgres.NewStore(db, cfg)
 	if err := postgresStore.CheckSchema(startupContext); err != nil {
 		log.Fatalf("database schema is not ready: %v", err)
@@ -178,28 +181,48 @@ func main() {
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	dispatcherDone := make(chan struct{})
+	dispatcherContext, cancelDispatcher := context.WithCancel(context.Background())
+	cleanupContext, cancelCleanup := context.WithCancel(context.Background())
+	var backgroundWorkers sync.WaitGroup
+	backgroundWorkers.Add(3)
 	go func() {
-		defer close(dispatcherDone)
-		dispatcher.Run(shutdownContext)
+		defer backgroundWorkers.Done()
+		dispatcher.Run(dispatcherContext)
 	}()
-	go operationLogs.RunCleanup(shutdownContext, time.Hour)
-	go postgresStore.RunStateCleanup(shutdownContext, time.Minute)
 	go func() {
-		<-shutdownContext.Done()
-		gracefulContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = server.Shutdown(gracefulContext)
+		defer backgroundWorkers.Done()
+		operationLogs.RunCleanup(cleanupContext, time.Hour)
+	}()
+	go func() {
+		defer backgroundWorkers.Done()
+		postgresStore.RunStateCleanup(cleanupContext, time.Minute)
+	}()
+	workDone := make(chan struct{})
+	go func() {
+		backgroundWorkers.Wait()
+		close(workDone)
+	}()
+
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	serverErrors := make(chan error, 1)
+	go func() {
+		serverErrors <- server.ListenAndServe()
 	}()
 	log.Printf("API listening on %s", cfg.HTTPAddr)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("API server failed: %v", err)
-	}
-	if shutdownContext.Err() != nil {
-		// Run stops claiming as soon as shutdownContext is canceled, while a
-		// claimed SMTP operation drains under the dispatcher's finite lease.
-		<-dispatcherDone
-	}
+	return runServerLifecycle(
+		server,
+		serverErrors,
+		signals,
+		cfg.ShutdownTimeout,
+		func(drainContext context.Context) {
+			dispatcher.BeginShutdown(drainContext)
+			cancelDispatcher()
+			cancelCleanup()
+		},
+		workDone,
+		db.Close,
+		terminateImmediately,
+	)
 }

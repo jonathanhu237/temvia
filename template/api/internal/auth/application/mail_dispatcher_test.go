@@ -533,6 +533,47 @@ func TestMailDispatcherDrainsActiveSendAfterShutdown(t *testing.T) {
 	}
 }
 
+func TestMailDispatcherHonorsSharedShutdownDeadlineForActiveDelivery(t *testing.T) {
+	job := &MailJob{
+		ID:        "00000000-0000-4000-8000-000000000015",
+		Kind:      MailPasswordChanged,
+		Name:      "Ada",
+		Email:     "ada@example.com",
+		Locale:    domain.LocaleEnglish,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	outbox := &dispatcherOutboxFake{job: job}
+	mailer := &cancellationAwareMailer{started: make(chan struct{}), release: make(chan struct{})}
+	dispatcher := NewMailDispatcher(outbox, mailer, &fakeRandom{value: 9}, bytes.Repeat([]byte{0x61}, 32), "https://admin.example", time.Hour, time.Second, time.Second, time.Minute)
+	runContext, cancelRun := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		dispatcher.Run(runContext)
+		close(done)
+	}()
+	select {
+	case <-mailer.started:
+	case <-time.After(time.Second):
+		t.Fatal("dispatcher did not start SMTP send")
+	}
+
+	drainContext, cancelDrain := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancelDrain()
+	dispatcher.BeginShutdown(drainContext)
+	cancelRun()
+	select {
+	case <-done:
+		t.Fatal("first shutdown signal interrupted an active delivery")
+	case <-time.After(15 * time.Millisecond):
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("active delivery did not stop at the shared deadline")
+	}
+}
+
 func TestMailDispatcherRetriesTemporaryAndDeadLettersPermanentFailures(t *testing.T) {
 	job := &MailJob{
 		ID:        "00000000-0000-4000-8000-000000000003",

@@ -40,7 +40,8 @@ type Config struct {
 	MailOutboxRetryMax        time.Duration
 	MailOutboxNotificationTTL time.Duration
 
-	SMTPTimeout time.Duration
+	SMTPTimeout     time.Duration
+	ShutdownTimeout time.Duration
 
 	PostgresHost     string
 	PostgresPort     string
@@ -96,7 +97,8 @@ func Load(get Lookup) (Config, error) {
 		MailOutboxRetryMax:        parseDuration(get, "MAIL_RETRY_MAX_INTERVAL", 10*time.Minute),
 		MailOutboxNotificationTTL: parseDuration(get, "MAIL_NOTIFICATION_TTL", 24*time.Hour),
 
-		SMTPTimeout: parseDuration(get, "SMTP_DELIVERY_TIMEOUT", 10*time.Second),
+		SMTPTimeout:     parseDuration(get, "SMTP_DELIVERY_TIMEOUT", 10*time.Second),
+		ShutdownTimeout: parseDuration(get, "SHUTDOWN_TIMEOUT", 30*time.Second),
 
 		PostgresHost:     getDefault(get, "POSTGRES_HOST", "localhost"),
 		PostgresPort:     getDefault(get, "POSTGRES_PORT", "5432"),
@@ -234,6 +236,9 @@ func (c *Config) validate() error {
 	}
 	if c.SMTPTimeout < time.Millisecond || c.SMTPTimeout > 5*time.Minute {
 		return fmt.Errorf("SMTP_DELIVERY_TIMEOUT must be between 1ms and 5m")
+	}
+	if c.ShutdownTimeout <= 0 {
+		return fmt.Errorf("SHUTDOWN_TIMEOUT must be a positive Go duration")
 	}
 	if c.HTTPAddr == "" {
 		return fmt.Errorf("HTTP_ADDR must not be empty")
