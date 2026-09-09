@@ -260,8 +260,23 @@ jobs:
           trap 'rm -rf "$smoke_dir"' EXIT
           public_npmrc="$RUNNER_TEMP/temvia-public.npmrc"
           : > "$public_npmrc"
-          NPM_CONFIG_USERCONFIG="$public_npmrc" pnpm create temvia@latest "$smoke_dir/project" --module github.com/jonathanhu237/temvia-smoke/api
-          test -f "$smoke_dir/project/README.md"
-          test -f "$smoke_dir/project/README.zh-CN.md"
-          test -f "$smoke_dir/project/LICENSE"
-          grep -Fx 'module github.com/jonathanhu237/temvia-smoke/api' "$smoke_dir/project/api/go.mod"
+          generated=false
+          for attempt in $(seq 1 12); do
+            project_dir="$smoke_dir/project-$attempt"
+            if NPM_CONFIG_USERCONFIG="$public_npmrc" pnpm create temvia@latest "$project_dir" --module github.com/jonathanhu237/temvia-smoke/api; then
+              generated=true
+              break
+            fi
+            echo "Public generation attempt $attempt/12 failed." >&2
+            if [ "$attempt" -lt 12 ]; then
+              sleep 10
+            fi
+          done
+          if [ "$generated" != true ]; then
+            echo 'Public generation failed after 12 attempts.' >&2
+            exit 1
+          fi
+          test -f "$project_dir/README.md"
+          test -f "$project_dir/README.zh-CN.md"
+          test -f "$project_dir/LICENSE"
+          grep -Fx 'module github.com/jonathanhu237/temvia-smoke/api' "$project_dir/api/go.mod"
