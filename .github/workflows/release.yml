@@ -228,7 +228,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
-          npm publish "release/create-temvia-$RELEASE_VERSION.tgz" --access public --provenance=false
+          npm publish "./release/create-temvia-$RELEASE_VERSION.tgz" --access public --provenance=false
 
       - name: Wait for the public latest version
         env:
