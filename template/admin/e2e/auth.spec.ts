@@ -121,7 +121,7 @@ async function expectResetAuthorityNotPersisted(page: Page, token: string): Prom
   expect(serializedState).not.toContain(token)
 }
 
-function collectBrowserErrors(page: Page): string[] {
+function collectBrowserErrors(page: Page, options: { allowExpectedLogoutFailure?: boolean } = {}): string[] {
   const errors: string[] = []
   page.on('console', (message) => {
     if (message.type() !== 'error') return
@@ -133,8 +133,12 @@ function collectBrowserErrors(page: Page): string[] {
     const isExpectedSetup403 = message.text().includes('403')
       && sourceURL.length > 0
       && new URL(sourceURL).pathname === '/api/setup'
+    const isExpectedLogout503 = options.allowExpectedLogoutFailure === true
+      && message.text().includes('503')
+      && sourceURL.length > 0
+      && new URL(sourceURL).pathname === '/api/auth/logout'
 
-    if (!isExpectedAuth401 && !isExpectedSetup403) errors.push(message.text())
+    if (!isExpectedAuth401 && !isExpectedSetup403 && !isExpectedLogout503) errors.push(message.text())
   })
   page.on('pageerror', (error) => errors.push(error.message))
   return errors
@@ -206,7 +210,7 @@ test.describe('administrator authentication', () => {
 
   test('initializes, signs in, restores the session, changes locale and logs out', async ({ page }) => {
     test.skip(!setupURL, 'Set E2E_SETUP_URL to a fresh setup URL from the API log.')
-    const browserErrors = collectBrowserErrors(page)
+    const browserErrors = collectBrowserErrors(page, { allowExpectedLogoutFailure: true })
     const setupStatusRequests: string[] = []
     page.on('request', (request) => {
       if (new URL(request.url()).pathname === '/api/setup/status') setupStatusRequests.push(request.url())
@@ -250,7 +254,11 @@ test.describe('administrator authentication', () => {
     await page.getByRole('button', { name: /sign in/i }).click()
     await expect(page).toHaveURL(/\/$/)
     await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
-    await expect(page.getByText(new RegExp(`Welcome back, ${name}`))).toBeVisible()
+    const accountButton = page.getByRole('button', { name: new RegExp(name) })
+    await expect(accountButton).toBeVisible()
+    await accountButton.click()
+    await expect(page.getByRole('menuitem', { name: /log out/i })).toBeVisible()
+    await page.keyboard.press('Escape')
     await expect(page.locator('[data-sidebar="header"]')).toHaveCount(0)
 
     const header = page.locator('header')
@@ -322,12 +330,17 @@ test.describe('administrator authentication', () => {
     })
     await page.getByRole('button', { name: new RegExp(name) }).click()
     await page.getByRole('menuitem', { name: /退出登录|log out/i }).click()
-    await expect(page.getByRole('alert')).toContainText('服务器没有确认会话已经撤销，请重试。')
+    await expect(page.getByText('当前仍保持登录', { exact: true })).toBeVisible()
+    await expect(page.getByText('所需服务暂时不可用，请稍后重试。', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: new RegExp(name) })).toBeVisible()
 
     await page.keyboard.press('Escape')
     await selectPreference(page, '语言设置', 'English')
-    await expect(page.getByRole('alert')).toContainText('The server did not confirm that your session was revoked. Try again.')
-    await page.getByRole('button', { name: 'Retry' }).click()
+    await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
+    await expect(page.getByRole('menu')).toBeHidden()
+    await expectNoA11yViolations(page)
+    await page.getByRole('button', { name: new RegExp(name) }).click()
+    await page.getByRole('menuitem', { name: 'Log out', exact: true }).click()
     await expect(page).toHaveURL(/\/login$/)
     expect(logoutAttempts).toBe(2)
     expect(browserErrors).toEqual([])

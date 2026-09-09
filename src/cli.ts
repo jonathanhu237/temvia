@@ -73,7 +73,7 @@ ${result.repository === 'existing' ? 'Using the existing Git working tree; no ne
 
 Container backend:
   cd ${quotePath(result.directory)}
-  cp .env.example .env  # fill database, Redis, reset-key, and invitation-key secrets
+  cp .env.example .env  # fill POSTGRES_PASSWORD, REDIS_PASSWORD, PASSWORD_RESET_TOKEN_KEY, INVITATION_TOKEN_KEY, and EMAIL_SETTINGS_ENCRYPTION_KEY
   make build
   make migrate-up
   make up
@@ -91,7 +91,7 @@ API health: http://127.0.0.1:8080/health
 Admin development: open the URL printed by Vite (default http://127.0.0.1:5173).
 Admin container: http://localhost:5173 (Caddy, after make up).
 If port 5173 is in use, Vite tries the next available port.
-APP_PUBLIC_URL must match Vite's exact printed origin; restart the API after changing it.
+APP_PUBLIC_URL must match Vite's exact printed origin; recreate the API after changing it with docker compose up -d api.
 Dependencies were not installed. See the generated README.md for more commands.
 `;
 }

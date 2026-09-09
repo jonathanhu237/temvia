@@ -1,13 +1,16 @@
 {
   "name": "create-temvia",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "A CLI for scaffolding Go backends and React admin frontends.",
   "type": "module",
   "bin": {
     "create-temvia": "dist/cli.js"
   },
-  "files": ["dist", "template"],
+  "files": [
+    "dist",
+    "template",
+    "README.zh-CN.md"
+  ],
   "engines": {
     "node": ">=24"
   },
@@ -23,5 +26,18 @@
   "devDependencies": {
     "@types/node": "24.13.3",
     "typescript": "6.0.3"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonathanhu237/temvia.git"
+  },
+  "homepage": "https://github.com/jonathanhu237/temvia#readme",
+  "bugs": {
+    "url": "https://github.com/jonathanhu237/temvia/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

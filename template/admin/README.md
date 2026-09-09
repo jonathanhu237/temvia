@@ -19,8 +19,9 @@ Vite prefers `http://127.0.0.1:5173` and automatically chooses another port if
 that port is occupied. Always use the URL Vite prints. Set `API_PORT` when the
 Go API is listening on a different loopback port; Vite reads it from the root
 `.env`. The API's `APP_PUBLIC_URL` must equal Vite's exact printed origin. If
-Vite selects another port, update `APP_PUBLIC_URL`, restart the API, and use
-the replacement setup link from the restarted API log.
+Vite selects another port, update `APP_PUBLIC_URL`, recreate the API with
+`docker compose up -d api`, and use the replacement setup link from its log.
+Restarting alone does not reload environment values.
 
 ```sh
 pnpm lint

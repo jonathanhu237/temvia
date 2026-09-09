@@ -1,0 +1,267 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version in package.json to publish
+        required: true
+        default: 0.1.0
+        type: string
+      verified_commit_sha:
+        description: Full commit SHA whose exact tarball passed macOS first-run acceptance
+        required: true
+        type: string
+      macos_acceptance:
+        description: Confirm the exact tarball passed the documented macOS first-run flow
+        required: true
+        default: false
+        type: boolean
+      release_readiness:
+        description: Confirm bilingual docs, licenses, third-party notices and release notes are ready
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
+    steps:
+      - name: Check out the requested source
+        uses: actions/checkout@v4
+
+      - name: Require release preflight evidence
+        env:
+          MACOS_ACCEPTANCE_CONFIRMED: ${{ inputs.macos_acceptance }}
+          RELEASE_READINESS_CONFIRMED: ${{ inputs.release_readiness }}
+          VERIFIED_COMMIT_SHA: ${{ inputs.verified_commit_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$MACOS_ACCEPTANCE_CONFIRMED" != "true" ]; then
+            echo 'The macOS first-run acceptance checkbox must be selected.' >&2
+            exit 1
+          fi
+          if [ "$RELEASE_READINESS_CONFIRMED" != "true" ]; then
+            echo 'The release-readiness checkbox must be selected after checking docs, licenses, notices and release notes.' >&2
+            exit 1
+          fi
+          if ! [[ "$VERIFIED_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'verified_commit_sha must be a full lowercase 40-character commit SHA.' >&2
+            exit 1
+          fi
+          if [ "$VERIFIED_COMMIT_SHA" != "$GITHUB_SHA" ]; then
+            echo "The macOS acceptance evidence is for $VERIFIED_COMMIT_SHA, but this run checks $GITHUB_SHA." >&2
+            exit 1
+          fi
+          echo "Release preflight accepted for source commit $GITHUB_SHA."
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Validate release source and version
+        id: metadata
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo 'Releases must be dispatched from the main branch.' >&2
+            exit 1
+          fi
+          node <<'NODE'
+          const fs = require('node:fs');
+          const metadata = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const expected = process.env.RELEASE_VERSION;
+          if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(expected)) {
+            throw new Error(`Invalid release version: ${expected}`);
+          }
+          if (metadata.name !== 'create-temvia') throw new Error(`Unexpected package name: ${metadata.name}`);
+          if (metadata.version !== expected) throw new Error(`package.json is ${metadata.version}, not ${expected}`);
+          if (metadata.private === true) throw new Error('The package is still private.');
+          if (metadata.license !== 'MIT') throw new Error(`Unexpected license: ${metadata.license}`);
+          if (metadata.publishConfig?.access !== 'public') throw new Error('The package must be public.');
+          NODE
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=create-temvia-$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install generator dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Check generator types
+        run: pnpm check
+
+      - name: Build generator
+        run: pnpm build
+
+      - name: Test generator
+        run: pnpm test
+
+      - name: Test Git integration
+        run: pnpm test:git
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.0
+          cache: false
+
+      - name: Test generated API
+        working-directory: template/api
+        run: |
+          go test ./...
+          go vet ./...
+          go build -o bin/server ./cmd/server
+
+      - name: Install generated admin dependencies
+        working-directory: template/admin
+        run: pnpm install --no-frozen-lockfile --ignore-scripts
+
+      - name: Check generated admin
+        working-directory: template/admin
+        run: |
+          pnpm lint
+          pnpm check
+          pnpm test
+          pnpm build
+
+      - name: Test the exact release tarball
+        env:
+          TEMVIA_TEST_TARBALL: ${{ runner.temp }}/temvia-release/create-temvia-${{ steps.metadata.outputs.version }}.tgz
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$TEMVIA_TEST_TARBALL")"
+          pnpm test:package
+          test -s "$TEMVIA_TEST_TARBALL"
+
+      - name: Record and upload the tested tarball
+        id: artifact
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+          ARTIFACT_NAME: ${{ steps.metadata.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          tarball="$RUNNER_TEMP/temvia-release/create-temvia-$RELEASE_VERSION.tgz"
+          (cd "$(dirname "$tarball")" && sha256sum "$(basename "$tarball")" > "$(basename "$tarball").sha256")
+          cat "$tarball.sha256"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the tested tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.artifact_name }}
+          path: |
+            ${{ runner.temp }}/temvia-release/create-temvia-${{ steps.metadata.outputs.version }}.tgz
+            ${{ runner.temp }}/temvia-release/create-temvia-${{ steps.metadata.outputs.version }}.tgz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish and smoke test
+    needs: verify
+    if: needs.verify.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/create-temvia
+    permissions:
+      contents: read
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+          registry-url: https://registry.npmjs.org
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Download the tested tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.verify.outputs.artifact_name }}
+          path: release
+
+      - name: Verify the downloaded tarball
+        env:
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum -c "create-temvia-$RELEASE_VERSION.tgz.sha256"
+
+      - name: Require the first-release npm token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo 'The npm environment must provide NPM_TOKEN before publishing.' >&2
+            exit 1
+          fi
+
+      - name: Publish the tested tarball
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          npm publish "release/create-temvia-$RELEASE_VERSION.tgz" --access public --provenance=false
+
+      - name: Wait for the public latest version
+        env:
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+        run: |
+          set -euo pipefail
+          latest=''
+          for attempt in $(seq 1 36); do
+            latest="$(npm view create-temvia@latest version --registry "$NPM_CONFIG_REGISTRY" 2>/dev/null || true)"
+            if [ "$latest" = "$RELEASE_VERSION" ]; then
+              break
+            fi
+            sleep 5
+          done
+          if [ "$latest" != "$RELEASE_VERSION" ]; then
+            echo "The public latest version did not become $RELEASE_VERSION in time." >&2
+            exit 1
+          fi
+
+      - name: Generate through the public pnpm create entry point
+        env:
+          CI: 'true'
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          smoke_dir="$(mktemp -d)"
+          trap 'rm -rf "$smoke_dir"' EXIT
+          public_npmrc="$RUNNER_TEMP/temvia-public.npmrc"
+          : > "$public_npmrc"
+          NPM_CONFIG_USERCONFIG="$public_npmrc" pnpm create temvia@latest "$smoke_dir/project" --module github.com/jonathanhu237/temvia-smoke/api
+          test -f "$smoke_dir/project/README.md"
+          test -f "$smoke_dir/project/README.zh-CN.md"
+          test -f "$smoke_dir/project/LICENSE"
+          grep -Fx 'module github.com/jonathanhu237/temvia-smoke/api' "$smoke_dir/project/api/go.mod"

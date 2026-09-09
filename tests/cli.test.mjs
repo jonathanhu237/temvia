@@ -46,7 +46,7 @@ test('help/version work without Git or filesystem output; subprocess errors are 
   const cwd = await temporaryDirectory(t);
   const git = fakeGit();
   assert.match(await run(['--help'], cwd, git), /Usage: create-temvia/);
-  assert.match(await run(['--version'], cwd, git), /^0\.0\.0\n$/);
+  assert.match(await run(['--version'], cwd, git), /^0\.1\.0\n$/);
   assert.deepEqual(git.calls, []);
   for (const flag of ['--help', '--version']) {
     const result = spawnSync(process.execPath, [cli, flag], { cwd, env: { ...process.env, PATH: '' }, encoding: 'utf8' });
@@ -69,8 +69,11 @@ test('new and empty targets produce independent apps and quote paths with spaces
     const output = await run([name, '--module', modulePath], cwd, git);
     assert.match(output, /go run .\/cmd\/server/);
     assert.match(output, /pnpm install/);
+    assert.match(output, /POSTGRES_PASSWORD.*EMAIL_SETTINGS_ENCRYPTION_KEY/);
+    assert.match(output, /docker compose up -d api/);
+    assert.doesNotMatch(output, /restart the API/);
     assert.match(output, /Dependencies were not installed/);
-    assert.deepEqual(await fs.readdir(target), ['.env.example', '.gitignore', 'Makefile', 'README.md', 'admin', 'api', 'compose.yaml'].sort());
+    assert.deepEqual(await fs.readdir(target), ['.env.example', '.gitignore', 'LICENSE', 'Makefile', 'README.md', 'README.zh-CN.md', 'admin', 'api', 'compose.yaml'].sort());
     assert.match(await fs.readFile(join(target, 'api/go.mod'), 'utf8'), new RegExp(`^module ${modulePath.replaceAll('/', '\\/')}\\n\\ngo 1\\.27\\.0\\n`));
     assert.equal(JSON.parse(await fs.readFile(join(target, 'admin/package.json'), 'utf8')).name, 'admin');
     assert.deepEqual(git.calls.map(([operation]) => operation), ['inspect', 'init']);

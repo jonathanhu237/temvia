@@ -45,7 +45,7 @@ export const adminTemplateFiles = [
 ];
 
 export const requiredTemplateFiles = [
-  '_gitignore', '.env.example', 'Makefile', 'README.md', 'compose.yaml',
+  '_gitignore', '.env.example', 'LICENSE', 'Makefile', 'README.md', 'README.zh-CN.md', 'compose.yaml',
   'api/Dockerfile', 'api/go.mod', 'api/go.sum', 'api/cmd/server/main.go',
   'api/cmd/server/main_test.go', 'api/migrations/Dockerfile',
   'api/migrations/000001_auth.up.sql', 'api/migrations/000001_auth.down.sql',

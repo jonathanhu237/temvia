@@ -33,7 +33,11 @@ test('actual npm tarball installs without dev dependencies and its mapped bin ge
   const metadata = JSON.parse(await fs.readFile(join(installed, 'package.json'), 'utf8'));
   assert.deepEqual(metadata.bin, { 'create-temvia': 'dist/cli.js' });
   assert.equal(metadata.dependencies, undefined);
-  assert.equal(metadata.private, true);
+  assert.notEqual(metadata.private, true);
+  assert.equal(metadata.version, '0.1.0');
+  assert.equal(metadata.license, 'MIT');
+  assert.ok(packed.files.includes('LICENSE'));
+  assert.ok(packed.files.includes('README.zh-CN.md'));
   await assert.rejects(fs.stat(join(consumer, 'node_modules/typescript')), { code: 'ENOENT' });
   await assert.rejects(fs.stat(join(installed, 'node_modules')), { code: 'ENOENT' });
   assert.match(await fs.readFile(join(installed, 'dist/cli.js'), 'utf8'), /^#!\/usr\/bin\/env node\n/);
@@ -43,7 +47,7 @@ test('actual npm tarball installs without dev dependencies and its mapped bin ge
   const output = join(directory, 'generated project');
   const stdout = command('npm', ['exec', '--offline', '--no', '--', 'create-temvia', output, '--module', modulePath], { cwd: consumer, env });
   assert.match(stdout, /Initialized Git/);
-  assert.deepEqual((await fs.readdir(output)).sort(), ['.env.example', '.git', '.gitignore', 'Makefile', 'README.md', 'admin', 'api', 'compose.yaml']);
+  assert.deepEqual((await fs.readdir(output)).sort(), ['.env.example', '.git', '.gitignore', 'LICENSE', 'Makefile', 'README.md', 'README.zh-CN.md', 'admin', 'api', 'compose.yaml']);
   assert.match(await fs.readFile(join(output, 'api/go.mod'), 'utf8'), new RegExp(`^module ${modulePath.replaceAll('/', '\\/')}\\n\\ngo 1\\.27\\.0\\n`));
   for (const asset of requiredAssets) {
     const relative = asset.slice('template/'.length);
@@ -66,6 +70,9 @@ test('actual npm tarball installs without dev dependencies and its mapped bin ge
     'admin/.npmignore', 'admin/src/style.css', '_gitignore', '.npmignore',
   ]) {
     await assert.rejects(fs.stat(join(output, unwanted)), { code: 'ENOENT' });
+  }
+  if (process.env.TEMVIA_TEST_TARBALL) {
+    await fs.copyFile(packed.path, process.env.TEMVIA_TEST_TARBALL);
   }
 });
 

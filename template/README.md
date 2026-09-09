@@ -1,25 +1,39 @@
 # Your project
 
+English | [简体中文](README.zh-CN.md)
+
 An independent Go API and React admin. The admin uses Vite during development
 and a pinned Caddy runtime in the production Compose stack. This source is
 yours to change or remove.
 
+## Requirements and verification
+
+For the Compose route: Docker with Compose v2, Make, and Node.js 24 or later
+(for the generator and portable secret generation). Start the Docker engine.
+On macOS install Make using Xcode Command Line Tools if needed.
+Only the complete macOS first-run route has been tested. Linux and WSL2 are
+not fully verified; native Windows PowerShell is outside this route.
+
 ## First run
 
-Copy the environment inventory and fill all four secret values before
+Copy the environment inventory and fill all five secret values before
 starting the containers:
 
 ```sh
 cp .env.example .env
 chmod 600 .env
 # edit .env and set POSTGRES_PASSWORD, REDIS_PASSWORD, PASSWORD_RESET_TOKEN_KEY, INVITATION_TOKEN_KEY, and EMAIL_SETTINGS_ENCRYPTION_KEY
-# openssl rand -base64url 32  # use the output for PASSWORD_RESET_TOKEN_KEY
-# openssl rand -base64url 32  # generate a separate value for INVITATION_TOKEN_KEY
-# openssl rand -base64url 32  # generate a separate value for EMAIL_SETTINGS_ENCRYPTION_KEY
+# node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"  # use the output for PASSWORD_RESET_TOKEN_KEY
+# node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"  # generate a separate value for INVITATION_TOKEN_KEY
+# node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"  # generate a separate value for EMAIL_SETTINGS_ENCRYPTION_KEY
 make build
 make migrate-up
 make up
 ```
+
+Run the Node command separately for each token key and use a different output
+for every secret. The same command produces suitable random values for the two
+database passwords; do not reuse a value across variables or commit `.env`.
 
 The API prints a temporary setup link in its logs while initialization is
 incomplete. Open that link in the browser-visible admin origin. The token is
@@ -66,12 +80,9 @@ invalidates pending reset-mail jobs (already delivered links remain consumable
 because PostgreSQL stores their digest); affected users can request a fresh
 link. Keep `INVITATION_TOKEN_KEY` stable as well; it is intentionally separate
 from the reset key. Invitation links expire after 72 hours by default and may
-be configured with `INVITATION_LINK_TTL` up to seven days. Run the current
-migrations, including migration 6 which adds immutable actor snapshots to
-operation history,
-before deploying this API. To roll back, stop the new API, apply one
-migration down, then deploy the previous API; passwords already changed by the
-feature are not reverted.
+be configured with `INVITATION_LINK_TTL` up to seven days. Run all current migrations before deploying this API. For rollback, back up
+the database and inspect each affected migration before choosing the matching
+API version; blindly applying one down migration is not a general rollback plan.
 
 For an application upgrade, stop the API, back up PostgreSQL, run the new
 migration explicitly, then start the new API:
@@ -79,7 +90,7 @@ migration explicitly, then start the new API:
 ```sh
 docker compose stop api
 make migrate-up
-make up
+docker compose up -d api admin
 ```
 
 ## Operation history
@@ -170,8 +181,9 @@ creates `admin/pnpm-lock.yaml`; keep it in version control.
 
 The API's `APP_PUBLIC_URL` must equal that exact printed origin, including the
 selected port. If Vite falls back to another port, update `APP_PUBLIC_URL` in
-the root `.env`, restart the API, and use the new setup link from its log. The
-Vite proxy reads `API_PORT` from the same root `.env`.
+the root `.env`, recreate the API with `docker compose up -d api`, and use the
+new setup link from its log. Restarting alone does not reload environment values.
+The Vite proxy reads `API_PORT` from the same root `.env`.
 
 ```sh
 pnpm lint
@@ -214,3 +226,37 @@ in operation history.
 `GET /api/online-users` returns `{ users: [{ id, name, email, lastSeenAt,
 sessionCount }] }`. `POST /api/online-users/{id}/kick` requires a same-origin
 request and returns 204. Session credentials are never exposed in these APIs.
+
+## Production deployment
+
+Use `APP_ENV=production` and set `APP_PUBLIC_URL` to the public HTTPS origin.
+Provide TLS through an ingress or a customized Caddy configuration; the supplied
+Compose gateway only listens on loopback HTTP. Keep backend, database and Redis
+ports private. Run `make build`, `make migrate-up`, then
+`docker compose up -d api admin` without the development profile. Do not use
+`make up` for production, because it enables Mailpit. Configure real SMTP through
+System settings. For local Mailpit use host `mailpit`, port `1025`, security
+`none`, no credentials, and a test sender in System settings.
+
+If a host port is occupied, change its mapping in `.env`; when changing
+`ADMIN_PORT`, change `APP_PUBLIC_URL` to the matching browser origin too.
+For frontend development, stop the Compose admin (`docker compose stop admin`)
+and follow the Admin section. Recreate the API after changing `.env` using
+`docker compose up -d api`; restarting alone does not reload environment values.
+The API must retain the same public origin used by your browser.
+
+Back up PostgreSQL and the encryption/signing keys separately. Redis is not a
+durable session backup. Avoid `docker compose down -v` unless you intend to
+remove the project's database volume.
+
+## License and updates
+
+The supplied Temvia code is MIT licensed; retain LICENSE and third-party
+notices in `admin/UPSTREAM.md`. You own your added code. This project does not
+automatically receive template upgrades. Consult
+[Temvia releases](https://github.com/jonathanhu237/temvia/releases) and apply
+relevant fixes yourself. Public feedback goes to
+[Issues](https://github.com/jonathanhu237/temvia/issues); private vulnerability
+reporting is described in
+[SECURITY.md](https://github.com/jonathanhu237/temvia/blob/main/SECURITY.md).
+Maintenance is best effort with no fixed response time or old-version support.
