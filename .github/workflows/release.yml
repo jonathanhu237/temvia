@@ -6,7 +6,7 @@ on:
       version:
         description: Package version in package.json to publish
         required: true
-        default: 0.1.0
+        default: 0.2.0
         type: string
       verified_commit_sha:
         description: Full commit SHA whose exact tarball passed macOS first-run acceptance

@@ -1,5 +1,26 @@
 # Changelog / 版本记录
 
+## 0.2.0
+
+- Basic abuse protection for login, password recovery, setup, invitations and test email, with operation-specific limits and trusted proxy handling.
+- Automatically recovering PostgreSQL token buckets, configurable through environment variables; distinct responses for rate limits and unavailable dependencies.
+- PostgreSQL replaces Redis for sessions and rate-limit state, removing the Redis deployment dependency.
+- Bounded graceful shutdown with a configurable shared shutdown budget.
+- Expanded HTTP/PostgreSQL integration tests, frontend error-message coverage and bilingual deployment documentation.
+
+- 为登录、密码找回、初始化、邀请和测试邮件提供基本防滥用，按操作分别限流并正确处理可信代理来源。
+- 使用可自动恢复的 PostgreSQL 令牌桶，通过环境变量配置，区分请求超限与依赖不可用。
+- 会话及限流状态改由 PostgreSQL 保存，移除 Redis 部署依赖。
+- 新增有界优雅停机，支持配置统一停机预算。
+- 补充 HTTP/PostgreSQL 集成测试、前端错误提示测试及双语部署文档。
+
+Generated projects remain independent source copies and do not automatically
+receive these changes. Complete the documented macOS tarball first-run acceptance
+for the final release commit before publishing.
+
+已生成项目仍是独立源码副本，不会自动接收这些变更。发布前需针对最终发布提交的
+tarball 完成文档规定的 macOS 首次启动验收。
+
 ## 0.1.0
 
 First public release / 首次公开发布。
