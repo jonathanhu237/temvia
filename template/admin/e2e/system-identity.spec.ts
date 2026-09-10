@@ -4,12 +4,10 @@ const enabled = process.env.E2E_SYSTEM_IDENTITY === '1'
 const email = process.env.E2E_ADMIN_EMAIL ?? 'admin@example.com'
 const password = process.env.E2E_ADMIN_PASSWORD ?? 'Admin1!x'
 const customSystemName = '品牌 <主站> & Co'
-const customEnglishName = 'Brand <Admin> & Co'
 const wideIcon = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGP4z8AAQv8BD/kD/YURmXYAAAAASUVORK5CYII=', 'base64')
 
 type SystemIdentity = {
   systemName: string
-  englishSystemName: string
   iconUrl: string
   hasCustomIcon: boolean
   revision: number
@@ -112,7 +110,6 @@ async function restoreIdentity(page: Page, original: SystemIdentitySnapshot): Pr
     const current = await currentResponse.json() as SystemIdentity
     const form = new FormData()
     form.set('systemName', saved.systemName)
-    form.set('englishSystemName', saved.englishSystemName)
     form.set('revision', String(current.revision))
     if (saved.hasCustomIcon) {
       if (!saved.iconBase64) throw new Error('Original custom icon bytes were not captured')
@@ -136,10 +133,9 @@ async function expectPublicAuthPage(page: Page, path: string, title: string, bra
   await expect(page.locator('img[alt=""]').first()).toBeVisible()
 }
 
-async function saveIdentity(page: Page, systemName: string, englishSystemName: string): Promise<void> {
+async function saveIdentity(page: Page, systemName: string): Promise<void> {
   const section = page.locator('section[aria-labelledby="identity-settings-title"]')
   await section.getByRole('textbox', { name: 'System name', exact: true }).fill(systemName)
-  await section.getByRole('textbox', { name: 'English system name', exact: true }).fill(englishSystemName)
   await section.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(section.getByRole('textbox', { name: 'System name', exact: true })).toHaveValue(systemName.trim())
 }
@@ -163,14 +159,22 @@ test.describe('system identity', () => {
       const identitySection = page.locator('section[aria-labelledby="identity-settings-title"]')
       await page.goto('/settings')
       await expect(identitySection.getByRole('heading', { name: 'System identity', exact: true })).toBeVisible()
-      await saveIdentity(page, customSystemName, customEnglishName)
+      await saveIdentity(page, customSystemName)
 
       const published = await readIdentity(page, '/api/public/system-identity')
       expect(published.systemName).toBe(customSystemName)
-      expect(published.englishSystemName).toBe(customEnglishName)
+      expect(Object.keys(published)).not.toContain('english' + 'SystemName')
+      await expect(identitySection.getByRole('textbox')).toHaveCount(1)
       await page.reload()
       await expect(identitySection.getByRole('textbox', { name: 'System name', exact: true })).toHaveValue(customSystemName)
-      await expect(identitySection.getByRole('textbox', { name: 'English system name', exact: true })).toHaveValue(customEnglishName)
+      await expect(identitySection.getByRole('textbox')).toHaveCount(1)
+      await setLocale(page, 'zh-CN')
+      await page.reload()
+      const chineseIdentitySection = page.locator('section[aria-labelledby="identity-settings-title"]')
+      await expect(chineseIdentitySection.getByRole('textbox', { name: '系统名称', exact: true })).toHaveValue(customSystemName)
+      await expect(chineseIdentitySection.getByRole('textbox')).toHaveCount(1)
+      await setLocale(page, 'en')
+      await page.reload()
 
       await identitySection.getByLabel('System icon', { exact: true }).setInputFiles({ name: 'wide.png', mimeType: 'image/png', buffer: wideIcon })
       await expect(identitySection.getByText('New icon will be published on save.', { exact: true })).toBeVisible()
@@ -179,6 +183,7 @@ test.describe('system identity', () => {
 
       const iconPublished = await readIdentity(page, '/api/public/system-identity')
       expect(iconPublished.systemName).toBe(customSystemName)
+      expect(Object.keys(iconPublished)).not.toContain('english' + 'SystemName')
       const faviconURL = await page.evaluate(() => document.head.querySelector<HTMLLinkElement>('link[data-temvia-system-icon]')?.href ?? '')
       expect(faviconURL).toContain(`/api/public/system-identity/icon?v=${iconPublished.revision}`)
       const favicon = await readRaster(page, faviconURL)
@@ -196,10 +201,10 @@ test.describe('system identity', () => {
 
       await publicPage.goto('/login')
       await setLocale(publicPage, 'en')
-      await expectPublicAuthPage(publicPage, '/login', 'Sign in', customEnglishName)
-      await expectPublicAuthPage(publicPage, '/forgot-password', 'Reset your password', customEnglishName)
-      await expectPublicAuthPage(publicPage, '/reset-password', 'This reset link is invalid', customEnglishName)
-      await expectPublicAuthPage(publicPage, '/accept-invitation', 'This invitation is invalid', customEnglishName)
+      await expectPublicAuthPage(publicPage, '/login', 'Sign in', customSystemName)
+      await expectPublicAuthPage(publicPage, '/forgot-password', 'Reset your password', customSystemName)
+      await expectPublicAuthPage(publicPage, '/reset-password', 'This reset link is invalid', customSystemName)
+      await expectPublicAuthPage(publicPage, '/accept-invitation', 'This invitation is invalid', customSystemName)
       await publicPage.setViewportSize({ width: 1440, height: 900 })
       await publicPage.goto('/login')
       await publicPage.screenshot({ path: testInfo.outputPath('system-identity-en-desktop.png'), fullPage: true })
@@ -219,7 +224,7 @@ test.describe('system identity', () => {
       await publicPage.screenshot({ path: testInfo.outputPath('system-identity-en-mobile.png'), fullPage: true })
 
       await page.goto('/settings')
-      await saveIdentity(page, customSystemName, '')
+      await saveIdentity(page, customSystemName)
       await publicPage.reload()
       await expect(publicPage).toHaveTitle(customSystemName)
       await expect(publicPage.getByText(customSystemName, { exact: true }).first()).toBeVisible()
@@ -230,8 +235,8 @@ test.describe('system identity', () => {
       await conflictB.goto('/settings')
       await expect(conflictA.locator('section[aria-labelledby="identity-settings-title"]').getByRole('textbox', { name: 'System name', exact: true })).toHaveValue(customSystemName)
       await expect(conflictB.locator('section[aria-labelledby="identity-settings-title"]').getByRole('textbox', { name: 'System name', exact: true })).toHaveValue(customSystemName)
-      await saveIdentity(conflictA, 'Conflict A', 'Conflict A EN')
-      await saveIdentity(conflictB, 'Conflict B', 'Conflict B EN')
+      await saveIdentity(conflictA, 'Conflict A')
+      await saveIdentity(conflictB, 'Conflict B')
       await expect(conflictB.getByRole('alert')).toContainText('This record changed')
       await conflictB.getByRole('button', { name: 'Reload', exact: true }).click()
       await expect(conflictB.locator('section[aria-labelledby="identity-settings-title"]').getByRole('textbox', { name: 'System name', exact: true })).toHaveValue('Conflict A')
@@ -254,7 +259,7 @@ test.describe('system identity', () => {
       await restoreIdentity(conflictA, customIconSnapshot)
       const restoredCustomIcon = await readIdentity(conflictA, '/api/public/system-identity')
       expect(restoredCustomIcon.systemName).toBe(customSystemName)
-      expect(restoredCustomIcon.englishSystemName).toBe(customEnglishName)
+      expect(Object.keys(restoredCustomIcon)).not.toContain('english' + 'SystemName')
       expect(restoredCustomIcon.hasCustomIcon).toBe(true)
       const restoredCustomIconRaster = await readRaster(conflictA, restoredCustomIcon.iconUrl)
       expect(restoredCustomIconRaster).toEqual(customIconRaster)

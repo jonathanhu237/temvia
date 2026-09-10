@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
 import { createContext, useContext, useEffect } from 'react'
-import { useTranslation } from 'react-i18next'
 import { Layers3 } from 'lucide-react'
 import type { ApiClient } from '@/shared/api/client'
 import type { SystemIdentity } from '@/shared/api/contracts'
@@ -8,7 +7,6 @@ import type { SystemIdentity } from '@/shared/api/contracts'
 export const publicSystemIdentityQueryKey = ['public', 'system-identity'] as const
 export const defaultSystemIdentity: SystemIdentity = {
   systemName: 'Temvia',
-  englishSystemName: '',
   iconUrl: '/api/public/system-identity/icon?default=1&style=layers',
   hasCustomIcon: false,
   revision: 0,
@@ -23,8 +21,7 @@ export function DefaultSystemIcon({ className }: { className?: string }) {
   </svg>
 }
 
-export function systemIdentityName(identity: SystemIdentity | undefined, locale: string): string {
-  if (locale.toLowerCase().startsWith('en') && identity?.englishSystemName.trim()) return identity.englishSystemName
+export function systemIdentityName(identity: SystemIdentity | undefined): string {
   return identity?.systemName.trim() || defaultSystemIdentity.systemName
 }
 
@@ -40,19 +37,18 @@ export function usePublicSystemIdentity(api: ApiClient) {
 
 export function IdentityMark({ api, compact = false }: { api?: ApiClient; compact?: boolean }) {
   const contextApi = useContext(SystemIdentityApiContext)
-  if (!api && !contextApi) return <IdentityMarkView identity={defaultSystemIdentity} compact={compact} locale="en" />
+  if (!api && !contextApi) return <IdentityMarkView identity={defaultSystemIdentity} compact={compact} />
   return <IdentityMarkWithQuery api={api ?? contextApi!} compact={compact} />
 }
 
 function IdentityMarkWithQuery({ api, compact }: { api: ApiClient; compact: boolean }) {
-  const { i18n } = useTranslation()
   const query = usePublicSystemIdentity(api)
   const identity = query.data ?? defaultSystemIdentity
-  return <IdentityMarkView identity={identity} compact={compact} locale={i18n.language} />
+  return <IdentityMarkView identity={identity} compact={compact} />
 }
 
-function IdentityMarkView({ identity, compact, locale }: { identity: SystemIdentity; compact: boolean; locale: string }) {
-  const name = systemIdentityName(identity, locale)
+function IdentityMarkView({ identity, compact }: { identity: SystemIdentity; compact: boolean }) {
+  const name = systemIdentityName(identity)
   return (
     <div className={`flex min-w-0 items-center gap-3 ${compact ? 'max-w-48' : ''}`}>
       {identity.hasCustomIcon
@@ -64,10 +60,9 @@ function IdentityMarkView({ identity, compact, locale }: { identity: SystemIdent
 }
 
 export function SystemIdentityRuntime({ api }: { api: ApiClient }) {
-  const { i18n } = useTranslation()
   const query = usePublicSystemIdentity(api)
   const identity = query.data ?? defaultSystemIdentity
-  const name = systemIdentityName(identity, i18n.language)
+  const name = systemIdentityName(identity)
 
   useEffect(() => {
     if (typeof document === 'undefined') return
@@ -83,7 +78,7 @@ export function SystemIdentityRuntime({ api }: { api: ApiClient }) {
     link.type = identity.hasCustomIcon ? 'image/png' : 'image/svg+xml'
     const description = document.head.querySelector<HTMLMetaElement>('meta[name="description"]')
     if (description) description.content = `${name} administration`
-  }, [identity.hasCustomIcon, identity.iconUrl, i18n.language, name])
+  }, [identity.hasCustomIcon, identity.iconUrl, name])
 
   return null
 }

@@ -13,9 +13,9 @@ import { PasswordField } from '@/features/auth/form-fields'
 import { systemIdentityName, usePublicSystemIdentity } from '@/features/identity/system-identity'
 
 export function InvitationAcceptanceForm({ api, token, onSuccess, onInvalid }: { api: ApiClient; token: string; onSuccess: () => void; onInvalid: () => void }) {
-  const { t, i18n } = useTranslation(['access', 'problems', 'auth'])
+  const { t } = useTranslation(['access', 'problems', 'auth'])
   const identity = usePublicSystemIdentity(api)
-  const systemName = systemIdentityName(identity.data, i18n.language)
+  const systemName = systemIdentityName(identity.data)
   const [error, setError] = useState<unknown>()
   const form = useForm<PasswordResetFormValues>({ resolver: zodResolver(passwordResetFormSchema), mode: 'onBlur', shouldFocusError: true, defaultValues: { password: '', passwordConfirmation: '' } })
   const mutation = useMutation({ retry: false, mutationFn: (values: PasswordResetFormValues) => { if (!api.acceptInvitation) throw new Error('missing acceptInvitation'); return api.acceptInvitation({ token, password: normalizePasswordResetValues(values).password }) }, onSuccess, onError: (value) => { if (value instanceof ApiProblemError && value.problem.type === '/problems/invalid-invitation') { onInvalid(); return }; setError(value) } })

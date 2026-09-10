@@ -150,7 +150,6 @@ export const operationalWarningsSchema = z.object({ warnings: z.array(z.object({
 
 export const systemIdentitySchema = z.object({
   systemName: z.string(),
-  englishSystemName: z.string(),
   iconUrl: z.string(),
   hasCustomIcon: z.boolean(),
   revision: z.number().int().nonnegative(),

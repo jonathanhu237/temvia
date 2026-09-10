@@ -125,8 +125,11 @@ outbox work to retry.
 
 In production, configure SMTP security (`starttls` or `tls`), a real sender
 address, and paired credentials when required by the provider in the System
-settings page. Keep `EMAIL_SETTINGS_ENCRYPTION_KEY` stable and back it up
-separately from PostgreSQL; it protects the stored SMTP password. Keep
+settings page. System settings use one required, language-neutral System name;
+the same name appears in the interface, browser title, and system emails
+regardless of interface or email language. Keep `EMAIL_SETTINGS_ENCRYPTION_KEY`
+stable and back it up separately from PostgreSQL; it protects the stored SMTP
+password. Keep
 `PASSWORD_RESET_TOKEN_KEY` stable across restarts. Deliberate key rotation
 invalidates pending reset-mail jobs (already delivered links remain consumable
 because PostgreSQL stores their digest); affected users can request a fresh

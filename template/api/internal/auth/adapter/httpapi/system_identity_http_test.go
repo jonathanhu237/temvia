@@ -79,15 +79,14 @@ func pngBytes(t *testing.T, width, height int) []byte {
 }
 
 func identityMultipartRequest(t *testing.T, method, path string, revision int64, action string, icon []byte) *http.Request {
-	return identityMultipartRequestWithValues(t, method, path, revision, action, "星河管理", "Galaxy", "icon.png", "image/png", icon)
+	return identityMultipartRequestWithValues(t, method, path, revision, action, "星河管理", "icon.png", "image/png", icon)
 }
 
-func identityMultipartRequestWithValues(t *testing.T, method, path string, revision int64, action, systemName, englishSystemName, fileName, mediaType string, icon []byte) *http.Request {
+func identityMultipartRequestWithValues(t *testing.T, method, path string, revision int64, action, systemName, fileName, mediaType string, icon []byte) *http.Request {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	_ = writer.WriteField("systemName", systemName)
-	_ = writer.WriteField("englishSystemName", englishSystemName)
 	_ = writer.WriteField("revision", strconv.FormatInt(revision, 10))
 	_ = writer.WriteField("iconAction", action)
 	if icon != nil {
@@ -160,7 +159,7 @@ func TestSystemIdentityHTTPUsesPublicDefaultAndProtectsManagementRead(t *testing
 }
 
 func TestSystemIdentityHTTPAllowsReadOnlyReadButRejectsWrite(t *testing.T) {
-	store := &identityHTTPStoreFake{configured: true, record: application.SystemIdentityRecord{SystemName: "星河管理", EnglishSystemName: "Galaxy", Revision: 4}}
+	store := &identityHTTPStoreFake{configured: true, record: application.SystemIdentityRecord{SystemName: "星河管理", Revision: 4}}
 	readOnly := newIdentityHTTPHandler(t, domain.Principal{User: domain.User{ID: "reader"}, Permissions: []domain.PermissionKey{domain.PermissionSettingsRead}}, store, &auditRecorderFake{})
 
 	read := httptest.NewRecorder()
@@ -182,19 +181,19 @@ func TestSystemIdentityHTTPAllowsReadOnlyReadButRejectsWrite(t *testing.T) {
 
 func TestSystemIdentityHTTPValidatesNameBoundariesAndPreservesPublishedIdentity(t *testing.T) {
 	icon := pngBytes(t, 2, 2)
-	store := &identityHTTPStoreFake{configured: true, record: application.SystemIdentityRecord{SystemName: "Before", EnglishSystemName: "Before EN", IconMediaType: "image/png", IconBytes: icon, Revision: 7}}
+	store := &identityHTTPStoreFake{configured: true, record: application.SystemIdentityRecord{SystemName: "Before", IconMediaType: "image/png", IconBytes: icon, Revision: 7}}
 	principal := domain.Principal{User: domain.User{ID: "admin"}, Permissions: []domain.PermissionKey{domain.PermissionSettingsWrite}}
 	handler := newIdentityHTTPHandler(t, principal, store, nil)
 
-	trimmed := identityMultipartRequestWithValues(t, http.MethodPut, "/api/settings/system-identity", 7, application.SystemIconPreserve, "  "+strings.Repeat("字", 2)+"  ", "  Brand  ", "icon.png", "image/png", nil)
+	trimmed := identityMultipartRequestWithValues(t, http.MethodPut, "/api/settings/system-identity", 7, application.SystemIconPreserve, "  "+strings.Repeat("字", 2)+"  ", "icon.png", "image/png", nil)
 	trimmedResponse := httptest.NewRecorder()
 	handler.ServeHTTP(trimmedResponse, trimmed)
-	if trimmedResponse.Code != http.StatusOK || store.record.SystemName != "字字" || store.record.EnglishSystemName != "Brand" {
-		t.Fatalf("trimmed names = %d %s record=%#v", trimmedResponse.Code, trimmedResponse.Body.String(), store.record)
+	if trimmedResponse.Code != http.StatusOK || store.record.SystemName != "字字" || bytes.Contains(trimmedResponse.Body.Bytes(), []byte("english"+"SystemName")) {
+		t.Fatalf("trimmed name = %d %s record=%#v", trimmedResponse.Code, trimmedResponse.Body.String(), store.record)
 	}
 
 	valid50 := strings.Repeat("名", application.MaxSystemNameLength)
-	valid50Request := identityMultipartRequestWithValues(t, http.MethodPut, "/api/settings/system-identity", store.record.Revision, application.SystemIconPreserve, valid50, valid50, "icon.png", "image/png", nil)
+	valid50Request := identityMultipartRequestWithValues(t, http.MethodPut, "/api/settings/system-identity", store.record.Revision, application.SystemIconPreserve, valid50, "icon.png", "image/png", nil)
 	valid50Response := httptest.NewRecorder()
 	handler.ServeHTTP(valid50Response, valid50Request)
 	if valid50Response.Code != http.StatusOK || store.record.SystemName != valid50 {
@@ -206,22 +205,20 @@ func TestSystemIdentityHTTPValidatesNameBoundariesAndPreservesPublishedIdentity(
 	for _, test := range []struct {
 		name     string
 		system   string
-		english  string
 		wantCode int
 	}{
-		{name: "empty required", system: "   ", english: "Brand", wantCode: http.StatusUnprocessableEntity},
-		{name: "51 runes", system: strings.Repeat("名", application.MaxSystemNameLength+1), english: "Brand", wantCode: http.StatusUnprocessableEntity},
-		{name: "empty english is allowed", system: "Kept", english: "   ", wantCode: http.StatusOK},
+		{name: "empty required", system: "   ", wantCode: http.StatusUnprocessableEntity},
+		{name: "51 runes", system: strings.Repeat("名", application.MaxSystemNameLength+1), wantCode: http.StatusUnprocessableEntity},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			revision := store.record.Revision
-			request := identityMultipartRequestWithValues(t, http.MethodPut, "/api/settings/system-identity", revision, application.SystemIconPreserve, test.system, test.english, "icon.png", "image/png", nil)
+			request := identityMultipartRequestWithValues(t, http.MethodPut, "/api/settings/system-identity", revision, application.SystemIconPreserve, test.system, "icon.png", "image/png", nil)
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			if response.Code != test.wantCode {
 				t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
 			}
-			if test.name != "empty english is allowed" && (store.record.SystemName != beforeInvalid.SystemName || store.record.Revision != beforeInvalid.Revision || !bytes.Equal(store.record.IconBytes, beforeInvalid.IconBytes)) {
+			if store.record.SystemName != beforeInvalid.SystemName || store.record.Revision != beforeInvalid.Revision || !bytes.Equal(store.record.IconBytes, beforeInvalid.IconBytes) {
 				t.Fatalf("invalid save changed published identity: %#v", store.record)
 			}
 		})
@@ -244,7 +241,7 @@ func TestSystemIdentityHTTPAcceptsJPEGAndWebPAndRejectsInvalidIconPayloads(t *te
 		{name: "webp", data: webpBytes(t), fileName: "icon.webp", mediaType: "image/webp", wantType: "image/webp"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			request := identityMultipartRequestWithValues(t, http.MethodPut, "/api/settings/system-identity", store.record.Revision, application.SystemIconReplace, "Brand", "Brand EN", test.fileName, test.mediaType, test.data)
+			request := identityMultipartRequestWithValues(t, http.MethodPut, "/api/settings/system-identity", store.record.Revision, application.SystemIconReplace, "Brand", test.fileName, test.mediaType, test.data)
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			if response.Code != http.StatusOK || store.record.IconMediaType != test.wantType || !bytes.Equal(store.record.IconBytes, test.data) {
@@ -267,7 +264,7 @@ func TestSystemIdentityHTTPAcceptsJPEGAndWebPAndRejectsInvalidIconPayloads(t *te
 		{name: "oversized", data: bytes.Repeat([]byte{'x'}, application.MaxSystemIconBytes+1), fileName: "icon.png", mediaType: "image/png", wantCode: http.StatusUnprocessableEntity},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			request := identityMultipartRequestWithValues(t, http.MethodPut, "/api/settings/system-identity", store.record.Revision, application.SystemIconReplace, "Brand", "Brand EN", test.fileName, test.mediaType, test.data)
+			request := identityMultipartRequestWithValues(t, http.MethodPut, "/api/settings/system-identity", store.record.Revision, application.SystemIconReplace, "Brand", test.fileName, test.mediaType, test.data)
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			if response.Code != test.wantCode {

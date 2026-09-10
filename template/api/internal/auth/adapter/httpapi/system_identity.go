@@ -20,12 +20,11 @@ import (
 const maxSystemIdentityMultipartBody = application.MaxSystemIconBytes + 128*1024
 
 type systemIdentityResponse struct {
-	SystemName        string `json:"systemName"`
-	EnglishSystemName string `json:"englishSystemName"`
-	IconURL           string `json:"iconUrl"`
-	HasCustomIcon     bool   `json:"hasCustomIcon"`
-	Revision          int64  `json:"revision"`
-	UpdatedAt         string `json:"updatedAt,omitempty"`
+	SystemName    string `json:"systemName"`
+	IconURL       string `json:"iconUrl"`
+	HasCustomIcon bool   `json:"hasCustomIcon"`
+	Revision      int64  `json:"revision"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
 }
 
 func systemIdentityResponseBody(r *http.Request, view application.SystemIdentityView) systemIdentityResponse {
@@ -36,11 +35,10 @@ func systemIdentityResponseBody(r *http.Request, view application.SystemIdentity
 		iconURL = "/api/public/system-identity/icon?default=1&style=layers"
 	}
 	body := systemIdentityResponse{
-		SystemName:        view.SystemName,
-		EnglishSystemName: view.EnglishSystemName,
-		IconURL:           iconURL,
-		HasCustomIcon:     view.HasCustomIcon(),
-		Revision:          view.Revision,
+		SystemName:    view.SystemName,
+		IconURL:       iconURL,
+		HasCustomIcon: view.HasCustomIcon(),
+		Revision:      view.Revision,
 	}
 	if !view.UpdatedAt.IsZero() {
 		body.UpdatedAt = view.UpdatedAt.UTC().Format(time.RFC3339Nano)
@@ -201,7 +199,7 @@ func (h *Handler) saveSystemIdentity(w http.ResponseWriter, r *http.Request) {
 		writeApplicationError(w, err)
 		return
 	}
-	details := map[string]any{"before": nil, "after": systemIdentitySnapshot(view), "fieldsModified": []string{"systemName", "englishSystemName", "icon"}}
+	details := map[string]any{"before": nil, "after": systemIdentitySnapshot(view), "fieldsModified": []string{"systemName", "icon"}}
 	if beforeErr == nil {
 		details["before"] = systemIdentitySnapshot(before)
 	}
@@ -238,10 +236,9 @@ func parseSystemIdentityMultipart(w http.ResponseWriter, r *http.Request) (appli
 		action = application.SystemIconPreserve
 	}
 	input := application.SystemIdentityInput{
-		SystemName:        multipartValue(form.Value, "systemName"),
-		EnglishSystemName: multipartValue(form.Value, "englishSystemName"),
-		IconAction:        action,
-		Revision:          revision,
+		SystemName: multipartValue(form.Value, "systemName"),
+		IconAction: action,
+		Revision:   revision,
 	}
 	if action == application.SystemIconReplace {
 		files := form.File["icon"]
@@ -281,9 +278,8 @@ func multipartValue(values map[string][]string, key string) string {
 
 func systemIdentitySnapshot(view application.SystemIdentityView) map[string]any {
 	return map[string]any{
-		"systemName":        view.SystemName,
-		"englishSystemName": view.EnglishSystemName,
-		"hasCustomIcon":     view.HasCustomIcon(),
-		"revision":          view.Revision,
+		"systemName":    view.SystemName,
+		"hasCustomIcon": view.HasCustomIcon(),
+		"revision":      view.Revision,
 	}
 }

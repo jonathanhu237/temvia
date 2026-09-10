@@ -22,10 +22,7 @@ Shared administrative configuration that applies throughout a Temvia administrat
 The shared delivery settings and default language for email sent by a Temvia administration app.
 
 **System name（系统名称）**:
-The shared display name identifying an administration app across its pages, browser titles, and system emails.
-
-**English system name（英文系统名称）**:
-An optional English display name used in English interfaces and English system emails. When absent, the system name is used instead.
+The single shared display name identifying an administration app across its pages, browser titles, and system emails. It is freely named without a prescribed language and stays the same regardless of interface or email language.
 
 **System icon（系统图标）**:
 The shared visual symbol identifying an administration app on its pages and browser tabs.

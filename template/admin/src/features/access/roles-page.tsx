@@ -32,11 +32,11 @@ import { notifyRequestError, notifySuccess, readFailureFeedback, useRequestError
 import { systemIdentityName, usePublicSystemIdentity } from '@/features/identity/system-identity'
 
 export function RolesPage({ api, canManage, actorPermissions, actorSuperAdmin = false }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean }) {
-  const { t, i18n } = useTranslation(['access', 'problems', 'common'])
+  const { t } = useTranslation(['access', 'problems', 'common'])
   const queryClient = useQueryClient()
   const query = useQuery(rolesOptions(api))
   const identity = usePublicSystemIdentity(api)
-  const systemName = systemIdentityName(identity.data, i18n.language)
+  const systemName = systemIdentityName(identity.data)
   const [selected, setSelected] = useState<Role | undefined>()
   const [detailOpen, setDetailOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)

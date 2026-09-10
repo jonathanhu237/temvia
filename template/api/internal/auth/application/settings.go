@@ -324,7 +324,7 @@ func (s *SettingsManagement) testEmailSettings(ctx context.Context, actorID stri
 		if identityErr != nil {
 			return identityErr
 		}
-		systemName = identity.NameForLocale(domain.Locale(input.DefaultLocale))
+		systemName = identity.DisplayName()
 	}
 	mailer, err := s.factory(SMTPSettings{Host: strings.TrimSpace(input.Host), Port: input.Port, Security: strings.ToLower(strings.TrimSpace(input.Security)), Username: strings.TrimSpace(input.Username), Password: password, FromAddress: strings.TrimSpace(input.FromAddress), FromName: strings.TrimSpace(input.FromName)})
 	if err != nil {

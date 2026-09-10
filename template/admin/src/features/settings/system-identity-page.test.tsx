@@ -26,7 +26,6 @@ function renderPage(api: ApiClient, canWrite = true) {
 
 const savedIdentity = {
   systemName: 'Temvia',
-  englishSystemName: '',
   iconUrl: '/api/public/system-identity/icon?v=1',
   hasCustomIcon: false,
   revision: 1,
@@ -80,7 +79,7 @@ describe('system identity page', () => {
 
     expect(await screen.findByLabelText('System name')).toHaveValue('Temvia')
     expect(screen.getByLabelText('System name')).toBeDisabled()
-    expect(screen.getByLabelText('English system name')).toBeDisabled()
+    expect(screen.getAllByRole('textbox')).toHaveLength(1)
     expect(screen.getByLabelText('System icon')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Restore default' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()

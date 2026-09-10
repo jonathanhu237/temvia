@@ -34,30 +34,27 @@ const (
 // SystemIdentityRecord is the persistence projection for the shared product
 // identity. IconBytes is nil when the built-in icon is active.
 type SystemIdentityRecord struct {
-	SystemName        string
-	EnglishSystemName string
-	IconMediaType     string
-	IconBytes         []byte
-	Revision          int64
-	UpdatedAt         time.Time
+	SystemName    string
+	IconMediaType string
+	IconBytes     []byte
+	Revision      int64
+	UpdatedAt     time.Time
 }
 
 type SystemIdentityView struct {
-	SystemName        string
-	EnglishSystemName string
-	IconMediaType     string
-	IconBytes         []byte
-	Revision          int64
-	UpdatedAt         time.Time
+	SystemName    string
+	IconMediaType string
+	IconBytes     []byte
+	Revision      int64
+	UpdatedAt     time.Time
 }
 
 type SystemIdentityInput struct {
-	SystemName        string
-	EnglishSystemName string
-	IconAction        string
-	IconMediaType     string
-	IconBytes         []byte
-	Revision          int64
+	SystemName    string
+	IconAction    string
+	IconMediaType string
+	IconBytes     []byte
+	Revision      int64
 }
 
 type SystemIdentityStore interface {
@@ -105,7 +102,7 @@ func (s *SystemIdentityManagement) SaveSystemIdentity(ctx context.Context, input
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 
-	name, english, err := normalizeSystemIdentityNames(input.SystemName, input.EnglishSystemName)
+	name, err := normalizeSystemIdentityName(input.SystemName)
 	if err != nil {
 		return SystemIdentityView{}, err
 	}
@@ -135,7 +132,7 @@ func (s *SystemIdentityManagement) SaveSystemIdentity(ctx context.Context, input
 		return SystemIdentityView{}, ErrStaleRevision
 	}
 
-	record := SystemIdentityRecord{SystemName: name, EnglishSystemName: english, Revision: input.Revision}
+	record := SystemIdentityRecord{SystemName: name, Revision: input.Revision}
 	switch action {
 	case SystemIconPreserve:
 		record.IconMediaType = current.IconMediaType
@@ -162,12 +159,9 @@ func (s *SystemIdentityManagement) SaveSystemIdentity(ctx context.Context, input
 	return systemIdentityView(saved), nil
 }
 
-func (v SystemIdentityView) NameForLocale(locale domain.Locale) string {
-	if locale == domain.LocaleEnglish && strings.TrimSpace(v.EnglishSystemName) != "" {
-		return v.EnglishSystemName
-	}
-	if strings.TrimSpace(v.SystemName) != "" {
-		return v.SystemName
+func (v SystemIdentityView) DisplayName() string {
+	if name := strings.TrimSpace(v.SystemName); name != "" {
+		return name
 	}
 	return DefaultSystemName
 }
@@ -193,27 +187,18 @@ func systemIdentityView(record SystemIdentityRecord) SystemIdentityView {
 	if name == "" {
 		name = DefaultSystemName
 	}
-	return SystemIdentityView{SystemName: name, EnglishSystemName: strings.TrimSpace(record.EnglishSystemName), IconMediaType: record.IconMediaType, IconBytes: append([]byte(nil), record.IconBytes...), Revision: record.Revision, UpdatedAt: record.UpdatedAt}
+	return SystemIdentityView{SystemName: name, IconMediaType: record.IconMediaType, IconBytes: append([]byte(nil), record.IconBytes...), Revision: record.Revision, UpdatedAt: record.UpdatedAt}
 }
 
-func normalizeSystemIdentityNames(name, english string) (string, string, error) {
+func normalizeSystemIdentityName(name string) (string, error) {
 	name = strings.TrimSpace(name)
-	english = strings.TrimSpace(english)
-	if err := validateSystemIdentityName(name, "systemName", false); err != nil {
-		return "", "", err
+	if err := validateSystemIdentityName(name, "systemName"); err != nil {
+		return "", err
 	}
-	if english != "" {
-		if err := validateSystemIdentityName(english, "englishSystemName", true); err != nil {
-			return "", "", err
-		}
-	}
-	return name, english, nil
+	return name, nil
 }
 
-func validateSystemIdentityName(value, field string, optional bool) error {
-	if value == "" && optional {
-		return nil
-	}
+func validateSystemIdentityName(value, field string) error {
 	if value == "" {
 		return invalidIdentityField(field, "required")
 	}

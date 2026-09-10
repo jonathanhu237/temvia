@@ -337,7 +337,7 @@ func (d *MailDispatcher) compose(ctx context.Context, job MailJob) (OutgoingMail
 	message := OutgoingMail{
 		MessageID:  "temvia-outbox-" + job.ID + "@temvia",
 		Kind:       job.Kind,
-		SystemName: identity.NameForLocale(job.Locale),
+		SystemName: identity.DisplayName(),
 		Name:       job.Name,
 		To:         job.Email,
 		Locale:     job.Locale,

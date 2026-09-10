@@ -17,7 +17,6 @@ type IconAction = 'preserve' | 'replace' | 'default'
 
 type SystemIdentityDraft = {
   systemName: string
-  englishSystemName: string
   iconAction: IconAction
   iconFile?: File
   iconPreview: string
@@ -51,7 +50,6 @@ export function SystemIdentityPage({ api, canWrite = true }: { api: ApiClient; c
       if (!api.saveSystemIdentity) throw new Error('missing saveSystemIdentity')
       const form = new FormData()
       form.append('systemName', current.systemName)
-      form.append('englishSystemName', current.englishSystemName)
       form.append('revision', String(current.revision))
       form.append('iconAction', current.iconAction)
       if (current.iconAction === 'replace' && current.iconFile) form.append('icon', current.iconFile, current.iconFile.name)
@@ -76,9 +74,8 @@ export function SystemIdentityPage({ api, canWrite = true }: { api: ApiClient; c
   const busy = save.isPending
   const forbidden = query.isError && isForbidden(query.error)
   const systemNameTooLong = runeLength(current.systemName) > 50
-  const englishSystemNameTooLong = runeLength(current.englishSystemName) > 50
   const editDisabled = busy || !canWrite || current.conflict || query.isError
-  const submitDisabled = editDisabled || !current.systemName.trim() || systemNameTooLong || englishSystemNameTooLong || (current.iconAction === 'replace' && !current.iconFile)
+  const submitDisabled = editDisabled || !current.systemName.trim() || systemNameTooLong || (current.iconAction === 'replace' && !current.iconFile)
 
   if (query.isPending) return <p role="status">{t('common:loading')}</p>
   if (query.isError && forbidden && !draft) return <p role="status">{t('access:forbiddenDescription')}</p>
@@ -105,7 +102,6 @@ export function SystemIdentityPage({ api, canWrite = true }: { api: ApiClient; c
       <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); if (!submitDisabled) save.mutate() }} noValidate>
         <FieldGroup>
           <Field><FieldLabel htmlFor="system-name">{t('identity.systemName')}</FieldLabel><Input id="system-name" value={current.systemName} aria-invalid={systemNameTooLong || !current.systemName.trim()} onChange={(event) => update({ systemName: event.target.value })} disabled={editDisabled} /><FieldDescription>{t('identity.systemNameDescription')}</FieldDescription>{!current.systemName.trim() ? <FieldError>{t('identity.nameRequired')}</FieldError> : systemNameTooLong ? <FieldError>{t('identity.nameTooLong')}</FieldError> : null}</Field>
-          <Field><FieldLabel htmlFor="english-system-name">{t('identity.englishSystemName')}</FieldLabel><Input id="english-system-name" value={current.englishSystemName} aria-invalid={englishSystemNameTooLong} onChange={(event) => update({ englishSystemName: event.target.value })} disabled={editDisabled} /><FieldDescription>{t('identity.englishSystemNameDescription')}</FieldDescription>{englishSystemNameTooLong ? <FieldError>{t('identity.englishNameTooLong')}</FieldError> : null}</Field>
         </FieldGroup>
         <div className="grid gap-5 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-start">
           <div className="flex size-32 items-center justify-center overflow-hidden rounded-xl border bg-muted/30 p-3">{current.iconAction === 'default' || (current.iconAction === 'preserve' && !query.data?.hasCustomIcon) ? <DefaultSystemIcon className="size-16" /> : <img src={current.iconPreview} alt="" className="max-h-full max-w-full object-contain" />}</div>
@@ -117,10 +113,10 @@ export function SystemIdentityPage({ api, canWrite = true }: { api: ApiClient; c
   </SettingsSection>
 }
 
-const emptyDraft = (): SystemIdentityDraft => ({ systemName: 'Temvia', englishSystemName: '', iconAction: 'preserve', iconPreview: '/api/public/system-identity/icon?default=1', revision: 0, dirty: false, conflict: false })
+const emptyDraft = (): SystemIdentityDraft => ({ systemName: 'Temvia', iconAction: 'preserve', iconPreview: '/api/public/system-identity/icon?default=1', revision: 0, dirty: false, conflict: false })
 
 function fromSystemIdentity(identity: SystemIdentity): SystemIdentityDraft {
-  return { systemName: identity.systemName, englishSystemName: identity.englishSystemName, iconAction: 'preserve', iconPreview: identity.iconUrl, revision: identity.revision, dirty: false, conflict: false }
+  return { systemName: identity.systemName, iconAction: 'preserve', iconPreview: identity.iconUrl, revision: identity.revision, dirty: false, conflict: false }
 }
 
 function runeLength(value: string): number {
