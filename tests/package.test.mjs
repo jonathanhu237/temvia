@@ -34,7 +34,8 @@ test('actual npm tarball installs without dev dependencies and its mapped bin ge
   assert.deepEqual(metadata.bin, { 'create-temvia': 'dist/cli.js' });
   assert.equal(metadata.dependencies, undefined);
   assert.notEqual(metadata.private, true);
-  assert.equal(metadata.version, '0.1.0');
+  const sourceMetadata = JSON.parse(await fs.readFile(join(root, 'package.json'), 'utf8'));
+  assert.equal(metadata.version, sourceMetadata.version);
   assert.equal(metadata.license, 'MIT');
   assert.ok(packed.files.includes('LICENSE'));
   assert.ok(packed.files.includes('README.zh-CN.md'));

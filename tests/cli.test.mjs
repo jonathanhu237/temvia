@@ -46,12 +46,14 @@ test('help/version work without Git or filesystem output; subprocess errors are 
   const cwd = await temporaryDirectory(t);
   const git = fakeGit();
   assert.match(await run(['--help'], cwd, git), /Usage: create-temvia/);
-  assert.match(await run(['--version'], cwd, git), /^0\.1\.0\n$/);
+  const { version } = JSON.parse(await fs.readFile(join(root, 'package.json'), 'utf8'));
+  assert.equal(await run(['--version'], cwd, git), `${version}\n`);
   assert.deepEqual(git.calls, []);
   for (const flag of ['--help', '--version']) {
     const result = spawnSync(process.execPath, [cli, flag], { cwd, env: { ...process.env, PATH: '' }, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
-    assert.ok(result.stdout.length > 0);
+    if (flag === '--version') assert.equal(result.stdout, `${version}\n`);
+    else assert.match(result.stdout, /Usage: create-temvia/);
   }
   const invalid = spawnSync(process.execPath, [cli, 'project', '--module', 'bad'], { cwd, encoding: 'utf8' });
   assert.equal(invalid.status, 1);
