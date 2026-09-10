@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import type { ApiClient } from '@/shared/api/client'
 import type { Invitation } from '@/shared/api/contracts'
-import { isForbidden } from '@/shared/api/problems'
+import { isForbidden, translateRateLimitedProblemWithFields } from '@/shared/api/problems'
 import { DataTable, SortableHeader } from './data-table'
 import { InvitationForm } from './users-page'
 import { PageNavigation, RoleBadges, canAssignRole, formatDate } from './access-components'
@@ -32,7 +32,7 @@ type InvitationAction = 'resend' | 'renew' | 'revoke'
 type InvitationSort = 'name' | 'email' | 'createdAt' | 'expiresAt'
 
 export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAdmin = false }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean }) {
-  const { t, i18n } = useTranslation(['access', 'common'])
+  const { t, i18n } = useTranslation(['access', 'common', 'problems'])
   const queryClient = useQueryClient()
   const [cursor, setCursor] = useState('')
   const [history, setHistory] = useState<string[]>([])
@@ -66,7 +66,7 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
       return { result: await api.resendInvitation(invitation.id), kind }
     },
     onSuccess: (_result, variables) => { setAction(undefined); notifySuccess(t(variables.kind === 'renew' ? 'invitationRenewed' : 'invitationResent')); void queryClient.invalidateQueries({ queryKey: ['access', 'invitations'] }) },
-    onError: (error, variables) => notifyRequestError(error, t, { title: t(variables?.kind === 'renew' ? 'renewAndSend' : 'resend') }),
+    onError: (error, variables) => notifyRequestError(error, t, { title: t(variables?.kind === 'renew' ? 'renewAndSend' : 'resend'), description: translateRateLimitedProblemWithFields(error, t, 'invitationSendRateLimited') }),
   })
   const revoke = useMutation({
     retry: false,

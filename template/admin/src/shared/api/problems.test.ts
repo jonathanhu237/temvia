@@ -13,6 +13,8 @@ import {
   translateFieldProblem,
   translateClientFieldError,
   translatePasswordResetProblem,
+  translateRateLimitedProblem,
+  translateRateLimitedProblemWithFields,
   translateProblem,
   translateProblemWithFields,
 } from './problems'
@@ -107,6 +109,34 @@ describe('localized problem mapping', () => {
       code: 'rate_limited',
     })
     expect(translatePasswordResetProblem(error, i18n.t.bind(i18n))).toBe(message)
+  })
+
+  it.each([
+    ['en', 'Too many invitation emails. Wait a moment and try again.', 'invitationSendRateLimited'],
+    ['zh-CN', '邀请邮件发送次数过多，请稍后重试。', 'invitationSendRateLimited'],
+    ['en', 'Too many setup attempts. Wait a moment and try again.', 'setupRateLimited'],
+    ['zh-CN', '初始化尝试次数过多，请稍后重试。', 'setupRateLimited'],
+  ] as const)('uses operation-specific rate-limit copy in %s', async (locale, message, key) => {
+    await i18n.changeLanguage(locale)
+    const error = new ApiProblemError({
+      type: '/problems/rate-limited',
+      title: 'diagnostic',
+      status: 429,
+      code: 'rate_limited',
+    })
+    expect(translateRateLimitedProblem(error, i18n.t.bind(i18n), key)).toBe(message)
+    expect(translateRateLimitedProblemWithFields(error, i18n.t.bind(i18n), key)).toBe(message)
+  })
+
+  it('does not replace a dependency failure with rate-limit copy', async () => {
+    await i18n.changeLanguage('en')
+    const error = new ApiProblemError({
+      type: '/problems/service-unavailable',
+      title: 'diagnostic',
+      status: 503,
+      code: 'service_unavailable',
+    })
+    expect(translateRateLimitedProblem(error, i18n.t.bind(i18n), 'testEmailRateLimited')).toBe('A required service is temporarily unavailable. Try again shortly.')
   })
 
   it('selects Chinese resources and synchronizes document metadata', async () => {

@@ -33,6 +33,30 @@ type Config struct {
 	PasswordResetGlobalRefill   time.Duration
 	PasswordResetEmailCapacity  int
 	PasswordResetEmailRefill    time.Duration
+	PasswordResetIPCapacity     int
+	PasswordResetIPRefill       time.Duration
+
+	// Anonymous source buckets protect the high-cost token and setup entries
+	// without coupling them to account or invitation state.
+	SetupIPCapacity                 int
+	SetupIPRefill                   time.Duration
+	InvitationAcceptIPCapacity      int
+	InvitationAcceptIPRefill        time.Duration
+	PasswordResetCompleteIPCapacity int
+	PasswordResetCompleteIPRefill   time.Duration
+
+	// Authenticated mail actions share the same invitation recipient bucket
+	// across create and resend, while test mail has its own namespace.
+	InvitationSendActorCapacity     int
+	InvitationSendActorRefill       time.Duration
+	InvitationSendRecipientCapacity int
+	InvitationSendRecipientRefill   time.Duration
+	TestEmailGlobalCapacity         int
+	TestEmailGlobalRefill           time.Duration
+	TestEmailActorCapacity          int
+	TestEmailActorRefill            time.Duration
+	TestEmailRecipientCapacity      int
+	TestEmailRecipientRefill        time.Duration
 
 	MailOutboxPollInterval    time.Duration
 	MailOutboxLeaseDuration   time.Duration
@@ -64,6 +88,8 @@ type Config struct {
 	LoginGlobalRefillInterval time.Duration
 	LoginEmailCapacity        int
 	LoginEmailRefillInterval  time.Duration
+	LoginIPCapacity           int
+	LoginIPRefillInterval     time.Duration
 
 	CookieName            string
 	SecureCookie          bool
@@ -80,16 +106,34 @@ func Load(get Lookup) (Config, error) {
 		TrustedProxyCIDRs: parseCSV(get("TRUSTED_PROXY_CIDRS")),
 		SetupLinkTTL:      parseDuration(get, "SETUP_LINK_TTL", 30*time.Minute),
 
-		PasswordResetTokenKey:       parseTokenKey(get("PASSWORD_RESET_TOKEN_KEY")),
-		InvitationTokenKey:          parseTokenKey(get("INVITATION_TOKEN_KEY")),
-		EmailSettingsEncryptionKey:  parseOptionalTokenKey(get("EMAIL_SETTINGS_ENCRYPTION_KEY")),
-		PasswordResetLinkTTL:        parseDuration(get, "PASSWORD_RESET_LINK_TTL", 30*time.Minute),
-		InvitationLinkTTL:           parseDuration(get, "INVITATION_LINK_TTL", 72*time.Hour),
-		PasswordResetResponseMin:    parseDuration(get, "PASSWORD_RESET_MIN_RESPONSE_TIME", 500*time.Millisecond),
-		PasswordResetGlobalCapacity: parseInt(get, "PASSWORD_RESET_RATE_LIMIT_GLOBAL_CAPACITY", 10),
-		PasswordResetGlobalRefill:   parseDuration(get, "PASSWORD_RESET_RATE_LIMIT_GLOBAL_REFILL_INTERVAL", 6*time.Second),
-		PasswordResetEmailCapacity:  parseInt(get, "PASSWORD_RESET_RATE_LIMIT_EMAIL_CAPACITY", 3),
-		PasswordResetEmailRefill:    parseDuration(get, "PASSWORD_RESET_RATE_LIMIT_EMAIL_REFILL_INTERVAL", 20*time.Minute),
+		PasswordResetTokenKey:           parseTokenKey(get("PASSWORD_RESET_TOKEN_KEY")),
+		InvitationTokenKey:              parseTokenKey(get("INVITATION_TOKEN_KEY")),
+		EmailSettingsEncryptionKey:      parseOptionalTokenKey(get("EMAIL_SETTINGS_ENCRYPTION_KEY")),
+		PasswordResetLinkTTL:            parseDuration(get, "PASSWORD_RESET_LINK_TTL", 30*time.Minute),
+		InvitationLinkTTL:               parseDuration(get, "INVITATION_LINK_TTL", 72*time.Hour),
+		PasswordResetResponseMin:        parseDuration(get, "PASSWORD_RESET_MIN_RESPONSE_TIME", 500*time.Millisecond),
+		PasswordResetGlobalCapacity:     parseInt(get, "PASSWORD_RESET_RATE_LIMIT_GLOBAL_CAPACITY", 10),
+		PasswordResetGlobalRefill:       parseDuration(get, "PASSWORD_RESET_RATE_LIMIT_GLOBAL_REFILL_INTERVAL", 6*time.Second),
+		PasswordResetEmailCapacity:      parseInt(get, "PASSWORD_RESET_RATE_LIMIT_EMAIL_CAPACITY", 3),
+		PasswordResetEmailRefill:        parseDuration(get, "PASSWORD_RESET_RATE_LIMIT_EMAIL_REFILL_INTERVAL", 20*time.Minute),
+		PasswordResetIPCapacity:         parseInt(get, "PASSWORD_RESET_RATE_LIMIT_IP_CAPACITY", 30),
+		PasswordResetIPRefill:           parseDuration(get, "PASSWORD_RESET_RATE_LIMIT_IP_REFILL_INTERVAL", 6*time.Second),
+		SetupIPCapacity:                 parseInt(get, "SETUP_RATE_LIMIT_IP_CAPACITY", 10),
+		SetupIPRefill:                   parseDuration(get, "SETUP_RATE_LIMIT_IP_REFILL_INTERVAL", time.Minute),
+		InvitationAcceptIPCapacity:      parseInt(get, "INVITATION_ACCEPT_RATE_LIMIT_IP_CAPACITY", 30),
+		InvitationAcceptIPRefill:        parseDuration(get, "INVITATION_ACCEPT_RATE_LIMIT_IP_REFILL_INTERVAL", time.Minute),
+		PasswordResetCompleteIPCapacity: parseInt(get, "PASSWORD_RESET_COMPLETE_RATE_LIMIT_IP_CAPACITY", 20),
+		PasswordResetCompleteIPRefill:   parseDuration(get, "PASSWORD_RESET_COMPLETE_RATE_LIMIT_IP_REFILL_INTERVAL", time.Minute),
+		InvitationSendActorCapacity:     parseInt(get, "INVITATION_RATE_LIMIT_ACTOR_CAPACITY", 20),
+		InvitationSendActorRefill:       parseDuration(get, "INVITATION_RATE_LIMIT_ACTOR_REFILL_INTERVAL", time.Minute),
+		InvitationSendRecipientCapacity: parseInt(get, "INVITATION_RATE_LIMIT_RECIPIENT_CAPACITY", 3),
+		InvitationSendRecipientRefill:   parseDuration(get, "INVITATION_RATE_LIMIT_RECIPIENT_REFILL_INTERVAL", 20*time.Minute),
+		TestEmailGlobalCapacity:         parseInt(get, "TEST_EMAIL_RATE_LIMIT_GLOBAL_CAPACITY", 20),
+		TestEmailGlobalRefill:           parseDuration(get, "TEST_EMAIL_RATE_LIMIT_GLOBAL_REFILL_INTERVAL", time.Hour),
+		TestEmailActorCapacity:          parseInt(get, "TEST_EMAIL_RATE_LIMIT_ACTOR_CAPACITY", 5),
+		TestEmailActorRefill:            parseDuration(get, "TEST_EMAIL_RATE_LIMIT_ACTOR_REFILL_INTERVAL", time.Hour),
+		TestEmailRecipientCapacity:      parseInt(get, "TEST_EMAIL_RATE_LIMIT_RECIPIENT_CAPACITY", 3),
+		TestEmailRecipientRefill:        parseDuration(get, "TEST_EMAIL_RATE_LIMIT_RECIPIENT_REFILL_INTERVAL", 20*time.Minute),
 
 		MailOutboxPollInterval:    parseDuration(get, "MAIL_DISPATCH_INTERVAL", time.Second),
 		MailOutboxLeaseDuration:   parseDuration(get, "MAIL_OUTBOX_LEASE_TTL", 30*time.Second),
@@ -117,10 +161,12 @@ func Load(get Lookup) (Config, error) {
 
 		PasswordHashMaxConcurrency: parseInt(get, "PASSWORD_HASH_MAX_CONCURRENCY", 2),
 
-		LoginGlobalCapacity:       parseInt(get, "LOGIN_RATE_LIMIT_GLOBAL_CAPACITY", 10),
+		LoginGlobalCapacity:       parseInt(get, "LOGIN_RATE_LIMIT_GLOBAL_CAPACITY", 60),
 		LoginGlobalRefillInterval: parseDuration(get, "LOGIN_RATE_LIMIT_GLOBAL_REFILL_INTERVAL", 6*time.Second),
 		LoginEmailCapacity:        parseInt(get, "LOGIN_RATE_LIMIT_EMAIL_CAPACITY", 5),
 		LoginEmailRefillInterval:  parseDuration(get, "LOGIN_RATE_LIMIT_EMAIL_REFILL_INTERVAL", time.Minute),
+		LoginIPCapacity:           parseInt(get, "LOGIN_RATE_LIMIT_IP_CAPACITY", 30),
+		LoginIPRefillInterval:     parseDuration(get, "LOGIN_RATE_LIMIT_IP_REFILL_INTERVAL", 6*time.Second),
 	}
 
 	if err := c.validate(); err != nil {
@@ -228,8 +274,38 @@ func (c *Config) validate() error {
 	if c.PasswordResetResponseMin < 0 || c.PasswordResetResponseMin > 5*time.Second {
 		return fmt.Errorf("PASSWORD_RESET_MIN_RESPONSE_TIME must be between 0 and 5s")
 	}
-	if c.PasswordResetGlobalCapacity <= 0 || c.PasswordResetGlobalRefill < time.Millisecond || c.PasswordResetEmailCapacity <= 0 || c.PasswordResetEmailRefill < time.Millisecond {
-		return fmt.Errorf("password-reset rate-limit settings must be positive and intervals at least 1ms")
+	if err := validateRateLimitSettings("password-reset global", c.PasswordResetGlobalCapacity, c.PasswordResetGlobalRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("password-reset email", c.PasswordResetEmailCapacity, c.PasswordResetEmailRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("password-reset IP", c.PasswordResetIPCapacity, c.PasswordResetIPRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("setup IP", c.SetupIPCapacity, c.SetupIPRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("invitation-accept IP", c.InvitationAcceptIPCapacity, c.InvitationAcceptIPRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("password-reset-complete IP", c.PasswordResetCompleteIPCapacity, c.PasswordResetCompleteIPRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("invitation actor", c.InvitationSendActorCapacity, c.InvitationSendActorRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("invitation recipient", c.InvitationSendRecipientCapacity, c.InvitationSendRecipientRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("test-email global", c.TestEmailGlobalCapacity, c.TestEmailGlobalRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("test-email actor", c.TestEmailActorCapacity, c.TestEmailActorRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("test-email recipient", c.TestEmailRecipientCapacity, c.TestEmailRecipientRefill); err != nil {
+		return err
 	}
 	if c.MailOutboxPollInterval < time.Millisecond || c.MailOutboxLeaseDuration < time.Second || c.MailOutboxLeaseDuration <= c.SMTPTimeout || c.MailOutboxRetryInitial < time.Millisecond || c.MailOutboxRetryMax < c.MailOutboxRetryInitial || c.MailOutboxNotificationTTL < time.Minute {
 		return fmt.Errorf("mail outbox settings are invalid")
@@ -269,14 +345,42 @@ func (c *Config) validate() error {
 	if c.PasswordHashMaxConcurrency <= 0 {
 		return fmt.Errorf("PASSWORD_HASH_MAX_CONCURRENCY must be positive")
 	}
-	if c.LoginGlobalCapacity <= 0 || c.LoginGlobalRefillInterval < time.Millisecond || c.LoginEmailCapacity <= 0 || c.LoginEmailRefillInterval < time.Millisecond {
-		return fmt.Errorf("login rate-limit settings must be positive and intervals at least 1ms")
+	if err := validateRateLimitSettings("login global", c.LoginGlobalCapacity, c.LoginGlobalRefillInterval); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("login email", c.LoginEmailCapacity, c.LoginEmailRefillInterval); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("login IP", c.LoginIPCapacity, c.LoginIPRefillInterval); err != nil {
+		return err
 	}
 	if public.Scheme == "https" {
 		c.CookieName = "__Host-temvia_session"
 		c.SecureCookie = true
 	} else {
 		c.CookieName = "temvia_session"
+	}
+	return nil
+}
+
+func validateRateLimitSettings(name string, capacity int, refill time.Duration) error {
+	if capacity <= 0 || refill < time.Millisecond {
+		return fmt.Errorf("%s rate-limit settings must use a positive capacity and an interval of at least 1ms", name)
+	}
+	// The database stores retention as milliseconds and computes (capacity+1)
+	// intervals. Reject values that would overflow either representation rather
+	// than silently wrapping into a short retention period.
+	maxDuration := time.Duration(1<<63 - 1)
+	maxIntervals := int64(maxDuration / refill)
+	if int64(capacity) >= maxIntervals {
+		return fmt.Errorf("%s rate-limit settings overflow the retention duration", name)
+	}
+	durationMillis := int64(refill / time.Millisecond)
+	if refill%time.Millisecond != 0 {
+		durationMillis++
+	}
+	if durationMillis <= 0 || int64(capacity) >= (int64(1<<63-1)/durationMillis) {
+		return fmt.Errorf("%s rate-limit settings overflow database milliseconds", name)
 	}
 	return nil
 }

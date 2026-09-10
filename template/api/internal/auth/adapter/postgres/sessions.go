@@ -260,7 +260,10 @@ func durationMillis(value time.Duration) int64 {
 	if value <= 0 {
 		return 0
 	}
-	millis := value.Milliseconds()
+	millis := int64(value / time.Millisecond)
+	if value%time.Millisecond != 0 {
+		millis++
+	}
 	if millis == 0 {
 		return 1
 	}

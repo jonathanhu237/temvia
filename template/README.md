@@ -55,6 +55,49 @@ an API or database restart; expired and revoked state is checked at request time
 and reclaimed by a bounded background cleanup. `make down` does not remove the
 PostgreSQL volume.
 
+The API has basic abuse protection enabled by default without Redis. Login uses
+separate source-IP, canonical-email, and global token buckets; password-reset
+requests use their own source-IP, email, and global buckets. Password-reset
+completion, invitation acceptance, and first setup have independent source-IP
+buckets. Invitation create/resend shares actor and recipient buckets, while test
+mail has separate global, actor, and recipient buckets. A source bucket is
+charged for a reached anonymous attempt; object or global denial does not drain
+an accepted-operation bucket. Successful login clears only its email bucket.
+All buckets refill automatically and are retained for a finite period; repeated
+rejections do not extend the token recovery schedule. A real quota denial is
+HTTP 429 (`rate_limited`); an unavailable or timed-out limiter is HTTP 503
+(`dependency_unavailable`) and fails closed without clearing an existing session
+cookie. These limits protect one API instance and are not DDoS or SMTP-provider
+quota protection.
+
+The related `*_RATE_LIMIT_*` environment variables in `.env.example` expose
+capacity and refill interval for every bucket. Values must be positive, intervals
+must be at least 1ms, and the calculated retention must fit the database
+representation; invalid values stop startup. Configure `TRUSTED_PROXY_CIDRS`
+only with the immediate proxy networks. Direct peers are used when it is empty,
+and malformed or untrusted forwarding headers cannot change the source identity.
+Run the bundled migrations, including the abuse-protection forward migration,
+before starting the API. For a public deployment, put a maintained edge proxy
+or WAF in front of the API for connection, request-body, and broad traffic
+controls; that is additional protection, not a prerequisite for these buckets.
+
+The shipped small-admin defaults are:
+
+| Operation | Buckets (capacity; one-token refill; sustained refill) |
+| --- | --- |
+| Login | IP 30; 6s; 10/min · email 5; 1m; 1/min · global 60; 6s; 10/min |
+| Password-reset request | IP 30; 6s; 10/min · email 3; 20m; 3/hour · global 10; 6s; 10/min |
+| Password-reset completion | IP 20; 1m; 1/min |
+| Invitation acceptance | IP 30; 1m; 1/min |
+| First setup | IP 10; 1m; 1/min |
+| Invitation create/resend | actor 20; 1m; 1/min · recipient 3; 20m; 3/hour |
+| Test email | global 20; 1h; 1/hour · actor 5; 1h; 1/hour · recipient 3; 20m; 3/hour |
+
+Capacities are burst tokens, not a promise of a fixed request count. Refill is
+continuous in discrete interval steps and a bucket never exceeds capacity.
+Changing a capacity clips existing excess tokens on the next request; changing
+an interval applies the new recovery and finite-retention schedule then.
+
 `SHUTDOWN_TIMEOUT` is the single graceful-shutdown budget. It defaults to 30s,
 is read by the API, and is also used as Compose's `stop_grace_period`; the
 budget starts at the first SIGINT/SIGTERM and includes a small internal exit

@@ -282,34 +282,87 @@ func (h *Handler) recordOperation(r *http.Request, input application.OperationLo
 }
 
 func (h *Handler) requestSourceIP(r *http.Request) string {
-	peer := remoteHost(r.RemoteAddr)
-	peerIP := net.ParseIP(peer)
-	if peerIP == nil || !h.trustedProxy(peerIP) {
+	peer, peerIP := parseSourceAddress(r.RemoteAddr)
+	if peerIP == nil {
+		return "unknown"
+	}
+	if !h.trustedProxy(peerIP) {
 		return peer
 	}
-	forwarded := make([]net.IP, 0)
-	for _, raw := range strings.Split(r.Header.Get("X-Forwarded-For"), ",") {
-		if candidate := net.ParseIP(strings.TrimSpace(raw)); candidate != nil {
-			forwarded = append(forwarded, candidate)
+
+	// Walk X-Forwarded-For from the application-facing side. Once the first
+	// valid address outside the configured proxy chain is reached, it is the
+	// client identity and everything further left is outside our trust
+	// boundary. In particular, an attacker-controlled malformed prefix added
+	// before a proxy's client address must not turn an otherwise usable chain
+	// into a shared fallback identity. A malformed node encountered before that
+	// boundary is conservative: use the immediate peer instead.
+	if values := r.Header.Values("X-Forwarded-For"); len(values) > 0 {
+		client, valid := forwardedClientIP(values, h.trustedProxy)
+		if !valid {
+			return peer
 		}
-	}
-	// Walk from the application-facing proxy toward the client. This ignores
-	// arbitrary values prepended by an untrusted client while preserving the
-	// first address outside the configured proxy chain.
-	for index := len(forwarded) - 1; index >= 0; index-- {
-		candidate := forwarded[index]
-		if h.trustedProxy(candidate) {
-			continue
+		if client != nil {
+			return canonicalIP(client)
 		}
-		return candidate.String()
+		// A chain containing only configured proxies gives us no client
+		// identity; use the immediate peer instead of guessing.
+		return peer
 	}
-	if len(forwarded) > 0 {
-		return forwarded[0].String()
-	}
-	if forwarded := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(forwarded) != nil {
-		return net.ParseIP(forwarded).String()
+
+	// X-Real-IP is a single-value fallback only when X-Forwarded-For is
+	// absent. Multiple values, an empty value, invalid syntax, or a value that
+	// is itself a configured proxy are all rejected to avoid header-merging
+	// ambiguity.
+	if values := r.Header.Values("X-Real-IP"); len(values) > 0 {
+		if len(values) != 1 {
+			return peer
+		}
+		candidate := strings.TrimSpace(values[0])
+		parsed := net.ParseIP(candidate)
+		if candidate == "" || parsed == nil || h.trustedProxy(parsed) {
+			return peer
+		}
+		return canonicalIP(parsed)
 	}
 	return peer
+}
+
+// forwardedClientIP resolves a complete, ordered set of X-Forwarded-For
+// header values from right to left. The bool reports whether every node read
+// before the trust boundary was syntactically valid. A valid untrusted node
+// ends the scan; nodes to its left are deliberately not parsed.
+func forwardedClientIP(values []string, trusted func(net.IP) bool) (net.IP, bool) {
+	for valueIndex := len(values) - 1; valueIndex >= 0; valueIndex-- {
+		parts := strings.Split(values[valueIndex], ",")
+		for partIndex := len(parts) - 1; partIndex >= 0; partIndex-- {
+			candidate := strings.TrimSpace(parts[partIndex])
+			parsed := net.ParseIP(candidate)
+			if candidate == "" || parsed == nil {
+				return nil, false
+			}
+			if !trusted(parsed) {
+				return parsed, true
+			}
+		}
+	}
+	return nil, true
+}
+
+func parseSourceAddress(value string) (string, net.IP) {
+	host := remoteHost(value)
+	parsed := net.ParseIP(strings.TrimSpace(host))
+	if parsed == nil {
+		return "unknown", nil
+	}
+	return canonicalIP(parsed), parsed
+}
+
+func canonicalIP(value net.IP) string {
+	if ipv4 := value.To4(); ipv4 != nil {
+		return ipv4.String()
+	}
+	return value.String()
 }
 
 func (h *Handler) trustedProxy(ip net.IP) bool {

@@ -44,3 +44,13 @@ it('announces an expired session before redirecting', async () => {
  await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: '/login', replace: true }))
  expect(toast.error).toHaveBeenCalledWith('Your session has expired. Sign in again.')
 })
+
+it('does not sign out on a limiter dependency failure', async () => {
+ navigate.mockClear()
+ const client = createAppQueryClient()
+ const unavailable = new ApiProblemError({ type: '/problems/service-unavailable', title: 'Unavailable', status: 503, code: 'service_unavailable' })
+ const checkSession = vi.fn().mockRejectedValue(unavailable)
+ render(<QueryClientProvider client={client}><SessionMonitor api={{ checkSession } as unknown as ApiClient} userID="user" /></QueryClientProvider>)
+ await waitFor(() => expect(client.getQueryState(['session-monitor', 'user'])?.status).toBe('error'))
+ expect(navigate).not.toHaveBeenCalled()
+})

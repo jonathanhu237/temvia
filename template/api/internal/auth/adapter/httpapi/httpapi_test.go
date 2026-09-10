@@ -250,6 +250,23 @@ func TestPasswordRecoveryHTTPErrorMapping(t *testing.T) {
 	}
 }
 
+func TestPasswordResetDependencyFailureDoesNotClearSessionCookie(t *testing.T) {
+	recovery := &recoveryFake{completeErr: application.ErrDependencyUnavailable}
+	handler := NewHandler(&setupFake{status: application.SetupComplete}, &authFake{}, testConfig(), recovery)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password-reset/complete", strings.NewReader(`{"token":"v1.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"Aa1!xxxx"}`))
+	req.Header.Set("Origin", testConfig().Origin)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: testConfig().CookieName, Value: strings.Repeat("s", 43)})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("dependency failure status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if cookies := response.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("dependency failure changed session cookie: %#v", cookies)
+	}
+}
+
 func TestInvitationAcceptanceHTTPContracts(t *testing.T) {
 	acceptance := &invitationAcceptanceFake{}
 	handler := NewHandlerWithAccess(&setupFake{status: application.SetupRequired}, &authFake{}, testConfig(), nil, nil, acceptance)

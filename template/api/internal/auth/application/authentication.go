@@ -14,6 +14,8 @@ const sessionIDBytes = 32
 type LoginInput struct {
 	Email    string
 	Password string
+	// SourceIP is supplied by the trusted HTTP adapter, never by JSON input.
+	SourceIP string
 }
 
 type Authentication struct {
@@ -42,7 +44,7 @@ func (a *Authentication) Login(ctx context.Context, input LoginInput) (domain.Us
 	if err != nil {
 		return domain.User{}, "", err
 	}
-	allowed, err := a.limiter.Allow(ctx, email.Canonical)
+	allowed, err := a.allowLogin(ctx, input.SourceIP, email.Canonical)
 	if err != nil {
 		return domain.User{}, "", dependencyError(err)
 	}
@@ -94,6 +96,16 @@ func (a *Authentication) Login(ctx context.Context, input LoginInput) (domain.Us
 		return domain.User{}, "", dependencyError(err)
 	}
 	return account.User, sessionID, nil
+}
+
+func (a *Authentication) allowLogin(ctx context.Context, sourceIP, canonicalEmail string) (bool, error) {
+	if a.limiter == nil {
+		return false, ErrDependencyUnavailable
+	}
+	if sourceAware, ok := a.limiter.(SourceAwareLoginLimiter); ok {
+		return sourceAware.AllowLogin(ctx, sourceIP, canonicalEmail)
+	}
+	return a.limiter.Allow(ctx, canonicalEmail)
 }
 
 func (a *Authentication) Current(ctx context.Context, sessionID string) (domain.User, error) {

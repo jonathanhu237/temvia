@@ -12,7 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { EmailSettings } from '@/shared/api/contracts'
-import { isForbidden, translateProblemWithFields } from '@/shared/api/problems'
+import { isForbidden, translateProblemWithFields, translateRateLimitedProblemWithFields } from '@/shared/api/problems'
 import { notifyRequestError, notifySuccess, readFailureFeedback, useRequestErrorToast } from '@/shared/feedback'
 import { useAccessDraftStore, type EmailSettingsDraft } from '@/features/access/drafts'
 
@@ -79,7 +79,7 @@ export function EmailSettingsPage({ api, canWrite = true, showTitle = true }: { 
       notifySuccess(t('email.testSuccess'))
     },
     onError: (value) => {
-      notifyRequestError(value, t, { title: t('email.testFailed'), description: translateProblemWithFields(value, t) })
+      notifyRequestError(value, t, { title: t('email.testFailed'), description: translateRateLimitedProblemWithFields(value, t, 'testEmailRateLimited') })
     },
   })
   if (query.isPending) return <p role="status">{t('common:loading')}</p>

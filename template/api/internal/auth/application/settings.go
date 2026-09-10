@@ -79,12 +79,13 @@ type MailerFactory func(SMTPSettings) (Mailer, error)
 // service stores only authenticated/encrypted SMTP credentials and updates a
 // runtime mailer atomically after an optimistic-lock success.
 type SettingsManagement struct {
-	store      EmailSettingsStore
-	cipher     SecretBox
-	factory    MailerFactory
-	runtime    *ReloadableMailer
-	identity   SystemIdentityProvider
-	production bool
+	store       EmailSettingsStore
+	cipher      SecretBox
+	factory     MailerFactory
+	runtime     *ReloadableMailer
+	identity    SystemIdentityProvider
+	production  bool
+	mailLimiter TestEmailLimiter
 	// saveMu serializes the commit and runtime reload pair. Without one
 	// critical section, two successful saves could reload their mailers in the
 	// opposite order and leave the runtime using an older committed revision.
@@ -98,6 +99,12 @@ func NewSettingsManagement(store EmailSettingsStore, cipher SecretBox, factory M
 func (s *SettingsManagement) SetProductionMode(production bool) {
 	if s != nil {
 		s.production = production
+	}
+}
+
+func (s *SettingsManagement) SetTestEmailLimiter(limiter TestEmailLimiter) {
+	if s != nil {
+		s.mailLimiter = limiter
 	}
 }
 
@@ -244,6 +251,17 @@ func (s *SettingsManagement) LoadRuntime(ctx context.Context) error {
 // TestEmailSettings sends one message using the form snapshot. It deliberately
 // bypasses persistence and therefore cannot alter the saved configuration.
 func (s *SettingsManagement) TestEmailSettings(ctx context.Context, input EmailSettingsInput, recipient string) error {
+	return s.testEmailSettings(ctx, "", input, recipient)
+}
+
+// TestEmailSettingsForActor applies the authenticated actor and recipient
+// buckets before resolving SMTP credentials or sending. The legacy method is
+// retained for embedders that do not have an actor identity at this seam.
+func (s *SettingsManagement) TestEmailSettingsForActor(ctx context.Context, actorID string, input EmailSettingsInput, recipient string) error {
+	return s.testEmailSettings(ctx, actorID, input, recipient)
+}
+
+func (s *SettingsManagement) testEmailSettings(ctx context.Context, actorID string, input EmailSettingsInput, recipient string) error {
 	if s == nil || s.factory == nil {
 		return ErrDependencyUnavailable
 	}
@@ -254,6 +272,19 @@ func (s *SettingsManagement) TestEmailSettings(ctx context.Context, input EmailS
 	parsedRecipient, err := mail.ParseAddress(recipient)
 	if err != nil || parsedRecipient.Address != recipient || strings.ContainsAny(recipient, "\r\n") {
 		return &domain.ValidationErrors{Items: []domain.FieldError{{Field: "recipient", Code: "invalid_email"}}}
+	}
+	canonicalRecipient, canonicalErr := domain.NewEmail(recipient)
+	if canonicalErr != nil {
+		return &domain.ValidationErrors{Items: []domain.FieldError{{Field: "recipient", Code: "invalid_email"}}}
+	}
+	if actorID != "" && s.mailLimiter != nil {
+		allowed, limitErr := s.mailLimiter.AllowTestEmail(ctx, actorID, canonicalRecipient.Canonical)
+		if limitErr != nil {
+			return dependencyError(limitErr)
+		}
+		if !allowed {
+			return ErrRateLimited
+		}
 	}
 	password := ""
 	if input.Password != nil {

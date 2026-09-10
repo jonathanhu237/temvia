@@ -267,3 +267,105 @@ func TestRequestSourceIPTrustsOnlyImmediateProxyAndStripsTrustedHops(t *testing.
 		t.Fatalf("untrusted peer source = %q, want peer", got)
 	}
 }
+
+func TestRequestSourceIPRejectsAmbiguousForwardingWithoutLosingTrustedClient(t *testing.T) {
+	handler := &Handler{cfg: config.Config{TrustedProxyCIDRs: []string{"10.0.0.0/8", "2001:db8:100::/48"}}}
+
+	tests := []struct {
+		name       string
+		remoteAddr string
+		forwarded  []string
+		realIP     []string
+		want       string
+	}{
+		{
+			name:       "malicious prefix is outside trust boundary",
+			remoteAddr: "10.0.0.2:1234",
+			forwarded:  []string{"not-an-ip, 198.51.100.9, 10.0.0.3"},
+			want:       "198.51.100.9",
+		},
+		{
+			name:       "rightmost untrusted address is not ignored",
+			remoteAddr: "10.0.0.2:1234",
+			forwarded:  []string{"10.0.0.3, 203.0.113.8"},
+			want:       "203.0.113.8",
+		},
+		{
+			name:       "invalid node before trust boundary falls back",
+			remoteAddr: "10.0.0.2:1234",
+			forwarded:  []string{"198.51.100.9, not-an-ip, 10.0.0.3"},
+			want:       "10.0.0.2",
+		},
+		{
+			name:       "header values are traversed from application side",
+			remoteAddr: "10.0.0.2:1234",
+			forwarded:  []string{"not-an-ip", "198.51.100.9, 10.0.0.3"},
+			want:       "198.51.100.9",
+		},
+		{
+			name:       "invalid closest header value falls back",
+			remoteAddr: "10.0.0.2:1234",
+			forwarded:  []string{"198.51.100.9", "not-an-ip"},
+			want:       "10.0.0.2",
+		},
+		{
+			name:       "only trusted forwarded hops fall back",
+			remoteAddr: "10.0.0.2:1234",
+			forwarded:  []string{"10.0.0.3, 10.0.0.4"},
+			want:       "10.0.0.2",
+		},
+		{
+			name:       "x-real-ip is single value fallback",
+			remoteAddr: "10.0.0.2:1234",
+			realIP:     []string{"::ffff:198.51.100.11"},
+			want:       "198.51.100.11",
+		},
+		{
+			name:       "multiple x-real-ip values fall back",
+			remoteAddr: "10.0.0.2:1234",
+			realIP:     []string{"198.51.100.11", "198.51.100.12"},
+			want:       "10.0.0.2",
+		},
+		{
+			name:       "trusted x-real-ip cannot replace peer",
+			remoteAddr: "10.0.0.2:1234",
+			realIP:     []string{"10.0.0.3"},
+			want:       "10.0.0.2",
+		},
+		{
+			name:       "ipv6 is canonicalized",
+			remoteAddr: "2001:db8:100::2:1234",
+			forwarded:  []string{"2001:db8:200::9, 2001:db8:100::3"},
+			want:       "2001:db8:200::9",
+		},
+		{
+			name:       "mapped ipv4 trusted peer",
+			remoteAddr: "[::ffff:10.0.0.2]:1234",
+			forwarded:  []string{"::ffff:198.51.100.13"},
+			want:       "198.51.100.13",
+		},
+		{
+			name:       "untrusted peer ignores all forwarding headers",
+			remoteAddr: "198.51.100.2:1234",
+			forwarded:  []string{"198.51.100.13"},
+			realIP:     []string{"198.51.100.14"},
+			want:       "198.51.100.2",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/", nil)
+			request.RemoteAddr = test.remoteAddr
+			for _, value := range test.forwarded {
+				request.Header.Add("X-Forwarded-For", value)
+			}
+			for _, value := range test.realIP {
+				request.Header.Add("X-Real-IP", value)
+			}
+			if got := handler.requestSourceIP(request); got != test.want {
+				t.Fatalf("source = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

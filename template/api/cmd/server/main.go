@@ -34,6 +34,21 @@ func newHandler() http.Handler {
 	return mux
 }
 
+func setupLimiter(value any) application.SetupLimiter {
+	limiter, _ := value.(application.SetupLimiter)
+	return limiter
+}
+
+func invitationAcceptLimiter(value any) application.InvitationAcceptLimiter {
+	limiter, _ := value.(application.InvitationAcceptLimiter)
+	return limiter
+}
+
+func invitationSendLimiter(value any) application.InvitationSendLimiter {
+	limiter, _ := value.(application.InvitationSendLimiter)
+	return limiter
+}
+
 func firstRecovery(recovery []httpapi.PasswordRecoveryService) httpapi.PasswordRecoveryService {
 	if len(recovery) == 0 {
 		return nil
@@ -54,7 +69,7 @@ func newApplicationHandlerWithOperationLog(cfg config.Config, setup application.
 }
 
 func newApplicationHandlerWithOperationLogAndIdentity(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery httpapi.PasswordRecoveryService, settingsService *application.SettingsManagement, operationLogs *application.OperationLogService, identity *application.SystemIdentityManagement) http.Handler {
-	setupService := application.NewSetup(setup, hasher, random, cfg.SetupLinkTTL)
+	setupService := application.NewSetup(setup, hasher, random, cfg.SetupLinkTTL, setupLimiter(limiter))
 	catalog := domain.DefaultPermissionCatalog()
 	authService := application.NewAuthentication(auth, hasher, sessions, limiter, random, catalog)
 	mux := http.NewServeMux()
@@ -67,7 +82,8 @@ func newApplicationHandlerWithOperationLogAndIdentity(cfg config.Config, setup a
 			} else {
 				access = application.NewAccessManagementWithInvitations(store, principals, catalog, cfg.InvitationTokenKey, random, cfg.InvitationLinkTTL)
 			}
-			accept := application.NewInvitationAcceptance(store, hasher, cfg.InvitationTokenKey)
+			access.SetInvitationSendLimiter(invitationSendLimiter(store))
+			accept := application.NewInvitationAcceptance(store, hasher, cfg.InvitationTokenKey, invitationAcceptLimiter(store))
 			var authHandler http.Handler
 			if settingsService != nil {
 				if operationLogs != nil {
@@ -144,6 +160,7 @@ func run() int {
 		return mailadapter.NewSMTPMailerFromSettingsWithTimeout(settings, cfg.SMTPTimeout)
 	}, runtimeMailer)
 	settingsService.SetProductionMode(cfg.Environment == "production")
+	settingsService.SetTestEmailLimiter(postgresStore)
 	settingsService.SetSystemIdentityProvider(identityService)
 	if err := settingsService.LoadRuntime(startupContext); err != nil {
 		log.Fatalf("email settings initialization failed: %v", err)

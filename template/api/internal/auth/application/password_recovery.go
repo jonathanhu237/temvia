@@ -12,11 +12,15 @@ const passwordResetSelectorBytes = domain.PasswordResetSelectorBytes
 
 type PasswordResetRequestInput struct {
 	Email string
+	// SourceIP is supplied by the trusted HTTP adapter, never by JSON input.
+	SourceIP string
 }
 
 type PasswordResetCompleteInput struct {
 	Token    string
 	Password string
+	// SourceIP is supplied by the trusted HTTP adapter, never by JSON input.
+	SourceIP string
 }
 
 // PasswordResetTargetStore is an optional audit seam. It returns only the
@@ -78,19 +82,22 @@ func (r *PasswordRecovery) Request(ctx context.Context, input PasswordResetReque
 	if err != nil {
 		return err
 	}
-	locale, err := r.mailLocale(ctx)
-	if err != nil {
-		return err
-	}
 	if r.limiter == nil || r.store == nil || r.random == nil {
 		return ErrDependencyUnavailable
 	}
-	allowed, err := r.limiter.AllowPasswordReset(ctx, email.Canonical)
+	// Check the source/object/resource buckets before reading mail settings or
+	// generating reset material. Unknown addresses still take the same path
+	// after this boundary, while rejected attempts have no reset side effect.
+	allowed, err := r.allowRequest(ctx, input.SourceIP, email.Canonical)
 	if err != nil {
 		return dependencyError(err)
 	}
 	if !allowed {
 		return ErrRateLimited
+	}
+	locale, err := r.mailLocale(ctx)
+	if err != nil {
+		return err
 	}
 
 	// This selector/HMAC work happens for both known and unknown addresses. The
@@ -116,6 +123,11 @@ func (r *PasswordRecovery) Complete(ctx context.Context, input PasswordResetComp
 }
 
 func (r *PasswordRecovery) CompleteWithTarget(ctx context.Context, input PasswordResetCompleteInput) (domain.User, error) {
+	if allowed, err := r.allowCompletion(ctx, input.SourceIP); err != nil {
+		return domain.User{}, dependencyError(err)
+	} else if !allowed {
+		return domain.User{}, ErrRateLimited
+	}
 	selector, verifierDigest, ok := domain.ParsePasswordResetToken(input.Token)
 	if !ok {
 		return domain.User{}, ErrInvalidPasswordResetToken
@@ -169,6 +181,25 @@ func (r *PasswordRecovery) CompleteWithTarget(ctx context.Context, input Passwor
 		return domain.User{}, dependencyError(err)
 	}
 	return target, nil
+}
+
+func (r *PasswordRecovery) allowRequest(ctx context.Context, sourceIP, canonicalEmail string) (bool, error) {
+	if sourceAware, ok := r.limiter.(SourceAwarePasswordResetLimiter); ok {
+		return sourceAware.AllowPasswordResetFromSource(ctx, sourceIP, canonicalEmail)
+	}
+	if r.limiter == nil {
+		return false, ErrDependencyUnavailable
+	}
+	return r.limiter.AllowPasswordReset(ctx, canonicalEmail)
+}
+
+func (r *PasswordRecovery) allowCompletion(ctx context.Context, sourceIP string) (bool, error) {
+	if sourceAware, ok := r.limiter.(SourceAwarePasswordResetLimiter); ok {
+		return sourceAware.AllowPasswordResetComplete(ctx, sourceIP)
+	}
+	// Existing embedders may not yet expose a completion bucket. The production
+	// PostgreSQL store does, while compatibility fakes retain the old seam.
+	return true, nil
 }
 
 func (r *PasswordRecovery) mailLocale(ctx context.Context) (domain.Locale, error) {

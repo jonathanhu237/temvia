@@ -25,17 +25,24 @@ type SetupInput struct {
 	Name     string
 	Email    string
 	Password string
+	// SourceIP is supplied by the trusted HTTP adapter, never by JSON input.
+	SourceIP string
 }
 
 type Setup struct {
-	store  SetupStore
-	hasher PasswordHasher
-	random RandomSource
-	ttl    time.Duration
+	store   SetupStore
+	hasher  PasswordHasher
+	random  RandomSource
+	ttl     time.Duration
+	limiter SetupLimiter
 }
 
-func NewSetup(store SetupStore, hasher PasswordHasher, random RandomSource, ttl time.Duration) *Setup {
-	return &Setup{store: store, hasher: hasher, random: random, ttl: ttl}
+func NewSetup(store SetupStore, hasher PasswordHasher, random RandomSource, ttl time.Duration, limiters ...SetupLimiter) *Setup {
+	var limiter SetupLimiter
+	if len(limiters) > 0 {
+		limiter = limiters[0]
+	}
+	return &Setup{store: store, hasher: hasher, random: random, ttl: ttl, limiter: limiter}
 }
 
 func (s *Setup) Status(ctx context.Context) (SetupStatus, error) {
@@ -81,6 +88,15 @@ func (s *Setup) Complete(ctx context.Context, input SetupInput) (domain.User, er
 	}
 	if complete {
 		return domain.User{}, ErrSetupComplete
+	}
+	if s.limiter != nil {
+		allowed, err := s.limiter.AllowSetup(ctx, input.SourceIP)
+		if err != nil {
+			return domain.User{}, dependencyError(err)
+		}
+		if !allowed {
+			return domain.User{}, ErrRateLimited
+		}
 	}
 	if !isUnpaddedBase64URL(input.Token, setupTokenBytes) {
 		return domain.User{}, ErrInvalidSetupToken

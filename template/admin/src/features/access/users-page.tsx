@@ -11,7 +11,7 @@ import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field
 import { Input } from '@/components/ui/input'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import type { Role } from '@/shared/api/contracts'
-import { isForbidden } from '@/shared/api/problems'
+import { isForbidden, translateRateLimitedProblemWithFields } from '@/shared/api/problems'
 import { DataTable, SortableHeader } from './data-table'
 import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { PageNavigation, RoleBadges, canAssignRole, formatDate, type AccessUser } from './access-components'
@@ -274,7 +274,7 @@ export function InvitationForm({ api, roles, open, onDone, assignableRoleIDs }: 
     },
     onError: (error, submission) => {
       if (!submission || !updateDraft({ submitting: false }, submission)) return
-      if (!(error instanceof Error && (error.message === 'validation' || error.message === 'stale draft'))) notifyRequestError(error, t, { title: t('sendInvitation') })
+      if (!(error instanceof Error && (error.message === 'validation' || error.message === 'stale draft'))) notifyRequestError(error, t, { title: t('sendInvitation'), description: translateRateLimitedProblemWithFields(error, t, 'invitationSendRateLimited') })
     },
   })
   return <>

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +20,9 @@ import (
 	postgresadapter "example.com/temvia/api/internal/auth/adapter/postgres"
 	"example.com/temvia/api/internal/auth/application"
 	"example.com/temvia/api/internal/auth/domain"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"example.com/temvia/api/internal/config"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // TestOnlineHTTPIntegration exercises the real authentication application,
@@ -26,21 +30,7 @@ import (
 // handlers and operation log persistence. It is gated so the normal unit suite
 // stays self-contained; run it with a disposable migrated database.
 func TestOnlineHTTPIntegration(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("isolated PostgreSQL is required")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := db.PingContext(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db, ctx := openHTTPIntegrationDatabase(t)
 
 	cfg := testConfig()
 	cfg.SessionIdleTimeout = time.Hour
@@ -159,25 +149,10 @@ func TestOnlineHTTPIntegration(t *testing.T) {
 }
 
 func TestOnlineHTTPNoTouchIntegration(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("isolated PostgreSQL is required")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		t.Fatal(err)
-	}
+	db, ctx := openHTTPIntegrationDatabase(t)
 	accounts := postgresadapter.NewStore(db)
 	hasher, err := password.NewHasher(2)
 	if err != nil {
-		_ = db.Close()
 		t.Fatal(err)
 	}
 	fixture := createOnlineHTTPFixture(t, ctx, db, hasher)
@@ -203,7 +178,6 @@ func TestOnlineHTTPNoTouchIntegration(t *testing.T) {
 		if err := cleanupSessionCookies(longSessions, longCookies); err != nil {
 			t.Errorf("clean no-touch observer sessions: %v", err)
 		}
-		_ = db.Close()
 	})
 
 	shortAuth := application.NewAuthentication(accounts, hasher, shortSessions, shortSessions, application.CryptoRandom(), domain.DefaultPermissionCatalog())
@@ -261,25 +235,10 @@ func TestOnlineHTTPNoTouchIntegration(t *testing.T) {
 }
 
 func TestOnlineHTTPConcurrentKickRejectsStaleLogin(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("isolated PostgreSQL is required")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		t.Fatal(err)
-	}
+	db, ctx := openHTTPIntegrationDatabase(t)
 	accounts := postgresadapter.NewStore(db)
 	hasher, err := password.NewHasher(2)
 	if err != nil {
-		_ = db.Close()
 		t.Fatal(err)
 	}
 	fixture := createOnlineHTTPFixture(t, ctx, db, hasher)
@@ -297,7 +256,6 @@ func TestOnlineHTTPConcurrentKickRejectsStaleLogin(t *testing.T) {
 		if err := cleanupOnlineHTTPFixture(db, sessions, fixture, sessionCookies); err != nil {
 			t.Errorf("clean concurrent online HTTP fixture: %v", err)
 		}
-		_ = db.Close()
 	})
 
 	managerAuth := application.NewAuthentication(accounts, hasher, sessions, sessions, application.CryptoRandom(), domain.DefaultPermissionCatalog())
@@ -559,4 +517,635 @@ func findOnlineHTTPUserOptional(users []application.OnlineUser, id string) *appl
 		}
 	}
 	return nil
+}
+
+// TestAbuseProtectionHTTPIntegration keeps the acceptance boundary at a real
+// HTTP handler, real application services, and PostgreSQL. Mail delivery is a
+// controlled substitute, but password reset and invitation work still goes
+// through the durable outbox and token transactions.
+func TestAbuseProtectionHTTPIntegration(t *testing.T) {
+	db, ctx := openHTTPIntegrationDatabase(t)
+
+	key := []byte(strings.Repeat("k", 32))
+	invitationKey := []byte(strings.Repeat("i", 32))
+	cfg := testConfig()
+	cfg.TrustedProxyCIDRs = []string{"10.0.0.0/8"}
+	cfg.SetupLinkTTL = time.Hour
+	cfg.PasswordResetTokenKey = key
+	cfg.InvitationTokenKey = invitationKey
+	cfg.PasswordResetLinkTTL = time.Hour
+	cfg.InvitationLinkTTL = 24 * time.Hour
+	cfg.PasswordResetResponseMin = 0
+	cfg.MailOutboxNotificationTTL = 24 * time.Hour
+	cfg.SessionIdleTimeout = time.Hour
+	cfg.SessionAbsoluteTimeout = 2 * time.Hour
+	cfg.LoginGlobalCapacity = 100
+	cfg.LoginGlobalRefillInterval = time.Hour
+	cfg.LoginEmailCapacity = 100
+	cfg.LoginEmailRefillInterval = time.Hour
+	cfg.LoginIPCapacity = 2
+	cfg.LoginIPRefillInterval = time.Hour
+	cfg.PasswordResetGlobalCapacity = 100
+	cfg.PasswordResetGlobalRefill = time.Hour
+	cfg.PasswordResetEmailCapacity = 1
+	cfg.PasswordResetEmailRefill = time.Hour
+	cfg.PasswordResetIPCapacity = 100
+	cfg.PasswordResetIPRefill = time.Hour
+	cfg.PasswordResetCompleteIPCapacity = 1
+	cfg.PasswordResetCompleteIPRefill = time.Hour
+	cfg.InvitationAcceptIPCapacity = 1
+	cfg.InvitationAcceptIPRefill = time.Hour
+	cfg.SetupIPCapacity = 1
+	cfg.SetupIPRefill = time.Hour
+	cfg.InvitationSendActorCapacity = 2
+	cfg.InvitationSendActorRefill = time.Hour
+	cfg.InvitationSendRecipientCapacity = 1
+	cfg.InvitationSendRecipientRefill = time.Hour
+	cfg.TestEmailGlobalCapacity = 10
+	cfg.TestEmailGlobalRefill = time.Hour
+	cfg.TestEmailActorCapacity = 2
+	cfg.TestEmailActorRefill = time.Hour
+	cfg.TestEmailRecipientCapacity = 1
+	cfg.TestEmailRecipientRefill = time.Hour
+
+	hasher, err := password.NewHasher(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := postgresadapter.NewStore(db, cfg)
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	managerEmail := "abuse-manager-" + suffix + "@example.com"
+	otherEmail := "abuse-other-" + suffix + "@example.com"
+	limitedEmail := "abuse-limited-" + suffix + "@example.com"
+	managerPassword := "Manager1!x"
+	otherPassword := "Other1!x"
+	insertUser := func(name, email, password string) string {
+		t.Helper()
+		hash, hashErr := hasher.Hash(ctx, password)
+		if hashErr != nil {
+			t.Fatal(hashErr)
+		}
+		var id string
+		if insertErr := db.QueryRowContext(ctx, `
+			INSERT INTO auth_users (name, email, email_canonical, password_hash)
+			VALUES ($1, $2, $2, $3) RETURNING id::text`, name, email, hash).Scan(&id); insertErr != nil {
+			t.Fatal(insertErr)
+		}
+		return id
+	}
+	managerID := insertUser("Abuse Manager", managerEmail, managerPassword)
+	otherID := insertUser("Abuse Other", otherEmail, otherPassword)
+	limitedID := insertUser("Abuse Limited", limitedEmail, "Limited1!x")
+	var noPermissionRoleID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO auth_roles (name, name_canonical, description)
+		VALUES ($1, $2, 'Integration role') RETURNING id::text`, "Abuse Reader "+suffix, "abuse reader "+suffix).Scan(&noPermissionRoleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO auth_role_permissions (role_id, permission_key) VALUES ($1::uuid, 'users.read')`, noPermissionRoleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO auth_user_roles (user_id, role_id) VALUES ($1::uuid, $2::uuid)`, limitedID, noPermissionRoleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO auth_user_roles (user_id, role_id) SELECT $1::uuid, id FROM auth_roles WHERE system_key = 'super_admin'`, managerID); err != nil {
+		t.Fatal(err)
+	}
+	var superRoleID string
+	if err := db.QueryRowContext(ctx, `SELECT id::text FROM auth_roles WHERE system_key = 'super_admin'`).Scan(&superRoleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO auth_email_settings
+			(singleton, smtp_host, smtp_port, smtp_security, smtp_username, smtp_password_ciphertext, from_address, from_name, default_locale, revision)
+		VALUES (true, 'smtp.example.test', 25, 'none', '', NULL, 'no-reply@example.test', 'Temvia', 'en', 1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	mailer := &abuseRecordingMailer{}
+	settings := application.NewSettingsManagement(store, nil, func(application.SMTPSettings) (application.Mailer, error) {
+		return mailer, nil
+	}, nil)
+	settings.SetTestEmailLimiter(store)
+	random := application.CryptoRandom()
+	setup := application.NewSetup(store, hasher, random, cfg.SetupLinkTTL, store)
+	auth := application.NewAuthentication(store, hasher, store, store, random, domain.DefaultPermissionCatalog())
+	recovery := application.NewPasswordRecovery(store, store, hasher, random, cfg.PasswordResetTokenKey, cfg.PasswordResetLinkTTL, cfg.MailOutboxNotificationTTL, 0, settings)
+	access := application.NewAccessManagementWithInvitations(store, store, domain.DefaultPermissionCatalog(), cfg.InvitationTokenKey, random, cfg.InvitationLinkTTL, settings)
+	access.SetInvitationSendLimiter(store)
+	acceptance := application.NewInvitationAcceptance(store, hasher, cfg.InvitationTokenKey, store)
+	operations := application.NewOperationLogService(store)
+	handler := NewHandlerWithAccessAndOperationLog(setup, auth, cfg, recovery, access, acceptance, settings, operations)
+
+	// A trusted multi-hop chain with an attacker-controlled prefix produces one
+	// source identity in both the limiter and the operation history. Port
+	// changes do not create a fresh source bucket.
+	managerCookie := abuseHTTPLogin(t, handler, managerEmail, managerPassword, "10.0.0.2:1000", []string{"not-an-ip, 198.51.100.77, 10.0.0.3"})
+	badLogin := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/login", fmt.Sprintf(`{"email":%q,"password":"wrong-password"}`, managerEmail), nil, "10.0.0.2:1001", []string{"198.51.100.77, 10.0.0.3"})
+	if badLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("bad login status = %d, body=%s", badLogin.Code, badLogin.Body.String())
+	}
+	blockedLogin := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/login", fmt.Sprintf(`{"email":%q,"password":%q}`, managerEmail, managerPassword), nil, "10.0.0.2:1002", []string{"198.51.100.77, 10.0.0.3"})
+	if blockedLogin.Code != http.StatusTooManyRequests {
+		t.Fatalf("source-exhausted login status = %d, body=%s", blockedLogin.Code, blockedLogin.Body.String())
+	}
+	spoofedLogin := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/login", fmt.Sprintf(`{"email":%q,"password":%q}`, managerEmail, managerPassword), nil, "198.51.100.88:1003", []string{"198.51.100.77"})
+	if spoofedLogin.Code != http.StatusOK {
+		t.Fatalf("untrusted forwarded login status = %d, body=%s", spoofedLogin.Code, spoofedLogin.Body.String())
+	}
+	var loginSource string
+	if err := db.QueryRowContext(ctx, `
+		SELECT source_ip FROM auth_operation_logs
+		WHERE action = 'auth.login' AND result = 'success' AND actor_user_id = $1::uuid AND source_ip = '198.51.100.77'
+		ORDER BY occurred_at DESC LIMIT 1`, managerID).Scan(&loginSource); err != nil {
+		t.Fatal(err)
+	}
+	if loginSource != "198.51.100.77" {
+		t.Fatalf("login operation source = %q, want limiter source 198.51.100.77", loginSource)
+	}
+	var spoofedSource string
+	if err := db.QueryRowContext(ctx, `
+		SELECT source_ip FROM auth_operation_logs
+		WHERE action = 'auth.login' AND result = 'success' AND actor_user_id = $1::uuid AND source_ip = '198.51.100.88'
+		ORDER BY occurred_at DESC LIMIT 1`, managerID).Scan(&spoofedSource); err != nil {
+		t.Fatal(err)
+	}
+	if spoofedSource != "198.51.100.88" {
+		t.Fatalf("untrusted forwarded operation source = %q, want peer 198.51.100.88", spoofedSource)
+	}
+
+	limitedCookie := abuseHTTPLogin(t, handler, limitedEmail, "Limited1!x", "198.51.100.90:2000", nil)
+	knownReset := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/password-reset/request", fmt.Sprintf(`{"email":%q}`, strings.ToUpper(managerEmail)), nil, "198.51.100.101:3000", nil)
+	if knownReset.Code != http.StatusAccepted {
+		t.Fatalf("known reset status = %d, body=%s", knownReset.Code, knownReset.Body.String())
+	}
+	unknownEmail := "abuse-unknown-" + suffix + "@example.com"
+	unknownReset := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/password-reset/request", fmt.Sprintf(`{"email":%q}`, unknownEmail), nil, "198.51.100.102:3000", nil)
+	if unknownReset.Code != http.StatusAccepted {
+		t.Fatalf("unknown reset status = %d, body=%s", unknownReset.Code, unknownReset.Body.String())
+	}
+	var resetSelector []byte
+	if err := db.QueryRowContext(ctx, `SELECT selector FROM auth_password_resets WHERE user_id = $1::uuid`, managerID).Scan(&resetSelector); err != nil {
+		t.Fatal(err)
+	}
+	var resetOutboxCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_mail_outbox WHERE user_id = $1::uuid AND kind = 'password_reset'`, managerID).Scan(&resetOutboxCount); err != nil {
+		t.Fatal(err)
+	}
+	repeatedKnown := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/password-reset/request", fmt.Sprintf(`{"email":%q}`, managerEmail), nil, "198.51.100.103:3000", nil)
+	if repeatedKnown.Code != http.StatusTooManyRequests {
+		t.Fatalf("repeated known reset status = %d, body=%s", repeatedKnown.Code, repeatedKnown.Body.String())
+	}
+	repeatedUnknown := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/password-reset/request", fmt.Sprintf(`{"email":%q}`, unknownEmail), nil, "198.51.100.104:3000", nil)
+	if repeatedUnknown.Code != http.StatusTooManyRequests {
+		t.Fatalf("repeated unknown reset status = %d, body=%s", repeatedUnknown.Code, repeatedUnknown.Body.String())
+	}
+	var resetSelectorAfter []byte
+	var resetOutboxCountAfter int
+	if err := db.QueryRowContext(ctx, `SELECT selector FROM auth_password_resets WHERE user_id = $1::uuid`, managerID).Scan(&resetSelectorAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_mail_outbox WHERE user_id = $1::uuid AND kind = 'password_reset'`, managerID).Scan(&resetOutboxCountAfter); err != nil {
+		t.Fatal(err)
+	}
+	if string(resetSelectorAfter) != string(resetSelector) || resetOutboxCountAfter != resetOutboxCount {
+		t.Fatalf("limited reset changed durable state: selector=%x/%x outbox=%d/%d", resetSelectorAfter, resetSelector, resetOutboxCountAfter, resetOutboxCount)
+	}
+
+	otherReset := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/password-reset/request", fmt.Sprintf(`{"email":%q}`, otherEmail), nil, "198.51.100.105:3000", nil)
+	if otherReset.Code != http.StatusAccepted {
+		t.Fatalf("other reset status = %d, body=%s", otherReset.Code, otherReset.Body.String())
+	}
+	var otherSelector []byte
+	if err := db.QueryRowContext(ctx, `SELECT selector FROM auth_password_resets WHERE user_id = $1::uuid`, otherID).Scan(&otherSelector); err != nil {
+		t.Fatal(err)
+	}
+	otherToken, err := domain.NewPasswordResetToken(cfg.PasswordResetTokenKey, otherSelector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/password-reset/complete", fmt.Sprintf(`{"token":%q,"password":"NewOther1!x"}`, otherToken), nil, "198.51.100.106:4000", nil)
+	if completed.Code != http.StatusNoContent || len(completed.Result().Cookies()) != 1 {
+		t.Fatalf("password completion = %d, cookies=%#v, body=%s", completed.Code, completed.Result().Cookies(), completed.Body.String())
+	}
+	blockedCompletion := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/password-reset/complete", fmt.Sprintf(`{"token":%q,"password":"NewOther1!x"}`, otherToken), nil, "198.51.100.106:4001", nil)
+	if blockedCompletion.Code != http.StatusTooManyRequests {
+		t.Fatalf("source-exhausted completion = %d, body=%s", blockedCompletion.Code, blockedCompletion.Body.String())
+	}
+	var otherVersion int64
+	if err := db.QueryRowContext(ctx, `SELECT auth_version FROM auth_users WHERE id = $1::uuid`, otherID).Scan(&otherVersion); err != nil {
+		t.Fatal(err)
+	}
+	if otherVersion != 2 {
+		t.Fatalf("password reset auth_version = %d, want 2", otherVersion)
+	}
+
+	roleID := superRoleID
+	invitePayload := func(name, email string) string {
+		return fmt.Sprintf(`{"name":%q,"email":%q,"roleIds":[%q]}`, name, email, roleID)
+	}
+	unauthorizedInvite := abuseHTTPRequest(handler, http.MethodPost, "/api/user-invitations", invitePayload("Unauthorized", "abuse-unauthorized-"+suffix+"@example.com"), limitedCookie, "198.51.100.90:2001", nil)
+	if unauthorizedInvite.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized invitation status = %d, body=%s", unauthorizedInvite.Code, unauthorizedInvite.Body.String())
+	}
+	inviteAEmail := "abuse-invite-a-" + suffix + "@example.com"
+	createdA := abuseHTTPRequest(handler, http.MethodPost, "/api/user-invitations", invitePayload("Invite A", inviteAEmail), managerCookie, "198.51.100.110:5000", nil)
+	if createdA.Code != http.StatusCreated {
+		t.Fatalf("create invitation A status = %d, body=%s", createdA.Code, createdA.Body.String())
+	}
+	var inviteAID string
+	var inviteASelector []byte
+	if err := db.QueryRowContext(ctx, `SELECT id::text, selector FROM auth_user_invitations WHERE email_canonical = $1`, inviteAEmail).Scan(&inviteAID, &inviteASelector); err != nil {
+		t.Fatal(err)
+	}
+	var inviteAOutbox int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_mail_outbox WHERE invitation_id = $1::uuid`, inviteAID).Scan(&inviteAOutbox); err != nil {
+		t.Fatal(err)
+	}
+	resentA := abuseHTTPRequest(handler, http.MethodPost, "/api/user-invitations/"+inviteAID+"/resend", ``, managerCookie, "198.51.100.110:5001", nil)
+	if resentA.Code != http.StatusTooManyRequests {
+		t.Fatalf("limited invitation resend status = %d, body=%s", resentA.Code, resentA.Body.String())
+	}
+	var inviteASelectorAfter []byte
+	var inviteAOutboxAfter int
+	if err := db.QueryRowContext(ctx, `SELECT selector FROM auth_user_invitations WHERE id = $1::uuid`, inviteAID).Scan(&inviteASelectorAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_mail_outbox WHERE invitation_id = $1::uuid`, inviteAID).Scan(&inviteAOutboxAfter); err != nil {
+		t.Fatal(err)
+	}
+	if string(inviteASelectorAfter) != string(inviteASelector) || inviteAOutboxAfter != inviteAOutbox {
+		t.Fatalf("limited resend changed invitation state: selector=%x/%x outbox=%d/%d", inviteASelectorAfter, inviteASelector, inviteAOutboxAfter, inviteAOutbox)
+	}
+	inviteBEmail := "abuse-invite-b-" + suffix + "@example.com"
+	createdB := abuseHTTPRequest(handler, http.MethodPost, "/api/user-invitations", invitePayload("Invite B", inviteBEmail), managerCookie, "198.51.100.110:5002", nil)
+	if createdB.Code != http.StatusCreated {
+		t.Fatalf("create invitation B after recipient denial status = %d, body=%s", createdB.Code, createdB.Body.String())
+	}
+	var inviteBID string
+	var inviteBSelector []byte
+	if err := db.QueryRowContext(ctx, `SELECT id::text, selector FROM auth_user_invitations WHERE email_canonical = $1`, inviteBEmail).Scan(&inviteBID, &inviteBSelector); err != nil {
+		t.Fatal(err)
+	}
+	inviteCEmail := "abuse-invite-c-" + suffix + "@example.com"
+	blockedInvite := abuseHTTPRequest(handler, http.MethodPost, "/api/user-invitations", invitePayload("Invite C", inviteCEmail), managerCookie, "198.51.100.110:5003", nil)
+	if blockedInvite.Code != http.StatusTooManyRequests {
+		t.Fatalf("actor-exhausted invitation status = %d, body=%s", blockedInvite.Code, blockedInvite.Body.String())
+	}
+	var inviteCCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_user_invitations WHERE email_canonical = $1`, inviteCEmail).Scan(&inviteCCount); err != nil {
+		t.Fatal(err)
+	}
+	if inviteCCount != 0 {
+		t.Fatalf("blocked invitation created %d rows", inviteCCount)
+	}
+	inviteToken, err := domain.NewInvitationToken(cfg.InvitationTokenKey, inviteBSelector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/invitations/accept", fmt.Sprintf(`{"token":%q,"password":"Invitee1!x"}`, inviteToken), nil, "198.51.100.120:6000", nil)
+	if accepted.Code != http.StatusNoContent {
+		t.Fatalf("invitation acceptance status = %d, body=%s", accepted.Code, accepted.Body.String())
+	}
+	blockedAccepted := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/invitations/accept", fmt.Sprintf(`{"token":%q,"password":"Invitee1!x"}`, inviteToken), nil, "198.51.100.120:6001", nil)
+	if blockedAccepted.Code != http.StatusTooManyRequests {
+		t.Fatalf("source-exhausted invitation acceptance = %d, body=%s", blockedAccepted.Code, blockedAccepted.Body.String())
+	}
+	var acceptedUsers int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_users WHERE email_canonical = $1`, inviteBEmail).Scan(&acceptedUsers); err != nil {
+		t.Fatal(err)
+	}
+	if acceptedUsers != 1 {
+		t.Fatalf("accepted invitation created %d users, want one", acceptedUsers)
+	}
+
+	testPayload := func(recipient string) string {
+		return fmt.Sprintf(`{"host":"smtp.example.test","port":25,"security":"none","username":"","fromAddress":"no-reply@example.test","fromName":"Temvia","defaultLocale":"en","recipient":%q}`, recipient)
+	}
+	unauthorizedTest := abuseHTTPRequest(handler, http.MethodPost, "/api/settings/email/test", testPayload("abuse-no-permission-"+suffix+"@example.com"), limitedCookie, "198.51.100.90:2002", nil)
+	if unauthorizedTest.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized test mail status = %d, body=%s", unauthorizedTest.Code, unauthorizedTest.Body.String())
+	}
+	initialMailCount := mailer.Count()
+	if initialMailCount != 0 {
+		t.Fatalf("unauthorized test mail sent %d messages", initialMailCount)
+	}
+	testA := "abuse-test-a-" + suffix + "@example.com"
+	allowedTest := abuseHTTPRequest(handler, http.MethodPost, "/api/settings/email/test", testPayload(testA), managerCookie, "198.51.100.110:7000", nil)
+	if allowedTest.Code != http.StatusAccepted || mailer.Count() != 1 {
+		t.Fatalf("first test mail = %d, count=%d, body=%s", allowedTest.Code, mailer.Count(), allowedTest.Body.String())
+	}
+	limitedTest := abuseHTTPRequest(handler, http.MethodPost, "/api/settings/email/test", testPayload(testA), managerCookie, "198.51.100.110:7001", nil)
+	if limitedTest.Code != http.StatusTooManyRequests || mailer.Count() != 1 {
+		t.Fatalf("recipient-limited test mail = %d, count=%d, body=%s", limitedTest.Code, mailer.Count(), limitedTest.Body.String())
+	}
+	testB := "abuse-test-b-" + suffix + "@example.com"
+	allowedOtherTest := abuseHTTPRequest(handler, http.MethodPost, "/api/settings/email/test", testPayload(testB), managerCookie, "198.51.100.110:7002", nil)
+	if allowedOtherTest.Code != http.StatusAccepted || mailer.Count() != 2 {
+		t.Fatalf("second actor test mail = %d, count=%d, body=%s", allowedOtherTest.Code, mailer.Count(), allowedOtherTest.Body.String())
+	}
+	blockedActorTest := abuseHTTPRequest(handler, http.MethodPost, "/api/settings/email/test", testPayload("abuse-test-c-"+suffix+"@example.com"), managerCookie, "198.51.100.110:7003", nil)
+	if blockedActorTest.Code != http.StatusTooManyRequests || mailer.Count() != 2 {
+		t.Fatalf("actor-limited test mail = %d, count=%d, body=%s", blockedActorTest.Code, mailer.Count(), blockedActorTest.Body.String())
+	}
+
+	// The authenticated account used for the permission checks remains valid;
+	// the password reset above targeted a different account and the rejected
+	// mail actions did not revoke or mutate this session.
+	if response := abuseHTTPRequest(handler, http.MethodGet, "/api/auth/me", ``, managerCookie, "198.51.100.110:7004", nil); response.Code != http.StatusOK {
+		t.Fatalf("manager session after rejected actions = %d, body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestAbuseProtectionSetupHTTPIntegration(t *testing.T) {
+	db, ctx := openHTTPIntegrationDatabase(t)
+	if _, err := db.ExecContext(ctx, `UPDATE auth_setup SET token_digest = NULL, token_expires_at = NULL, completed_at = NULL WHERE singleton = true`); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig()
+	cfg.SetupLinkTTL = time.Hour
+	cfg.SetupIPCapacity = 1
+	cfg.SetupIPRefill = time.Hour
+	cfg.SessionIdleTimeout = time.Hour
+	cfg.SessionAbsoluteTimeout = 2 * time.Hour
+	store := postgresadapter.NewStore(db, cfg)
+	hasher, err := password.NewHasher(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	random := application.CryptoRandom()
+	setup := application.NewSetup(store, hasher, random, cfg.SetupLinkTTL, store)
+	auth := application.NewAuthentication(store, hasher, store, store, random, domain.DefaultPermissionCatalog())
+	handler := NewHandler(setup, auth, cfg)
+	token, required, err := setup.IssueStartupToken(ctx)
+	if err != nil || !required || token == "" {
+		t.Fatalf("IssueStartupToken() = %q, %t, %v", token, required, err)
+	}
+	invalid := abuseHTTPRequest(handler, http.MethodPost, "/api/setup", `{"token":"invalid","name":"Setup User","email":"setup-abuse@example.com","password":"Setup1!x"}`, nil, "198.51.100.220:8000", nil)
+	if invalid.Code != http.StatusForbidden {
+		t.Fatalf("invalid setup token status = %d, body=%s", invalid.Code, invalid.Body.String())
+	}
+	limited := abuseHTTPRequest(handler, http.MethodPost, "/api/setup", fmt.Sprintf(`{"token":%q,"name":"Setup User","email":"setup-abuse@example.com","password":"Setup1!x"}`, token), nil, "198.51.100.220:8001", nil)
+	if limited.Code != http.StatusTooManyRequests {
+		t.Fatalf("source-limited setup status = %d, body=%s", limited.Code, limited.Body.String())
+	}
+	allowed := abuseHTTPRequest(handler, http.MethodPost, "/api/setup", fmt.Sprintf(`{"token":%q,"name":"Setup User","email":"setup-abuse@example.com","password":"Setup1!x"}`, token), nil, "198.51.100.221:8000", nil)
+	if allowed.Code != http.StatusCreated {
+		t.Fatalf("setup after source change status = %d, body=%s", allowed.Code, allowed.Body.String())
+	}
+	var users int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_users WHERE email_canonical = 'setup-abuse@example.com'`).Scan(&users); err != nil {
+		t.Fatal(err)
+	}
+	if users != 1 {
+		t.Fatalf("setup created %d users, want one", users)
+	}
+}
+
+type abuseRecordingMailer struct {
+	mu       sync.Mutex
+	messages []application.OutgoingMail
+}
+
+func (m *abuseRecordingMailer) Send(_ context.Context, message application.OutgoingMail) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.messages = append(m.messages, message)
+	return nil
+}
+
+func (m *abuseRecordingMailer) Count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.messages)
+}
+
+func abuseHTTPRequest(handler http.Handler, method, path, body string, cookie *http.Cookie, remoteAddr string, forwarded []string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.RemoteAddr = remoteAddr
+	request.Header.Set("Origin", testConfig().Origin)
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	for _, value := range forwarded {
+		request.Header.Add("X-Forwarded-For", value)
+	}
+	if cookie != nil {
+		request.AddCookie(cookie)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func abuseHTTPLogin(t *testing.T, handler http.Handler, email, password, remoteAddr string, forwarded []string) *http.Cookie {
+	t.Helper()
+	response := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/login", fmt.Sprintf(`{"email":%q,"password":%q}`, email, password), nil, remoteAddr, forwarded)
+	if response.Code != http.StatusOK {
+		t.Fatalf("login %s status = %d, body=%s", email, response.Code, response.Body.String())
+	}
+	return sessionCookieFromResponse(t, response)
+}
+
+// openHTTPIntegrationDatabase gives each HTTP integration test its own schema. The
+// other integration packages intentionally use the migrated public schema, so
+// resetting that schema here would delete their users, roles, and singleton
+// settings while their tests are running. Real migrations initialize this
+// schema, and the application pool is restricted to it.
+func openHTTPIntegrationDatabase(t *testing.T) (*sql.DB, context.Context) {
+	t.Helper()
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	t.Cleanup(cancel)
+
+	admin, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin.SetMaxOpenConns(4)
+	admin.SetMaxIdleConns(2)
+	if err := admin.PingContext(ctx); err != nil {
+		_ = admin.Close()
+		t.Fatal(err)
+	}
+	schema := fmt.Sprintf("temvia_abuse_http_%d", time.Now().UnixNano())
+	quotedSchema := quoteAbuseSQLIdentifier(schema)
+	if _, err := admin.ExecContext(ctx, "CREATE SCHEMA "+quotedSchema); err != nil {
+		_ = admin.Close()
+		t.Fatal(err)
+	}
+
+	var appDB *sql.DB
+	t.Cleanup(func() {
+		if appDB != nil {
+			_ = appDB.Close()
+		}
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if _, err := admin.ExecContext(cleanupCtx, "DROP SCHEMA "+quotedSchema+" CASCADE"); err != nil {
+			t.Errorf("drop abuse HTTP schema %s: %v", schema, err)
+		}
+		_ = admin.Close()
+	})
+
+	// ParseConfig supports both PostgreSQL URLs and keyword DSNs. Set the
+	// search path on every pooled connection, without inheriting public tables.
+	connectionConfig, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectionConfig.RuntimeParams["search_path"] = schema
+	appDB = stdlib.OpenDB(*connectionConfig)
+	appDB.SetMaxOpenConns(32)
+	appDB.SetMaxIdleConns(16)
+	if err := appDB.PingContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Exercise the actual shipped migrations rather than maintaining a second
+	// schema, foreign-key list, and seed-data implementation in this fixture.
+	migrations, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "migrations", "*.up.sql"))
+	if err != nil || len(migrations) == 0 {
+		t.Fatalf("find HTTP fixture migrations: %v (found %d)", err, len(migrations))
+	}
+	var version int64
+	for _, migration := range migrations {
+		contents, readErr := os.ReadFile(migration)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if _, err := appDB.ExecContext(ctx, string(contents)); err != nil {
+			t.Fatalf("apply %s: %v", migration, err)
+		}
+		version, err = strconv.ParseInt(strings.SplitN(filepath.Base(migration), "_", 2)[0], 10, 64)
+		if err != nil {
+			t.Fatalf("migration version %s: %v", migration, err)
+		}
+	}
+	if _, err := appDB.ExecContext(ctx, `CREATE TABLE schema_migrations (version bigint PRIMARY KEY, dirty boolean NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appDB.ExecContext(ctx, `INSERT INTO schema_migrations (version, dirty) VALUES ($1, false)`, version); err != nil {
+		t.Fatal(err)
+	}
+	if err := postgresadapter.NewStore(appDB).CheckSchema(ctx); err != nil {
+		t.Fatalf("migrated schema check: %v", err)
+	}
+	return appDB, ctx
+}
+
+func quoteAbuseSQLIdentifier(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+}
+
+func loadDefaultAbuseConfig(t *testing.T) config.Config {
+	t.Helper()
+	cfg, err := config.Load(func(key string) string {
+		switch key {
+		case "PASSWORD_RESET_TOKEN_KEY", "INVITATION_TOKEN_KEY":
+			return strings.Repeat("A", 43)
+		case "POSTGRES_PASSWORD":
+			return "review"
+		default:
+			return ""
+		}
+	})
+	if err != nil {
+		t.Fatalf("load default abuse config: %v", err)
+	}
+	return cfg
+}
+
+// TestAbuseProtectionDefaultLoginHTTPIntegration exercises the production
+// defaults rather than the small quotas used by the focused acceptance test.
+// It demonstrates that shared-IP normal users can log in, a successful login
+// does not clear the source bucket, another source remains usable, and an
+// exhausted password-reset namespace is independent of login.
+func TestAbuseProtectionDefaultLoginHTTPIntegration(t *testing.T) {
+	db, ctx := openHTTPIntegrationDatabase(t)
+	cfg := loadDefaultAbuseConfig(t)
+	if cfg.LoginIPCapacity < 3 || cfg.LoginGlobalCapacity <= cfg.LoginIPCapacity {
+		t.Fatalf("default login relationship is not suitable for shared-IP use: global=%d ip=%d", cfg.LoginGlobalCapacity, cfg.LoginIPCapacity)
+	}
+	store := postgresadapter.NewStore(db, cfg)
+	hasher, err := password.NewHasher(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	users := []struct {
+		name     string
+		email    string
+		password string
+	}{
+		{name: "Default Shared A", email: "default-shared-a-" + suffix + "@example.com", password: "SharedA1!x"},
+		{name: "Default Shared B", email: "default-shared-b-" + suffix + "@example.com", password: "SharedB1!x"},
+		{name: "Default Other Source", email: "default-other-" + suffix + "@example.com", password: "Other1!x"},
+	}
+	for _, user := range users {
+		hash, hashErr := hasher.Hash(ctx, user.password)
+		if hashErr != nil {
+			t.Fatal(hashErr)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO auth_users (name, email, email_canonical, password_hash) VALUES ($1, $2, $2, $3)`, user.name, user.email, hash); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var superRoleID string
+	if err := db.QueryRowContext(ctx, `SELECT id::text FROM auth_roles WHERE system_key = 'super_admin'`).Scan(&superRoleID); err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range users {
+		if _, err := db.ExecContext(ctx, `INSERT INTO auth_user_roles (user_id, role_id) SELECT id, $1::uuid FROM auth_users WHERE email_canonical = $2`, superRoleID, user.email); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Exhausting a reset bucket must not consume the login namespace under the
+	// same production defaults. Unique recipients avoid the reset email bucket.
+	const resetSource = "198.51.100.250"
+	for i := 0; i < cfg.PasswordResetGlobalCapacity; i++ {
+		allowed, allowErr := store.AllowPasswordResetFromSource(ctx, resetSource, fmt.Sprintf("default-reset-%d-%s@example.com", i, suffix))
+		if allowErr != nil || !allowed {
+			t.Fatalf("default password-reset request %d = %t, %v", i+1, allowed, allowErr)
+		}
+	}
+	if allowed, allowErr := store.AllowPasswordResetFromSource(ctx, resetSource, "default-reset-final-"+suffix+"@example.com"); allowErr != nil || allowed {
+		t.Fatalf("default password-reset bucket after capacity = %t, %v", allowed, allowErr)
+	}
+
+	auth := application.NewAuthentication(store, hasher, store, store, application.CryptoRandom(), domain.DefaultPermissionCatalog())
+	handler := NewHandler(&setupFake{status: application.SetupComplete}, auth, cfg)
+	sharedSource := "198.51.100.240"
+	if response := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/login", fmt.Sprintf(`{"email":%q,"password":%q}`, users[0].email, users[0].password), nil, sharedSource+":9000", nil); response.Code != http.StatusOK {
+		t.Fatalf("first shared-IP login status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if response := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/login", fmt.Sprintf(`{"email":%q,"password":%q}`, users[1].email, users[1].password), nil, sharedSource+":9001", nil); response.Code != http.StatusOK {
+		t.Fatalf("second shared-IP login status = %d, body=%s", response.Code, response.Body.String())
+	}
+
+	// Consume exactly the remaining source capacity with unknown accounts. A
+	// successful login that reset the source bucket would make this loop fail
+	// to reach the source denial boundary.
+	for i := 0; i < cfg.LoginIPCapacity-2; i++ {
+		response := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/login", fmt.Sprintf(`{"email":"default-unknown-%d-%s@example.com","password":"wrong-password"}`, i, suffix), nil, sharedSource+fmt.Sprintf(":%d", 9100+i), nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("unknown shared-IP login %d status = %d, body=%s", i+1, response.Code, response.Body.String())
+		}
+	}
+	blocked := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/login", fmt.Sprintf(`{"email":%q,"password":%q}`, users[0].email, users[0].password), nil, sharedSource+":9200", nil)
+	if blocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("source-exhausted default login status = %d, body=%s", blocked.Code, blocked.Body.String())
+	}
+	otherSource := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/login", fmt.Sprintf(`{"email":%q,"password":%q}`, users[2].email, users[2].password), nil, "198.51.100.241:9200", nil)
+	if otherSource.Code != http.StatusOK {
+		t.Fatalf("independent-source default login status = %d, body=%s", otherSource.Code, otherSource.Body.String())
+	}
+	stillBlocked := abuseHTTPRequest(handler, http.MethodPost, "/api/auth/login", fmt.Sprintf(`{"email":%q,"password":%q}`, users[1].email, users[1].password), nil, sharedSource+":9201", nil)
+	if stillBlocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("successful other-source login cleared shared source bucket: status=%d body=%s", stillBlocked.Code, stillBlocked.Body.String())
+	}
 }

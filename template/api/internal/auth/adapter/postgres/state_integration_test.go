@@ -421,7 +421,7 @@ func TestStateIntegrationLimiterSerializesCreationWithResetAndCleanup(t *testing
 				if _, err := db.ExecContext(ctx, `
 					UPDATE auth_rate_limit_buckets
 					SET tokens = 0,
-						last_refill_at = clock_timestamp() - interval '2 seconds',
+						last_refill_at = clock_timestamp() - interval '5 hours',
 						expires_at = clock_timestamp() - interval '1 second'`); err != nil {
 					t.Fatal(err)
 				}
@@ -568,7 +568,7 @@ func TestStateIntegrationLimiterQuotasAtomicityRefillCleanupAndConcurrency(t *te
 	if allowed, err := store.AllowPasswordReset(ctx, "refill@example.com"); err != nil || allowed {
 		t.Fatalf("quota restored before expiry = %t, %v", allowed, err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE auth_rate_limit_buckets SET last_refill_at = clock_timestamp() - interval '2 seconds', expires_at = clock_timestamp() - interval '1 second' WHERE namespace = 'password-reset'`); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE auth_rate_limit_buckets SET last_refill_at = clock_timestamp() - interval '5 hours', expires_at = clock_timestamp() - interval '1 second' WHERE namespace = 'password-reset'`); err != nil {
 		t.Fatal(err)
 	}
 	if deleted, err := store.CleanupExpiredRateLimitBuckets(ctx, 100); err != nil || deleted == 0 {
@@ -638,6 +638,224 @@ func TestStateIntegrationLimiterQuotasAtomicityRefillCleanupAndConcurrency(t *te
 	}
 	if got := allowed.Load(); got != int32(cfg.LoginEmailCapacity) {
 		t.Fatalf("concurrent first-use email allows = %d, want %d", got, cfg.LoginEmailCapacity)
+	}
+}
+
+func TestStateIntegrationAbuseDimensionsAndRecovery(t *testing.T) {
+	db, ctx := openStateIntegrationDB(t)
+	defer db.Close()
+	if err := resetAuthState(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{
+		SessionIdleTimeout:              time.Hour,
+		SessionAbsoluteTimeout:          2 * time.Hour,
+		LoginGlobalCapacity:             100,
+		LoginGlobalRefillInterval:       time.Hour,
+		LoginEmailCapacity:              2,
+		LoginEmailRefillInterval:        time.Hour,
+		LoginIPCapacity:                 2,
+		LoginIPRefillInterval:           time.Hour,
+		PasswordResetGlobalCapacity:     100,
+		PasswordResetGlobalRefill:       time.Hour,
+		PasswordResetEmailCapacity:      2,
+		PasswordResetEmailRefill:        time.Hour,
+		PasswordResetIPCapacity:         2,
+		PasswordResetIPRefill:           time.Hour,
+		PasswordResetCompleteIPCapacity: 2,
+		PasswordResetCompleteIPRefill:   time.Hour,
+		InvitationAcceptIPCapacity:      2,
+		InvitationAcceptIPRefill:        time.Hour,
+		SetupIPCapacity:                 2,
+		SetupIPRefill:                   time.Hour,
+		InvitationSendActorCapacity:     2,
+		InvitationSendActorRefill:       time.Hour,
+		InvitationSendRecipientCapacity: 1,
+		InvitationSendRecipientRefill:   time.Hour,
+		TestEmailGlobalCapacity:         100,
+		TestEmailGlobalRefill:           time.Hour,
+		TestEmailActorCapacity:          2,
+		TestEmailActorRefill:            time.Hour,
+		TestEmailRecipientCapacity:      1,
+		TestEmailRecipientRefill:        time.Hour,
+	}
+	store := NewStore(db, cfg)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	if allowed, err := store.AllowLogin(ctx, "::ffff:198.51.100.1", "first@example.com"); err != nil || !allowed {
+		t.Fatalf("first mapped IPv4 login = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowLogin(ctx, "198.51.100.1", "first@example.com"); err != nil || !allowed {
+		t.Fatalf("equivalent IPv4 login = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowLogin(ctx, "198.51.100.1", "second@example.com"); err != nil || allowed {
+		t.Fatalf("same-source login after IP quota = %t, %v", allowed, err)
+	}
+	var deniedEmailBuckets int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_rate_limit_buckets WHERE namespace = 'login' AND bucket_kind = 'email' AND bucket_digest = $1::bytea`, rateLimitDigest("second@example.com")).Scan(&deniedEmailBuckets); err != nil {
+		t.Fatal(err)
+	}
+	if deniedEmailBuckets != 0 {
+		t.Fatalf("source-denied login created %d business buckets", deniedEmailBuckets)
+	}
+	if allowed, err := store.AllowLogin(ctx, "198.51.100.2", "first@example.com"); err != nil || allowed {
+		t.Fatalf("same-email login from another source after email quota = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowLogin(ctx, "2001:db8::1", "second@example.com"); err != nil || !allowed {
+		t.Fatalf("independent IPv6 login = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowPasswordResetFromSource(ctx, "198.51.100.1", "first@example.com"); err != nil || !allowed {
+		t.Fatalf("independent password-reset namespace = %t, %v", allowed, err)
+	}
+
+	if allowed, err := store.AllowInvitationSend(ctx, "actor-1", "recipient-a@example.com"); err != nil || !allowed {
+		t.Fatalf("first invitation send = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowInvitationSend(ctx, "actor-1", "recipient-a@example.com"); err != nil || allowed {
+		t.Fatalf("repeated invitation recipient = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowInvitationSend(ctx, "actor-1", "recipient-b@example.com"); err != nil || !allowed {
+		t.Fatalf("actor quota after recipient denial = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowInvitationSend(ctx, "actor-1", "recipient-c@example.com"); err != nil || allowed {
+		t.Fatalf("invitation actor quota = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowTestEmail(ctx, "actor-1", "recipient-a@example.com"); err != nil || !allowed {
+		t.Fatalf("first test email = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowTestEmail(ctx, "actor-1", "recipient-a@example.com"); err != nil || allowed {
+		t.Fatalf("repeated test recipient = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowTestEmail(ctx, "actor-1", "recipient-b@example.com"); err != nil || !allowed {
+		t.Fatalf("test actor after recipient denial = %t, %v", allowed, err)
+	}
+	if allowed, err := store.AllowTestEmail(ctx, "actor-1", "recipient-c@example.com"); err != nil || allowed {
+		t.Fatalf("test actor quota = %t, %v", allowed, err)
+	}
+
+	if _, err := db.ExecContext(ctx, `DELETE FROM auth_rate_limit_buckets`); err != nil {
+		t.Fatal(err)
+	}
+	concurrentCfg := cfg
+	concurrentCfg.LoginIPCapacity = 4
+	concurrentStore := NewStore(db, concurrentCfg)
+	const attempts = 24
+	var allowed atomic.Int32
+	errorsFromLimiter := make(chan error, attempts)
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	wait.Add(attempts)
+	for index := 0; index < attempts; index++ {
+		go func(index int) {
+			defer wait.Done()
+			<-start
+			ok, err := concurrentStore.AllowLogin(ctx, "198.51.100.200", fmt.Sprintf("concurrent-%d@example.com", index))
+			if err != nil {
+				errorsFromLimiter <- err
+			} else if ok {
+				allowed.Add(1)
+			}
+		}(index)
+	}
+	close(start)
+	wait.Wait()
+	close(errorsFromLimiter)
+	for err := range errorsFromLimiter {
+		t.Fatalf("concurrent source limiter error = %v", err)
+	}
+	if got := allowed.Load(); got != int32(concurrentCfg.LoginIPCapacity) {
+		t.Fatalf("concurrent source allows = %d, want %d", got, concurrentCfg.LoginIPCapacity)
+	}
+
+	if _, err := db.ExecContext(ctx, `DELETE FROM auth_rate_limit_buckets`); err != nil {
+		t.Fatal(err)
+	}
+	recoveryCfg := cfg
+	recoveryCfg.LoginIPCapacity = 1
+	recoveryCfg.LoginIPRefillInterval = 500 * time.Millisecond
+	recoveryStore := NewStore(db, recoveryCfg)
+	if allowed, err := recoveryStore.AllowLogin(ctx, "198.51.100.201", "recovery@example.com"); err != nil || !allowed {
+		t.Fatalf("recovery initial allow = %t, %v", allowed, err)
+	}
+	var before time.Time
+	if err := db.QueryRowContext(ctx, `SELECT last_refill_at FROM auth_rate_limit_buckets WHERE namespace = 'login' AND bucket_kind = 'ip' AND bucket_digest = $1::bytea`, rateLimitDigest("198.51.100.201")).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if allowed, err := recoveryStore.AllowLogin(ctx, "198.51.100.201", "recovery@example.com"); err != nil || allowed {
+			t.Fatalf("repeated recovery denial = %t, %v", allowed, err)
+		}
+	}
+	var after time.Time
+	if err := db.QueryRowContext(ctx, `SELECT last_refill_at FROM auth_rate_limit_buckets WHERE namespace = 'login' AND bucket_kind = 'ip' AND bucket_digest = $1::bytea`, rateLimitDigest("198.51.100.201")).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if !after.Equal(before) {
+		t.Fatalf("repeated denial moved last_refill_at from %s to %s", before, after)
+	}
+	time.Sleep(650 * time.Millisecond)
+	if allowed, err := recoveryStore.AllowLogin(ctx, "198.51.100.201", "recovery@example.com"); err != nil || !allowed {
+		t.Fatalf("recovery after refill interval = %t, %v", allowed, err)
+	}
+}
+
+func TestStateIntegrationLimiterUsesCurrentRetentionAfterConfigurationChange(t *testing.T) {
+	db, ctx := openStateIntegrationDB(t)
+	defer db.Close()
+	if err := resetAuthState(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	oldConfig := config.Config{
+		SessionIdleTimeout:          time.Hour,
+		SessionAbsoluteTimeout:      2 * time.Hour,
+		LoginGlobalCapacity:         10,
+		LoginGlobalRefillInterval:   time.Hour,
+		LoginEmailCapacity:          10,
+		LoginEmailRefillInterval:    time.Hour,
+		LoginIPCapacity:             1,
+		LoginIPRefillInterval:       100 * time.Millisecond,
+		PasswordResetGlobalCapacity: 10,
+		PasswordResetGlobalRefill:   time.Hour,
+		PasswordResetEmailCapacity:  10,
+		PasswordResetEmailRefill:    time.Hour,
+	}
+	oldStore := NewStore(db, oldConfig)
+	const source = "198.51.100.210"
+	if allowed, err := oldStore.AllowLogin(ctx, source, "change@example.com"); err != nil || !allowed {
+		t.Fatalf("initial configuration allow = %t, %v", allowed, err)
+	}
+	time.Sleep(250 * time.Millisecond)
+	newConfig := oldConfig
+	newConfig.LoginIPRefillInterval = time.Hour
+	newStore := NewStore(db, newConfig)
+	if deleted, err := newStore.CleanupExpiredRateLimitBuckets(ctx, 100); err != nil || deleted != 0 {
+		t.Fatalf("cleanup after lengthening interval = %d, %v", deleted, err)
+	}
+	if allowed, err := newStore.AllowLogin(ctx, source, "change@example.com"); err != nil || allowed {
+		t.Fatalf("state after lengthening interval = %t, %v", allowed, err)
+	}
+
+	if _, err := db.ExecContext(ctx, `DELETE FROM auth_rate_limit_buckets`); err != nil {
+		t.Fatal(err)
+	}
+	largeConfig := oldConfig
+	largeConfig.LoginIPCapacity = 5
+	largeConfig.LoginIPRefillInterval = time.Hour
+	largeStore := NewStore(db, largeConfig)
+	for i := 0; i < 4; i++ {
+		if allowed, err := largeStore.AllowLogin(ctx, source, fmt.Sprintf("clip-%d@example.com", i)); err != nil || !allowed {
+			t.Fatalf("large-capacity allow %d = %t, %v", i, allowed, err)
+		}
+	}
+	clippedConfig := largeConfig
+	clippedConfig.LoginIPCapacity = 1
+	clippedStore := NewStore(db, clippedConfig)
+	if allowed, err := clippedStore.AllowLogin(ctx, source, "clip-next@example.com"); err != nil || !allowed {
+		t.Fatalf("capacity-clipped allow = %t, %v", allowed, err)
+	}
+	if allowed, err := clippedStore.AllowLogin(ctx, source, "clip-final@example.com"); err != nil || allowed {
+		t.Fatalf("capacity-clipped second allow = %t, %v", allowed, err)
 	}
 }
 

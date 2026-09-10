@@ -146,6 +146,7 @@ type AccessManagement struct {
 	random        RandomSource
 	invitationTTL time.Duration
 	mailSettings  MailSettingsProvider
+	mailLimiter   InvitationSendLimiter
 }
 
 func NewAccessManagement(store AccessStore, principals PrincipalStore, catalog domain.PermissionCatalog) *AccessManagement {
@@ -164,6 +165,14 @@ func NewAccessManagementWithInvitations(store AccessStore, principals PrincipalS
 		manager.mailSettings = mailSettings[0]
 	}
 	return manager
+}
+
+// SetInvitationSendLimiter wires the authenticated invitation-send policy
+// without changing the constructor used by existing embedders.
+func (m *AccessManagement) SetInvitationSendLimiter(limiter InvitationSendLimiter) {
+	if m != nil {
+		m.mailLimiter = limiter
+	}
 }
 
 func (m *AccessManagement) SnapshotRole(ctx context.Context, actorID, roleID string) (domain.Role, error) {
@@ -524,14 +533,17 @@ func (m *AccessManagement) CreateInvitation(ctx context.Context, actorID string,
 	if err != nil {
 		return domain.Invitation{}, err
 	}
-	locale, err := m.defaultMailLocale(ctx)
-	if err != nil {
-		return domain.Invitation{}, err
-	}
 	if err := validateRoleIDs(input.RoleIDs); err != nil {
 		return domain.Invitation{}, err
 	}
 	if err := m.authorizeInvitationRoles(ctx, principal, input.RoleIDs); err != nil {
+		return domain.Invitation{}, err
+	}
+	if err := m.allowInvitationSend(ctx, principal.User.ID, email.Canonical); err != nil {
+		return domain.Invitation{}, err
+	}
+	locale, err := m.defaultMailLocale(ctx)
+	if err != nil {
 		return domain.Invitation{}, err
 	}
 	selector := make([]byte, 16)
@@ -618,12 +630,23 @@ func (m *AccessManagement) ResendInvitation(ctx context.Context, actorID, invita
 	if err := m.authorizeExistingInvitation(ctx, principal, invitationID); err != nil {
 		return domain.Invitation{}, err
 	}
+	if m.random == nil || len(m.invitationKey) != 32 || m.invitationTTL <= 0 {
+		return domain.Invitation{}, ErrDependencyUnavailable
+	}
+	existingInvitation, err := m.store.FindInvitation(ctx, invitationID)
+	if err != nil {
+		return domain.Invitation{}, normalizeAccessError(err)
+	}
+	email, err := domain.NewEmail(existingInvitation.Email)
+	if err != nil {
+		return domain.Invitation{}, ErrDependencyUnavailable
+	}
+	if err := m.allowInvitationSend(ctx, principal.User.ID, email.Canonical); err != nil {
+		return domain.Invitation{}, err
+	}
 	locale, err := m.defaultMailLocale(ctx)
 	if err != nil {
 		return domain.Invitation{}, err
-	}
-	if m.random == nil || len(m.invitationKey) != 32 || m.invitationTTL <= 0 {
-		return domain.Invitation{}, ErrDependencyUnavailable
 	}
 	selector := make([]byte, 16)
 	if err := m.random.Read(selector); err != nil {
@@ -655,12 +678,23 @@ func (m *AccessManagement) ResendInvitationWithSnapshot(ctx context.Context, act
 	if err := m.authorizeExistingInvitation(ctx, principal, invitationID); err != nil {
 		return domain.Invitation{}, domain.Invitation{}, err
 	}
+	if m.random == nil || len(m.invitationKey) != 32 || m.invitationTTL <= 0 {
+		return domain.Invitation{}, domain.Invitation{}, ErrDependencyUnavailable
+	}
+	existingInvitation, err := m.store.FindInvitation(ctx, invitationID)
+	if err != nil {
+		return domain.Invitation{}, domain.Invitation{}, normalizeAccessError(err)
+	}
+	email, err := domain.NewEmail(existingInvitation.Email)
+	if err != nil {
+		return domain.Invitation{}, domain.Invitation{}, ErrDependencyUnavailable
+	}
+	if err := m.allowInvitationSend(ctx, principal.User.ID, email.Canonical); err != nil {
+		return domain.Invitation{}, domain.Invitation{}, err
+	}
 	locale, err := m.defaultMailLocale(ctx)
 	if err != nil {
 		return domain.Invitation{}, domain.Invitation{}, err
-	}
-	if m.random == nil || len(m.invitationKey) != 32 || m.invitationTTL <= 0 {
-		return domain.Invitation{}, domain.Invitation{}, ErrDependencyUnavailable
 	}
 	selector := make([]byte, 16)
 	if err := m.random.Read(selector); err != nil {
@@ -771,6 +805,20 @@ func (m *AccessManagement) invitationManager(ctx context.Context, actorID string
 	return principal, nil
 }
 
+func (m *AccessManagement) allowInvitationSend(ctx context.Context, actorID, canonicalEmail string) error {
+	if m.mailLimiter == nil {
+		return nil
+	}
+	allowed, err := m.mailLimiter.AllowInvitationSend(ctx, actorID, canonicalEmail)
+	if err != nil {
+		return dependencyError(err)
+	}
+	if !allowed {
+		return ErrRateLimited
+	}
+	return nil
+}
+
 func (m *AccessManagement) defaultMailLocale(ctx context.Context) (domain.Locale, error) {
 	if m.mailSettings != nil {
 		if err := m.mailSettings.EnsureMailConfigured(ctx); err != nil {
@@ -848,17 +896,22 @@ func (m *AccessManagement) authorizeExistingInvitation(ctx context.Context, prin
 }
 
 type InvitationAcceptance struct {
-	store  AccessStore
-	hasher PasswordHasher
-	key    []byte
+	store   AccessStore
+	hasher  PasswordHasher
+	key     []byte
+	limiter InvitationAcceptLimiter
 }
 
 type InvitationTargetStore interface {
 	FindInvitationTarget(context.Context, []byte, []byte) (domain.Invitation, error)
 }
 
-func NewInvitationAcceptance(store AccessStore, hasher PasswordHasher, key []byte) *InvitationAcceptance {
-	return &InvitationAcceptance{store: store, hasher: hasher, key: append([]byte(nil), key...)}
+func NewInvitationAcceptance(store AccessStore, hasher PasswordHasher, key []byte, limiters ...InvitationAcceptLimiter) *InvitationAcceptance {
+	var limiter InvitationAcceptLimiter
+	if len(limiters) > 0 {
+		limiter = limiters[0]
+	}
+	return &InvitationAcceptance{store: store, hasher: hasher, key: append([]byte(nil), key...), limiter: limiter}
 }
 
 func (a *InvitationAcceptance) Complete(ctx context.Context, token, password string) error {
@@ -866,7 +919,32 @@ func (a *InvitationAcceptance) Complete(ctx context.Context, token, password str
 	return err
 }
 
+// CompleteWithSource is the source-aware anonymous acceptance path. The
+// legacy Complete methods remain available for small embedders that do not
+// expose an HTTP source identity.
+func (a *InvitationAcceptance) CompleteWithSource(ctx context.Context, sourceIP, token, password string) error {
+	_, err := a.completeWithTarget(ctx, sourceIP, token, password)
+	return err
+}
+
 func (a *InvitationAcceptance) CompleteWithTarget(ctx context.Context, token, password string) (domain.Invitation, error) {
+	return a.completeWithTarget(ctx, "", token, password)
+}
+
+func (a *InvitationAcceptance) CompleteWithTargetAndSource(ctx context.Context, sourceIP, token, password string) (domain.Invitation, error) {
+	return a.completeWithTarget(ctx, sourceIP, token, password)
+}
+
+func (a *InvitationAcceptance) completeWithTarget(ctx context.Context, sourceIP, token, password string) (domain.Invitation, error) {
+	if a.limiter != nil {
+		allowed, err := a.limiter.AllowInvitationAccept(ctx, sourceIP)
+		if err != nil {
+			return domain.Invitation{}, dependencyError(err)
+		}
+		if !allowed {
+			return domain.Invitation{}, ErrRateLimited
+		}
+	}
 	selector, digest, ok := domain.ParseInvitationToken(token)
 	if !ok {
 		return domain.Invitation{}, ErrInvitationInvalid

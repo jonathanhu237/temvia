@@ -21,6 +21,9 @@ func TestLoadDefaultsAndModes(t *testing.T) {
 	if c.ShutdownTimeout != 30*time.Second {
 		t.Fatalf("shutdown timeout = %s, want 30s", c.ShutdownTimeout)
 	}
+	if c.LoginGlobalCapacity != 60 || c.LoginIPCapacity != 30 || c.PasswordResetIPCapacity != 30 || c.SetupIPCapacity != 10 || c.TestEmailRecipientCapacity != 3 {
+		t.Fatalf("abuse-protection defaults = %#v", c)
+	}
 	values["SHUTDOWN_TIMEOUT"] = "7s"
 	c, err = Load(env(values))
 	if err != nil || c.ShutdownTimeout != 7*time.Second {
@@ -64,6 +67,10 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		"unsafe database user":         func(v map[string]string) { v["POSTGRES_USER"] = "user@example" },
 		"invalid invitation key":       func(v map[string]string) { v["INVITATION_TOKEN_KEY"] = "not-base64" },
 		"invitation ttl above maximum": func(v map[string]string) { v["INVITATION_LINK_TTL"] = "8d" },
+		"zero login ip capacity":       func(v map[string]string) { v["LOGIN_RATE_LIMIT_IP_CAPACITY"] = "0" },
+		"short setup refill":           func(v map[string]string) { v["SETUP_RATE_LIMIT_IP_REFILL_INTERVAL"] = "500us" },
+		"invalid trusted proxy":        func(v map[string]string) { v["TRUSTED_PROXY_CIDRS"] = "not-a-network" },
+		"retention overflow":           func(v map[string]string) { v["TEST_EMAIL_RATE_LIMIT_GLOBAL_CAPACITY"] = "9223372036854775807" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			values := map[string]string{}

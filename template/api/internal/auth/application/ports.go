@@ -60,8 +60,36 @@ type LoginLimiter interface {
 	ResetEmail(context.Context, string) error
 }
 
+// SourceAwareLoginLimiter adds a separately throttled source bucket to the
+// legacy login limiter. Keeping the small legacy interface intact preserves
+// embedders that only provide the original email/global policy.
+type SourceAwareLoginLimiter interface {
+	AllowLogin(context.Context, string, string) (bool, error)
+}
+
 type PasswordResetLimiter interface {
 	AllowPasswordReset(context.Context, string) (bool, error)
+}
+
+type SourceAwarePasswordResetLimiter interface {
+	AllowPasswordResetFromSource(context.Context, string, string) (bool, error)
+	AllowPasswordResetComplete(context.Context, string) (bool, error)
+}
+
+type SetupLimiter interface {
+	AllowSetup(context.Context, string) (bool, error)
+}
+
+type InvitationAcceptLimiter interface {
+	AllowInvitationAccept(context.Context, string) (bool, error)
+}
+
+type InvitationSendLimiter interface {
+	AllowInvitationSend(context.Context, string, string) (bool, error)
+}
+
+type TestEmailLimiter interface {
+	AllowTestEmail(context.Context, string, string) (bool, error)
 }
 
 type PasswordResetStore interface {

@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { FieldGroup } from '@/components/ui/field'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
-import { fieldProblemFor, translateProblem } from '@/shared/api/problems'
+import { fieldProblemFor, translateRateLimitedProblem } from '@/shared/api/problems'
 import { currentUserQueryKey } from './queries'
 import { loginFormSchema, normalizeLoginValues, type LoginFormValues } from './schemas'
 import { PasswordField, TextField } from './form-fields'
@@ -52,7 +52,7 @@ export function LoginForm({ api, onSuccess }: { api: ApiClient; onSuccess: () =>
 
   return (
     <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-6">
-      {formError !== undefined ? <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{translateProblem(formError, t)}</AlertDescription></Alert> : null}
+      {formError !== undefined ? <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{translateRateLimitedProblem(formError, t, 'rateLimited')}</AlertDescription></Alert> : null}
       <FieldGroup className="gap-5">
         <TextField id="email" label={t('emailLabel')} registration={form.register('email')} error={form.formState.errors.email} type="email" inputMode="email" autoComplete="username" />
         <PasswordField id="password" label={t('passwordLabel')} registration={form.register('password')} error={form.formState.errors.password} autoComplete="current-password" />

@@ -138,12 +138,25 @@ export function translateProblemWithFields(error: unknown, t: unknown): string {
 }
 
 export function translatePasswordResetProblem(error: unknown, t: unknown): string {
+  return translateRateLimitedProblem(error, t, 'passwordResetRateLimited')
+}
+
+export function translateRateLimitedProblem(error: unknown, t: unknown, key: string): string {
   if (error instanceof ApiProblemError && error.problem.status === 429 && (
     error.problem.type === '/problems/rate-limited' || error.problem.code === 'rate_limited'
   )) {
-    return (t as (key: string) => string)('problems:passwordResetRateLimited')
+    return (t as (value: string) => string)(`problems:${key}`)
   }
   return translateProblem(error, t)
+}
+
+export function translateRateLimitedProblemWithFields(error: unknown, t: unknown, key: string): string {
+  if (error instanceof ApiProblemError && error.problem.status === 429 && (
+    error.problem.type === '/problems/rate-limited' || error.problem.code === 'rate_limited'
+  )) {
+    return (t as (value: string) => string)(`problems:${key}`)
+  }
+  return translateProblemWithFields(error, t)
 }
 
 export function problemFieldKey(field: FieldProblem): string {

@@ -33,6 +33,10 @@ type PasswordRecoveryAuditService interface {
 	CompleteWithTarget(context.Context, application.PasswordResetCompleteInput) (domain.User, error)
 }
 
+type InvitationAcceptanceSourceService interface {
+	CompleteWithTargetAndSource(context.Context, string, string, string) (domain.Invitation, error)
+}
+
 type AccessService interface {
 	Roles(context.Context, string) (application.RolePage, error)
 	RoleOptions(context.Context, string) ([]application.RoleOption, error)
@@ -53,6 +57,10 @@ type SettingsService interface {
 	SaveEmailSettings(context.Context, application.EmailSettingsInput) (application.EmailSettingsView, error)
 	TestEmailSettings(context.Context, application.EmailSettingsInput, string) error
 	OperationalWarnings(context.Context) ([]application.OperationalWarning, error)
+}
+
+type ActorTestEmailSettingsService interface {
+	TestEmailSettingsForActor(context.Context, string, application.EmailSettingsInput, string) error
 }
 
 type SystemIdentityService interface {
@@ -314,6 +322,7 @@ func (h *Handler) setupComplete(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	input.SourceIP = h.requestSourceIP(r)
 	created, err := h.setup.Complete(r.Context(), input)
 	if err != nil {
 		h.recordOperation(r, application.OperationLogInput{Action: "auth.setup.complete", ObjectType: "account", Result: application.OperationLogFailure, AttemptedAccount: input.Email, Details: map[string]any{"failure": operationErrorCode(err)}})
@@ -343,9 +352,11 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	var sessionID string
 	var err error
 	if enriched, ok := h.auth.(application.PrincipalAuthenticationService); ok {
+		input.SourceIP = h.requestSourceIP(r)
 		principal, sessionID, err = enriched.LoginWithPrincipal(r.Context(), input)
 		user = principal.User
 	} else {
+		input.SourceIP = h.requestSourceIP(r)
 		user, sessionID, err = h.auth.Login(r.Context(), input)
 	}
 	if err != nil {
@@ -444,6 +455,7 @@ func (h *Handler) passwordResetRequest(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	input.SourceIP = h.requestSourceIP(r)
 	if err := h.recovery.Request(r.Context(), input); err != nil {
 		h.recordOperation(r, application.OperationLogInput{Action: "auth.password_reset.request", ObjectType: "password_reset", Result: application.OperationLogFailure, AttemptedAccount: input.Email, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
@@ -469,6 +481,7 @@ func (h *Handler) passwordResetComplete(w http.ResponseWriter, r *http.Request) 
 		writeDecodeError(w, err)
 		return
 	}
+	input.SourceIP = h.requestSourceIP(r)
 	var target domain.User
 	var completeErr error
 	if audited, ok := h.recovery.(PasswordRecoveryAuditService); ok {
@@ -1015,10 +1028,15 @@ func (h *Handler) acceptInvitationHandler(w http.ResponseWriter, r *http.Request
 		writeDecodeError(w, err)
 		return
 	}
+	sourceIP := h.requestSourceIP(r)
 	var target domain.Invitation
 	var completeErr error
 	if audited, ok := h.acceptInvitation.(InvitationAcceptanceAuditService); ok {
-		target, completeErr = audited.CompleteWithTarget(r.Context(), input.Token, input.Password)
+		if sourceAware, sourceOK := h.acceptInvitation.(InvitationAcceptanceSourceService); sourceOK {
+			target, completeErr = sourceAware.CompleteWithTargetAndSource(r.Context(), sourceIP, input.Token, input.Password)
+		} else {
+			target, completeErr = audited.CompleteWithTarget(r.Context(), input.Token, input.Password)
+		}
 	} else {
 		completeErr = h.acceptInvitation.Complete(r.Context(), input.Token, input.Password)
 	}
@@ -1146,7 +1164,12 @@ func (h *Handler) testEmailSettings(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	err = h.settings.TestEmailSettings(r.Context(), application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, Revision: input.RevisionValue()}, input.Recipient)
+	settingsInput := application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, Revision: input.RevisionValue()}
+	if actorAware, actorOK := h.settings.(ActorTestEmailSettingsService); actorOK {
+		err = actorAware.TestEmailSettingsForActor(r.Context(), principal.User.ID, settingsInput, input.Recipient)
+	} else {
+		err = h.settings.TestEmailSettings(r.Context(), settingsInput, input.Recipient)
+	}
 	if err != nil {
 		h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "settings.email.test", ObjectType: "email_settings", Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)

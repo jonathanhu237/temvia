@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { FieldGroup } from '@/components/ui/field'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
-import { fieldProblemFor, isInvalidPasswordResetToken, translatePasswordResetProblem } from '@/shared/api/problems'
+import { fieldProblemFor, isInvalidPasswordResetToken, translateRateLimitedProblem } from '@/shared/api/problems'
 import { normalizePasswordResetValues, passwordResetFormSchema, type PasswordResetFormValues } from './schemas'
 import { PasswordField } from './form-fields'
 
@@ -51,7 +51,7 @@ export function PasswordResetForm({ api, token, onSuccess, onInvalidAuthority }:
 
   return (
     <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-6">
-      {formError !== undefined ? <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{translatePasswordResetProblem(formError, t)}</AlertDescription></Alert> : null}
+      {formError !== undefined ? <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{translateRateLimitedProblem(formError, t, 'passwordResetCompletionRateLimited')}</AlertDescription></Alert> : null}
       <FieldGroup className="gap-5">
         <PasswordField id="password" label={t('passwordLabel')} registration={form.register('password')} error={form.formState.errors.password} autoComplete="new-password" />
         <PasswordField id="passwordConfirmation" label={t('confirmPasswordLabel')} registration={form.register('passwordConfirmation')} error={form.formState.errors.passwordConfirmation} autoComplete="new-password" />
