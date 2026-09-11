@@ -73,8 +73,10 @@ function validatePassword(value: string, ctx: z.RefinementCtx): void {
 
 function validateLoginPassword(value: string, ctx: z.RefinementCtx): void {
   const length = Array.from(normalizePassword(value)).length
-  if (length === 0 || length > 128) {
-    addIssue(ctx, ['password'], 'invalid_login_password')
+  if (length === 0) {
+    addIssue(ctx, ['password'], 'login_password_required')
+  } else if (length > 128) {
+    addIssue(ctx, ['password'], 'login_password_too_long')
   }
 }
 

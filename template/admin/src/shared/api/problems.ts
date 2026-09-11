@@ -58,6 +58,8 @@ const fieldKeys: Record<string, string> = {
   invalid_email: 'problems:fields.invalidEmail',
   invalid_password: 'problems:fields.invalidPassword',
   invalid_login_password: 'problems:fields.invalidLoginPassword',
+  login_password_required: 'problems:fields.loginPasswordRequired',
+  login_password_too_long: 'problems:fields.loginPasswordTooLong',
   invalid_value: 'problems:fields.invalidValue',
   email_already_registered: 'problems:fields.emailAlreadyRegistered',
   password_mismatch: 'problems:fields.passwordMismatch',

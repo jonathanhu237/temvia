@@ -18,7 +18,7 @@ export function LoginForm({ api, onSuccess }: { api: ApiClient; onSuccess: () =>
   const [formError, setFormError] = useState<unknown>()
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginFormSchema),
-    mode: 'onBlur',
+    mode: 'onSubmit',
     shouldFocusError: true,
     defaultValues: { email: '', password: '' },
   })
@@ -41,17 +41,20 @@ export function LoginForm({ api, onSuccess }: { api: ApiClient; onSuccess: () =>
         for (const fieldName of ['email', 'password'] as const) {
           const field = fieldProblemFor(error, `/${fieldName}`)
           if (field) {
-            form.setError(fieldName, { type: 'server', message: field.code }, { shouldFocus: !focused })
+            const message = fieldName === 'password' && field.code === 'invalid_login_password'
+              ? (normalizeLoginValues(values).password.length === 0 ? 'login_password_required' : 'login_password_too_long')
+              : field.code
+            form.setError(fieldName, { type: 'server', message }, { shouldFocus: !focused })
             focused = true
           }
         }
       }
-      setFormError(error)
+      if (!focused) setFormError(error)
     }
   })
 
   return (
-    <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-6">
+    <form noValidate onSubmit={(event) => { setFormError(undefined); void submit(event) }} className="flex flex-col gap-6">
       {formError !== undefined ? <Alert variant="destructive" role="alert" aria-live="polite"><AlertDescription>{translateRateLimitedProblem(formError, t, 'rateLimited')}</AlertDescription></Alert> : null}
       <FieldGroup className="gap-5">
         <TextField id="email" label={t('emailLabel')} registration={form.register('email')} error={form.formState.errors.email} type="email" inputMode="email" autoComplete="username" />

@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef, OnChangeFn, SortingState } from '@tanstack/react-table'
-import { Mail, Pencil, Save, UserRound } from 'lucide-react'
+import { Mail, MoreHorizontal, Pencil, Save, UserRound, UserRoundCheck, UserRoundX, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent } from '@/components/ui/card'
@@ -114,11 +115,21 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     {
       id: 'actions',
       enableSorting: false,
-      header: () => <span>{t('actions')}</span>,
-      cell: ({ row }) => canManage ? <div className="flex flex-wrap justify-end gap-1">
-        {canAssign && !roleAdministrationForbidden ? <Button type="button" variant="ghost" size="sm" onClick={() => openAssignment(row.original)}><Pencil aria-hidden="true" data-icon="inline-start" />{t('assignRoles')}</Button> : null}
-        <Button size="sm" variant="outline" disabled={lifecycle.isPending || users.isError || row.original.id === actorID} title={row.original.id === actorID ? t('problems:selfUserOperation') : undefined} onClick={() => { setDeleteEmail(''); setLifecycleTarget({ user: row.original, action: row.original.disabled ? 'reactivate' : 'deactivate' }) }}>{t(row.original.disabled ? 'reactivate' : 'deactivate')}</Button>
-        <Button size="sm" variant="destructive" disabled={lifecycle.isPending || users.isError || row.original.id === actorID} title={row.original.id === actorID ? t('problems:selfUserOperation') : undefined} onClick={() => { setDeleteEmail(''); setLifecycleTarget({ user: row.original, action: 'delete' }) }}>{t('deleteUser')}</Button>
+      header: () => <div className="text-center">{t('actions')}</div>,
+      cell: ({ row }) => canManage ? <div className="flex justify-center">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label={t('moreActions')} disabled={lifecycle.isPending || users.isError}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              {canAssign && !roleAdministrationForbidden ? <DropdownMenuItem onSelect={() => openAssignment(row.original)}><Pencil aria-hidden="true" />{t('assignRoles')}</DropdownMenuItem> : null}
+              <DropdownMenuItem disabled={row.original.id === actorID} title={row.original.id === actorID ? t('problems:selfUserOperation') : undefined} onSelect={() => { setDeleteEmail(''); setLifecycleTarget({ user: row.original, action: row.original.disabled ? 'reactivate' : 'deactivate' }) }}>{row.original.disabled ? <UserRoundCheck aria-hidden="true" /> : <UserRoundX aria-hidden="true" />}{t(row.original.disabled ? 'reactivate' : 'deactivate')}</DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem disabled={row.original.id === actorID} title={row.original.id === actorID ? t('problems:selfUserOperation') : undefined} onSelect={() => { setDeleteEmail(''); setLifecycleTarget({ user: row.original, action: 'delete' }) }}><Trash2 aria-hidden="true" />{t('deleteUser')}</DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div> : null,
     },
   ], [canManage, canAssign, actorID, users.isError, i18n.language, lifecycle.isPending, roleAdministrationForbidden, t])

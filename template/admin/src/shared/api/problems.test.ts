@@ -81,8 +81,8 @@ describe('localized problem mapping', () => {
   })
 
   it.each([
-    ['en', 'Enter a non-empty password of at most 128 characters.'],
-    ['zh-CN', '请输入非空且不超过 128 个字符的密码。'],
+    ['en', 'Enter a valid password.'],
+    ['zh-CN', '请输入有效的密码。'],
   ] as const)('localizes the login password code in %s', async (locale, message) => {
     await i18n.changeLanguage(locale)
     expect(fieldMessageKey('invalid_login_password')).toBe('problems:fields.invalidLoginPassword')

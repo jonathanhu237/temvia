@@ -119,8 +119,8 @@ describe('authentication forms', () => {
   })
 
   it.each([
-    ['en', 'Email', 'Password', 'Sign in', 'Enter a valid email address.', 'Enter a non-empty password of at most 128 characters.'],
-    ['zh-CN', '邮箱', '密码', '登录', '请输入有效的邮箱地址。', '请输入非空且不超过 128 个字符的密码。'],
+    ['en', 'Email', 'Password', 'Sign in', 'Enter a valid email address.', 'Enter your password.'],
+    ['zh-CN', '邮箱', '密码', '登录', '请输入有效的邮箱地址。', '请输入密码。'],
   ] as const)('localizes login client validation errors in %s', async (locale, email, password, submit, emailMessage, passwordMessage) => {
     const user = userEvent.setup()
     await i18n.changeLanguage(locale)
@@ -133,6 +133,38 @@ describe('authentication forms', () => {
     expect(screen.getByLabelText(email)).toHaveAttribute('aria-describedby', 'email-error')
     expect(screen.getByLabelText(password, { exact: true })).toHaveAttribute('aria-describedby', 'password-error')
     expect(view.container.textContent).not.toMatch(/invalid_(?:email|password|login_password)/)
+  })
+
+  it('waits for submission before showing login errors and distinguishes an overlong password', async () => {
+    const user = userEvent.setup()
+    const api = mockApi()
+    renderWithQueryClient(<LoginForm api={api} onSuccess={vi.fn()} />)
+    expect(screen.queryByText('Enter your password.')).not.toBeInTheDocument()
+    await user.click(screen.getByLabelText('Password', { exact: true }))
+    await user.tab()
+    expect(screen.queryByText('Enter your password.')).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Email'), 'admin@example.com')
+    await user.click(screen.getByLabelText('Password', { exact: true }))
+    await user.paste('x'.repeat(129))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByText('Password must not exceed 128 characters.')).toBeVisible()
+    expect(screen.queryByText('Enter your password.')).not.toBeInTheDocument()
+    expect(api.login).not.toHaveBeenCalled()
+  })
+
+  it('shows server field errors without a second form-level alert', async () => {
+    const user = userEvent.setup()
+    const api = mockApi({ login: vi.fn().mockRejectedValue(new ApiProblemError({
+      type: '/problems/validation-failed', title: 'Validation failed', status: 422,
+      code: 'validation_failed', errors: [{ pointer: '/email', code: 'invalid_email' }],
+    })) })
+    renderWithQueryClient(<LoginForm api={api} onSuccess={vi.fn()} />)
+    await user.type(screen.getByLabelText('Email'), 'admin@example.com')
+    await user.type(screen.getByLabelText('Password', { exact: true }), 'password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByText('Enter a valid email address.')).toBeVisible()
+    expect(screen.queryByText('Check the highlighted fields and try again.')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="alert"]')).toBeNull()
   })
 
   it('shows localized invalid credentials without exposing server diagnostics', async () => {
@@ -169,7 +201,7 @@ describe('authentication forms', () => {
 
     await i18n.changeLanguage('zh-CN')
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('邮箱或密码不正确。')
+    expect(await screen.findByRole('alert')).toHaveTextContent('邮箱或密码错误。')
     expect(screen.getByDisplayValue('admin@example.com')).toBe(email)
     expect(screen.getByDisplayValue('correct horse battery')).toBe(password)
   })
