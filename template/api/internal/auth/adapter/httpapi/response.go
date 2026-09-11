@@ -88,6 +88,7 @@ type accessUserResponseBody struct {
 	Email       string             `json:"email"`
 	CreatedAt   string             `json:"createdAt"`
 	AuthVersion int64              `json:"authVersion"`
+	Disabled    bool               `json:"disabled"`
 	Roles       []roleResponseBody `json:"roles"`
 }
 
@@ -97,6 +98,7 @@ type usersResponse struct {
 }
 
 type invitationResponseBody struct {
+	Creator   operationActor     `json:"creator"`
 	ID        string             `json:"id"`
 	Name      string             `json:"name"`
 	Email     string             `json:"email"`
@@ -170,7 +172,7 @@ func accessUserResponse(user domain.AccessUser) accessUserResponseBody {
 	for _, role := range user.Roles {
 		roles = append(roles, roleResponse(role))
 	}
-	return accessUserResponseBody{ID: user.User.ID, Name: user.User.Name, Email: user.User.Email, CreatedAt: user.User.CreatedAt.UTC().Format(time.RFC3339Nano), AuthVersion: user.AuthVersion, Roles: roles}
+	return accessUserResponseBody{ID: user.User.ID, Name: user.User.Name, Email: user.User.Email, CreatedAt: user.User.CreatedAt.UTC().Format(time.RFC3339Nano), AuthVersion: user.AuthVersion, Disabled: user.User.Disabled, Roles: roles}
 }
 
 func invitationResponse(invitation domain.Invitation) invitationResponseBody {
@@ -178,7 +180,7 @@ func invitationResponse(invitation domain.Invitation) invitationResponseBody {
 	for _, role := range invitation.Roles {
 		roles = append(roles, roleResponse(role))
 	}
-	return invitationResponseBody{ID: invitation.ID, Name: invitation.Name, Email: invitation.Email, Locale: string(invitation.Locale), Roles: roles, ExpiresAt: invitation.ExpiresAt.UTC().Format(time.RFC3339Nano), CreatedAt: invitation.CreatedAt.UTC().Format(time.RFC3339Nano), Revision: invitation.Revision}
+	return invitationResponseBody{Creator: operationActor{ID: invitation.CreatedBy, Name: invitation.CreatedByName, Email: invitation.CreatedByEmail, Deleted: invitation.CreatorDeleted}, ID: invitation.ID, Name: invitation.Name, Email: invitation.Email, Locale: string(invitation.Locale), Roles: roles, ExpiresAt: invitation.ExpiresAt.UTC().Format(time.RFC3339Nano), CreatedAt: invitation.CreatedAt.UTC().Format(time.RFC3339Nano), Revision: invitation.Revision}
 }
 
 func userResponse(user domain.User) userEnvelope {

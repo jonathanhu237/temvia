@@ -18,6 +18,7 @@ type operationLogResponseBody struct {
 	Action           string         `json:"action"`
 	ObjectType       string         `json:"objectType"`
 	ObjectID         string         `json:"objectId,omitempty"`
+	ObjectDeleted    bool           `json:"objectDeleted"`
 	Result           string         `json:"result"`
 	OccurredAt       string         `json:"occurredAt"`
 	SourceIP         string         `json:"sourceIp,omitempty"`
@@ -26,11 +27,12 @@ type operationLogResponseBody struct {
 }
 
 type operationActor struct {
-	ID    string `json:"id,omitempty"`
-	Name  string `json:"name,omitempty"`
-	Email string `json:"email,omitempty"`
-	Kind  string `json:"kind,omitempty"`
-	Label string `json:"label,omitempty"`
+	Deleted bool   `json:"deleted"`
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Email   string `json:"email,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Label   string `json:"label,omitempty"`
 }
 
 type operationLogsResponse struct {
@@ -241,10 +243,11 @@ func parseOperationLogQuery(r *http.Request) (application.OperationLogListOption
 func operationLogResponse(item application.OperationLog) operationLogResponseBody {
 	return operationLogResponseBody{
 		ID:               item.ID,
-		Actor:            operationActor{ID: item.ActorID, Name: item.ActorName, Email: item.ActorEmail, Kind: item.ActorKind, Label: item.ActorLabel},
+		Actor:            operationActor{Deleted: item.ActorDeleted, ID: item.ActorID, Name: item.ActorName, Email: item.ActorEmail, Kind: item.ActorKind, Label: item.ActorLabel},
 		Action:           item.Action,
 		ObjectType:       item.ObjectType,
 		ObjectID:         item.ObjectID,
+		ObjectDeleted:    item.ObjectDeleted,
 		Result:           item.Result,
 		OccurredAt:       item.OccurredAt.UTC().Format(time.RFC3339Nano),
 		SourceIP:         item.SourceIP,
@@ -386,6 +389,14 @@ func operationErrorCode(err error) string {
 	switch {
 	case err == nil:
 		return ""
+	case errors.Is(err, application.ErrAccountDisabled):
+		return "account_disabled"
+	case errors.Is(err, application.ErrSelfUserOperation):
+		return "self_user_operation"
+	case errors.Is(err, application.ErrLastSuperAdmin):
+		return "last_super_admin"
+	case errors.Is(err, application.ErrUserNotFound):
+		return "not_found"
 	case errors.Is(err, application.ErrForbidden):
 		return "forbidden"
 	case errors.Is(err, application.ErrUnauthenticated):
@@ -461,7 +472,7 @@ func accessUserSnapshot(user domain.AccessUser) map[string]any {
 	for _, role := range user.Roles {
 		roles = append(roles, roleSnapshot(role))
 	}
-	return map[string]any{"id": user.User.ID, "name": user.User.Name, "email": user.User.Email, "roleIds": roleIDs(user.Roles), "roles": roles, "authVersion": user.AuthVersion}
+	return map[string]any{"id": user.User.ID, "name": user.User.Name, "email": user.User.Email, "roleIds": roleIDs(user.Roles), "roles": roles, "authVersion": user.AuthVersion, "disabled": user.User.Disabled}
 }
 
 func invitationSnapshot(invitation domain.Invitation) map[string]any {
@@ -469,7 +480,7 @@ func invitationSnapshot(invitation domain.Invitation) map[string]any {
 	for _, role := range invitation.Roles {
 		roles = append(roles, roleSnapshot(role))
 	}
-	return map[string]any{"id": invitation.ID, "name": invitation.Name, "email": invitation.Email, "roleIds": roleIDs(invitation.Roles), "roles": roles, "expiresAt": invitation.ExpiresAt.UTC().Format(time.RFC3339Nano), "revision": invitation.Revision}
+	return map[string]any{"creator": map[string]any{"id": invitation.CreatedBy, "name": invitation.CreatedByName, "email": invitation.CreatedByEmail, "deleted": invitation.CreatorDeleted}, "id": invitation.ID, "name": invitation.Name, "email": invitation.Email, "roleIds": roleIDs(invitation.Roles), "roles": roles, "expiresAt": invitation.ExpiresAt.UTC().Format(time.RFC3339Nano), "revision": invitation.Revision}
 }
 
 func roleIDs(roles []domain.Role) []string {

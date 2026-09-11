@@ -45,6 +45,15 @@ it('announces an expired session before redirecting', async () => {
  expect(toast.error).toHaveBeenCalledWith('Your session has expired. Sign in again.')
 })
 
+it('explains deactivation using the trusted session response', async () => {
+ vi.clearAllMocks()
+ const client = createAppQueryClient()
+ const disabled = new ApiProblemError({ type: '/problems/unauthenticated', title: 'Unauthenticated', status: 401, code: 'account_disabled' })
+ render(<QueryClientProvider client={client}><SessionMonitor api={{ checkSession: vi.fn().mockRejectedValue(disabled) } as unknown as ApiClient} userID="user" /></QueryClientProvider>)
+ await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: '/login', replace: true }))
+ expect(toast.error).toHaveBeenCalledWith('Your account has been deactivated. Contact an administrator.')
+})
+
 it('does not sign out on a limiter dependency failure', async () => {
  navigate.mockClear()
  const client = createAppQueryClient()

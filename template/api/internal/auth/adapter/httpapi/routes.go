@@ -52,6 +52,12 @@ type AccessService interface {
 	RevokeInvitation(context.Context, string, string) error
 }
 
+type versionedLifecycleService interface {
+	DeactivateUserWithRevision(context.Context, string, string, int64) (domain.AccessUser, error)
+	ReactivateUserWithRevision(context.Context, string, string, int64) (domain.AccessUser, error)
+	DeleteUserWithRevision(context.Context, string, string, int64) error
+}
+
 type SettingsService interface {
 	GetEmailSettings(context.Context) (application.EmailSettingsView, error)
 	SaveEmailSettings(context.Context, application.EmailSettingsInput) (application.EmailSettingsView, error)
@@ -180,6 +186,9 @@ func newHandlerWithOperationLogAndIdentity(setup SetupService, auth Authenticati
 		h.mux.HandleFunc("DELETE /api/roles/{id}", h.deleteRole)
 		h.mux.HandleFunc("GET /api/users", h.users)
 		h.mux.HandleFunc("PUT /api/users/{id}/roles", h.replaceUserRoles)
+		h.mux.HandleFunc("POST /api/users/{id}/deactivate", h.deactivateUser)
+		h.mux.HandleFunc("POST /api/users/{id}/reactivate", h.reactivateUser)
+		h.mux.HandleFunc("DELETE /api/users/{id}", h.deleteUser)
 		h.mux.HandleFunc("GET /api/user-invitations", h.invitations)
 		h.mux.HandleFunc("POST /api/user-invitations", h.createInvitation)
 		h.mux.HandleFunc("POST /api/user-invitations/{id}/resend", h.resendInvitation)
@@ -277,6 +286,12 @@ func expectedMethods(path string) (string, bool) {
 		return "GET, PUT", true
 	}
 	if len(parts) == 4 && parts[0] == "api" && parts[1] == "user-invitations" && parts[3] == "resend" {
+		return "POST", true
+	}
+	if len(parts) == 3 && parts[0] == "api" && parts[1] == "users" {
+		return "DELETE", true
+	}
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "users" && (parts[3] == "deactivate" || parts[3] == "reactivate") {
 		return "POST", true
 	}
 	if len(parts) == 4 && parts[0] == "api" && parts[1] == "users" && parts[3] == "roles" {

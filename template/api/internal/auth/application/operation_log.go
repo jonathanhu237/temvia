@@ -46,6 +46,8 @@ type OperationLogInput struct {
 }
 
 type OperationLog struct {
+	ActorDeleted     bool
+	ObjectDeleted    bool
 	ID               string
 	ActorID          string
 	ActorName        string

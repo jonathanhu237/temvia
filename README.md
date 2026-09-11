@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 A Go API and React admin starter, distributed as the `create-temvia` CLI.
 Includes administrator setup, login and password recovery, invitations, roles
-and permissions, online users and force sign-out, operation history, email and
+and permissions, user deactivation and deletion, online users and force sign-out, operation history, email and
 system identity settings, Chinese/English interfaces, and light/dark themes.
 
 ## Quick start

@@ -46,7 +46,7 @@ The language used for grouping and granting administrative capabilities in Temvi
 ## Language
 
 **Role**:
-A named collection of permissions that can be selected for an active user or an invitation.
+A named collection of permissions that can be assigned to a user or an invitation.
 
 **Permission**:
 A named administrative capability included in a role, expressed as a resource and either read or write access. Read permits viewing the resource; write permits changing it or performing its state-changing operations, and does not implicitly grant read access.
@@ -65,13 +65,31 @@ _Avoid_: System role
 A role created and maintained by an administrator.
 
 **Role assignment**:
-A relationship between a role and either a user or an invitation. A role remains in use while any of its assignments exist and cannot be deleted until every assignment has been removed.
+A relationship between a role and either a user or an invitation. A role remains in use while any of its assignments exist, including assignments to disabled users, and cannot be deleted until every assignment has been removed.
 
 **Assignment count**:
 The number of users and invitations currently assigned a role. Expired invitations remain included until they are renewed or revoked.
 
 **User**:
-A person who has activated an account and can sign in to a Temvia administration app.
+A person with an activated account in a Temvia administration app. A disabled user retains their account but cannot sign in.
+
+**User deactivation（停用用户）**:
+A reversible administrative action that ends a user's existing sign-in sessions and prevents further sign-in while retaining their account, email, password, role assignments, and history. Password recovery cannot restore access while the user is disabled; reactivation requires an administrator. Deactivation invalidates existing password reset links but does not revoke invitations previously created by the user.
+
+**User reactivation（恢复用户）**:
+An administrative action that allows a disabled user to sign in again with their retained account and role assignments. Previous sign-in sessions and invalidated password reset links are not restored.
+
+**User deletion（删除用户）**:
+An irreversible administrative action that removes an unneeded account while retaining associated historical and business records. It is distinct from deactivation and does not mean erasing all personal information.
+
+**Deleted user（已删除用户）**:
+A former account holder identified in retained records by their original identity, including name, email, and user identifier, with an indication that the account has been deleted. Deleting an invitation's creator does not revoke the invitation. The email may be invited again, but a newly activated account is a distinct user and does not inherit the deleted user's identity or history.
+
+**User management（用户管理）**:
+The administrative capability to view users with user read access and to change role assignments, deactivate, reactivate, or delete users with user write access. Deactivation, reactivation, and deletion may target any other user regardless of relative permissions, including a Super Admin; role assignment retains its separate grant restrictions.
+
+**Available Super Admin（可用超级管理员）**:
+A user who holds the Super Admin role and is not disabled. User management must retain at least one available Super Admin and cannot deactivate or delete the acting user's own account.
 
 **Invitation**:
 A request for a person to activate an account, with roles selected in advance. The person becomes a user only after accepting the invitation.

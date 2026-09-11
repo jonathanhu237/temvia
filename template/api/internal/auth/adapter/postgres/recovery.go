@@ -15,7 +15,7 @@ func (s *Store) FindPasswordResetTarget(ctx context.Context, selector, verifierD
 		SELECT u.id::text, u.name, u.email, u.created_at
 		FROM auth_password_resets AS r
 		JOIN auth_users AS u ON u.id = r.user_id
-		WHERE r.selector = $1 AND r.verifier_digest = $2 AND r.expires_at > clock_timestamp()`, selector, verifierDigest).
+		WHERE r.selector = $1 AND r.verifier_digest = $2 AND r.expires_at > clock_timestamp() AND u.disabled_at IS NULL`, selector, verifierDigest).
 		Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.User{}, application.ErrInvalidPasswordResetToken
@@ -31,7 +31,7 @@ func (s *Store) RequestPasswordReset(ctx context.Context, canonical string, sele
 	defer func() { _ = tx.Rollback() }()
 
 	var userID string
-	err = tx.QueryRowContext(ctx, `SELECT id::text FROM auth_users WHERE email_canonical = $1 FOR UPDATE`, canonical).Scan(&userID)
+	err = tx.QueryRowContext(ctx, `SELECT id::text FROM auth_users WHERE email_canonical = $1 AND disabled_at IS NULL FOR UPDATE`, canonical).Scan(&userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return tx.Commit()
@@ -57,8 +57,9 @@ func (s *Store) RequestPasswordReset(ctx context.Context, canonical string, sele
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO auth_mail_outbox (kind, user_id, reset_selector, locale, expires_at, created_at)
-		SELECT 'password_reset', user_id, selector, $2, expires_at, created_at
-		FROM auth_password_resets WHERE user_id = $1::uuid`, userID, string(locale)); err != nil {
+		SELECT 'password_reset', pr.user_id, pr.selector, $2, pr.expires_at, pr.created_at
+		FROM auth_password_resets AS pr JOIN auth_users AS u ON u.id = pr.user_id
+		WHERE pr.user_id = $1::uuid AND u.disabled_at IS NULL`, userID, string(locale)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -88,13 +89,20 @@ func (s *Store) CompletePasswordReset(ctx context.Context, selector, verifierDig
 	defer func() { _ = tx.Rollback() }()
 
 	var userID string
+	// Match the account-before-reset lock order used by issuance and deactivation.
+	if err := tx.QueryRowContext(ctx, `SELECT id::text FROM auth_users WHERE id=(SELECT user_id FROM auth_password_resets WHERE selector=$1) AND disabled_at IS NULL FOR UPDATE`, selector).Scan(&userID); err != nil {
+		if err == sql.ErrNoRows {
+			return time.Time{}, application.ErrInvalidPasswordResetToken
+		}
+		return time.Time{}, err
+	}
 	var stored []byte
 	var valid bool
 	if err := tx.QueryRowContext(ctx, `
 		SELECT r.user_id::text, r.verifier_digest, r.expires_at > clock_timestamp()
 		FROM auth_password_resets AS r
 		JOIN auth_users AS u ON u.id = r.user_id
-		WHERE r.selector = $1
+		WHERE r.selector = $1 AND u.disabled_at IS NULL
 		FOR UPDATE OF r, u`, selector).Scan(&userID, &stored, &valid); err != nil {
 		if err == sql.ErrNoRows {
 			return time.Time{}, application.ErrInvalidPasswordResetToken

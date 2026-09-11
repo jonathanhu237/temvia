@@ -120,6 +120,10 @@ export function InvitationsPage({ api, canManage, actorPermissions, actorSuperAd
       },
     },
     {
+      id: 'creator', header: t('creator'), enableSorting: false,
+      cell: ({ row }) => <div className="flex flex-col gap-1"><span>{row.original.creator?.name || row.original.creator?.id || '—'}{row.original.creator?.deleted ? ` · ${t('deletedUser')}` : ''}</span><span className="text-muted-foreground">{row.original.creator?.email}</span></div>,
+    },
+    {
       id: 'actions',
       enableSorting: false,
       header: () => <span>{t('actions')}</span>,

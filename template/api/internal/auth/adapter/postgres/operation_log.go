@@ -37,6 +37,17 @@ func (s *Store) CreateOperationLog(ctx context.Context, input application.Operat
 	return err
 }
 
+// Deleted identity lookup never joins by email: a reused email is a new user.
+const operationLogSelect = `SELECT l.id::text,l.actor_user_id::text,COALESCE(l.actor_name,ad.name,''),COALESCE(l.actor_email,ad.email,''),
+ COALESCE(l.actor_kind,''),COALESCE(l.actor_label,''),l.action,l.object_type,COALESCE(l.object_id,''),l.result,l.occurred_at,
+ COALESCE(l.source_ip,''),COALESCE(l.attempted_account,''),
+ CASE WHEN td.user_id IS NOT NULL AND NOT(l.details ? 'target' OR l.details ? 'before' OR l.details ? 'after')
+ THEN l.details || jsonb_build_object('target',jsonb_build_object('id',td.user_id,'name',td.name,'email',td.email)) ELSE l.details END,
+ ad.user_id IS NOT NULL,td.user_id IS NOT NULL
+ FROM auth_operation_logs l
+ LEFT JOIN auth_deleted_user_identities ad ON ad.user_id=l.actor_user_id
+ LEFT JOIN auth_deleted_user_identities td ON td.user_id::text=l.object_id AND l.object_type IN ('user','account','password')`
+
 func (s *Store) ListOperationLogs(ctx context.Context, options application.OperationLogListOptions) (application.OperationLogPage, error) {
 	args := make([]any, 0, 10)
 	clauses := make([]string, 0, 10)
@@ -69,12 +80,7 @@ func (s *Store) ListOperationLogs(ctx context.Context, options application.Opera
 		cursorArg := arg(options.Cursor)
 		clauses = append(clauses, `(l.occurred_at, l.id) < (SELECT occurred_at, id FROM auth_operation_logs WHERE id = `+cursorArg+`::uuid)`)
 	}
-	query := `
-		SELECT l.id::text, l.actor_user_id::text, COALESCE(l.actor_name, ''), COALESCE(l.actor_email, ''),
-		       COALESCE(l.actor_kind, ''), COALESCE(l.actor_label, ''), l.action,
-		       l.object_type, COALESCE(l.object_id, ''), l.result, l.occurred_at,
-		       COALESCE(l.source_ip, ''), COALESCE(l.attempted_account, ''), l.details
-		FROM auth_operation_logs AS l`
+	query := operationLogSelect
 	if len(clauses) > 0 {
 		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
@@ -93,7 +99,7 @@ func (s *Store) ListOperationLogs(ctx context.Context, options application.Opera
 		var item application.OperationLog
 		var actorID sql.NullString
 		var detailJSON []byte
-		if err := rows.Scan(&item.ID, &actorID, &item.ActorName, &item.ActorEmail, &item.ActorKind, &item.ActorLabel, &item.Action, &item.ObjectType, &item.ObjectID, &item.Result, &item.OccurredAt, &item.SourceIP, &item.AttemptedAccount, &detailJSON); err != nil {
+		if err := rows.Scan(&item.ID, &actorID, &item.ActorName, &item.ActorEmail, &item.ActorKind, &item.ActorLabel, &item.Action, &item.ObjectType, &item.ObjectID, &item.Result, &item.OccurredAt, &item.SourceIP, &item.AttemptedAccount, &detailJSON, &item.ActorDeleted, &item.ObjectDeleted); err != nil {
 			return application.OperationLogPage{}, err
 		}
 		item.ActorID = actorID.String
@@ -115,14 +121,8 @@ func (s *Store) FindOperationLog(ctx context.Context, id string) (application.Op
 	var item application.OperationLog
 	var actorID sql.NullString
 	var detailJSON []byte
-	err := s.db.QueryRowContext(ctx, `
-		SELECT l.id::text, l.actor_user_id::text, COALESCE(l.actor_name, ''), COALESCE(l.actor_email, ''),
-		       COALESCE(l.actor_kind, ''), COALESCE(l.actor_label, ''), l.action,
-		       l.object_type, COALESCE(l.object_id, ''), l.result, l.occurred_at,
-		       COALESCE(l.source_ip, ''), COALESCE(l.attempted_account, ''), l.details
-		FROM auth_operation_logs AS l
-		WHERE l.id = $1::uuid`, id).
-		Scan(&item.ID, &actorID, &item.ActorName, &item.ActorEmail, &item.ActorKind, &item.ActorLabel, &item.Action, &item.ObjectType, &item.ObjectID, &item.Result, &item.OccurredAt, &item.SourceIP, &item.AttemptedAccount, &detailJSON)
+	err := s.db.QueryRowContext(ctx, operationLogSelect+` WHERE l.id = $1::uuid`, id).
+		Scan(&item.ID, &actorID, &item.ActorName, &item.ActorEmail, &item.ActorKind, &item.ActorLabel, &item.Action, &item.ObjectType, &item.ObjectID, &item.Result, &item.OccurredAt, &item.SourceIP, &item.AttemptedAccount, &detailJSON, &item.ActorDeleted, &item.ObjectDeleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return application.OperationLog{}, application.ErrOperationLogNotFound
 	}

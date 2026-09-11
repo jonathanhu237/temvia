@@ -11,6 +11,7 @@ export type AccessUser = {
   email: string
   createdAt: string
   authVersion: number
+  disabled: boolean
   roles: Role[]
 }
 

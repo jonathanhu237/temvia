@@ -148,6 +148,41 @@ make migrate-up
 docker compose up -d api admin
 ```
 
+## Deactivate, reactivate, and delete users
+
+The user list includes active and disabled accounts and supports status filtering.
+User read access permits viewing users; user write access permits deactivating,
+reactivating, or deleting any other user, including Super Admins. Existing role-grant
+restrictions remain unchanged. You cannot deactivate or delete yourself, and
+lifecycle actions and role changes must leave at least one active Super Admin.
+The API enforces these rules transactionally and requires the displayed user version;
+after a conflict, reload the user before confirming again.
+
+Deactivation immediately invalidates all existing sessions and blocks sign-in and
+password recovery while retaining the email, password, and assigned roles. Roles may
+still be edited and remain in use while assigned to disabled users. Reactivation
+requires a fresh sign-in; old sessions and reset links never become valid again.
+Previously signed-in users receive a deactivation message when their session is
+checked. Anonymous sign-in and recovery responses do not disclose account status.
+
+Deletion requires individual confirmation and the target email. It is irreversible
+and does not require prior deactivation. Credentials, sessions, reset authority, and
+role assignments are removed. Associated records retain the original name, email,
+and user ID, with a Deleted user indicator. Operation history follows its existing
+retention policy; minimal historical identity records contain no credentials.
+Account deletion is not a promise to erase all personal information. The email may
+be invited again, but the new user gets a new identity and no previous credentials,
+roles, or historical attribution.
+
+Invitations remain valid when their creator is disabled or deleted, subject to their
+existing expiry and authorization rules. New business modules should explicitly
+retain necessary associations rather than cascade-delete business records.
+
+Apply all migrations before starting the new API. Downgrading the lifecycle migration
+refuses while disabled users or deleted identities exist, rather than restoring
+access or silently losing history. Plan rollback against actual data; do not clear
+data to bypass these protections.
+
 ## Operation history
 
 Administrators with the `operation-logs.read` permission can open Operation

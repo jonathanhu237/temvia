@@ -26,7 +26,8 @@ func (s *Store) CreateVersioned(ctx context.Context, sessionID, userID string, a
 	idleMillis := durationMillis(s.idleTimeout)
 	absoluteMillis := durationMillis(s.absoluteTimeout)
 	result, err := s.db.ExecContext(operationCtx, `
-		WITH db_clock AS (SELECT clock_timestamp() AS now)
+		WITH db_clock AS (SELECT clock_timestamp() AS now),
+        account AS MATERIALIZED (SELECT id FROM auth_users WHERE id=$2::uuid AND disabled_at IS NULL AND auth_version=$3::bigint FOR SHARE)
 		INSERT INTO auth_sessions (
 			token_digest, user_id, auth_version, created_at, last_seen_at,
 			idle_expires_at, absolute_expires_at
@@ -37,7 +38,7 @@ func (s *Store) CreateVersioned(ctx context.Context, sessionID, userID string, a
 				now + ($5::bigint * INTERVAL '1 millisecond')
 			),
 			now + ($5::bigint * INTERVAL '1 millisecond')
-		FROM db_clock
+		FROM db_clock CROSS JOIN account
 		ON CONFLICT (token_digest) DO NOTHING`, sessionDigest(sessionID), userID, authVersion, idleMillis, absoluteMillis)
 	if err != nil {
 		return err
@@ -45,7 +46,7 @@ func (s *Store) CreateVersioned(ctx context.Context, sessionID, userID string, a
 	if affected, err := result.RowsAffected(); err != nil {
 		return err
 	} else if affected != 1 {
-		return fmt.Errorf("session credential collision")
+		return application.ErrInvalidCredentials
 	}
 	return nil
 }
@@ -69,11 +70,21 @@ func (s *Store) ResolveAndTouchVersioned(ctx context.Context, sessionID string) 
 	var lastSeenAt time.Time
 	var idleExpiresAt time.Time
 	var absoluteExpiresAt time.Time
+	// All lifecycle paths lock the account before dependent sessions.
+	var disabled bool
+	err = tx.QueryRowContext(operationCtx, `SELECT disabled_at IS NOT NULL FROM auth_users WHERE id=(SELECT user_id FROM auth_sessions WHERE token_digest=$1) FOR UPDATE`, sessionDigest(sessionID)).Scan(&disabled)
+	if errorsIsNoRows(err) {
+		return "", 0, nil
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	var disabledRevoked bool
 	err = tx.QueryRowContext(operationCtx, `
-		SELECT user_id::text, auth_version, last_seen_at, idle_expires_at, absolute_expires_at
-		FROM auth_sessions
-		WHERE token_digest = $1::bytea
-		FOR UPDATE`, sessionDigest(sessionID)).Scan(&userID, &authVersion, &lastSeenAt, &idleExpiresAt, &absoluteExpiresAt)
+		SELECT sessions.user_id::text, sessions.auth_version, sessions.last_seen_at, sessions.idle_expires_at, sessions.absolute_expires_at, sessions.disabled_revoked
+		FROM auth_sessions AS sessions
+		WHERE sessions.token_digest = $1::bytea
+		FOR UPDATE`, sessionDigest(sessionID)).Scan(&userID, &authVersion, &lastSeenAt, &idleExpiresAt, &absoluteExpiresAt, &disabledRevoked)
 	if errorsIsNoRows(err) {
 		return "", 0, nil
 	}
@@ -89,6 +100,13 @@ func (s *Store) ResolveAndTouchVersioned(ctx context.Context, sessionID string) 
 		return "", 0, err
 	}
 	if !now.Before(idleExpiresAt) || !now.Before(absoluteExpiresAt) {
+		return "", 0, nil
+	}
+
+	if disabled && disabledRevoked {
+		return "", 0, application.ErrAccountDisabled
+	}
+	if disabled || disabledRevoked {
 		return "", 0, nil
 	}
 
@@ -130,19 +148,27 @@ func (s *Store) ResolveVersioned(ctx context.Context, sessionID string) (string,
 	defer cancel()
 	var userID string
 	var authVersion int64
+	var disabled, disabledRevoked bool
 	err := s.db.QueryRowContext(operationCtx, `
 		WITH db_clock AS (SELECT clock_timestamp() AS now)
-		SELECT sessions.user_id::text, sessions.auth_version
+		SELECT sessions.user_id::text, sessions.auth_version, users.disabled_at IS NOT NULL, sessions.disabled_revoked
 		FROM auth_sessions AS sessions
+		JOIN auth_users AS users ON users.id = sessions.user_id
 		CROSS JOIN db_clock
 		WHERE sessions.token_digest = $1::bytea
 		  AND sessions.idle_expires_at > db_clock.now
-		  AND sessions.absolute_expires_at > db_clock.now`, sessionDigest(sessionID)).Scan(&userID, &authVersion)
+		  AND sessions.absolute_expires_at > db_clock.now`, sessionDigest(sessionID)).Scan(&userID, &authVersion, &disabled, &disabledRevoked)
 	if errorsIsNoRows(err) {
 		return "", 0, nil
 	}
 	if err != nil {
 		return "", 0, err
+	}
+	if disabled && disabledRevoked {
+		return "", 0, application.ErrAccountDisabled
+	}
+	if disabled || disabledRevoked {
+		return "", 0, nil
 	}
 	return userID, authVersion, nil
 }
@@ -163,8 +189,10 @@ func (s *Store) ValidSessions(ctx context.Context) ([]application.SessionActivit
 		WITH db_clock AS (SELECT clock_timestamp() AS now)
 		SELECT sessions.user_id::text, sessions.auth_version, sessions.last_seen_at
 		FROM auth_sessions AS sessions
+		JOIN auth_users AS users ON users.id = sessions.user_id
 		CROSS JOIN db_clock
-		WHERE sessions.idle_expires_at > db_clock.now
+		WHERE users.disabled_at IS NULL AND NOT sessions.disabled_revoked AND users.auth_version=sessions.auth_version
+		  AND sessions.idle_expires_at > db_clock.now
 		  AND sessions.absolute_expires_at > db_clock.now
 		  AND sessions.last_seen_at > TIMESTAMPTZ 'epoch'
 		ORDER BY sessions.last_seen_at DESC, sessions.user_id::text`)

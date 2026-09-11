@@ -17,7 +17,7 @@ import (
 func (s *Store) FindPrincipalByID(ctx context.Context, id string) (domain.Principal, error) {
 	var principal domain.Principal
 	var authVersion int64
-	err := s.db.QueryRowContext(ctx, `SELECT id::text, name, email, created_at, auth_version FROM auth_users WHERE id = $1::uuid`, id).
+	err := s.db.QueryRowContext(ctx, `SELECT id::text, name, email, created_at, auth_version FROM auth_users WHERE id = $1::uuid AND disabled_at IS NULL`, id).
 		Scan(&principal.User.ID, &principal.User.Name, &principal.User.Email, &principal.User.CreatedAt, &authVersion)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -455,7 +455,7 @@ func (s *Store) ListUsers(ctx context.Context, cursor string, limit int) (applic
 // single statement before a mutation; credentials are never selected.
 func (s *Store) FindAccessUser(ctx context.Context, id string) (domain.AccessUser, error) {
 	page, err := scanUsers(ctx, s.db, `
-		SELECT u.id::text, u.name, u.email, u.created_at, u.auth_version,
+		SELECT u.id::text, u.name, u.email, u.created_at, u.auth_version, (u.disabled_at IS NOT NULL),
 		       COALESCE(r.id::text, ''), COALESCE(r.system_key, ''), COALESCE(r.name, ''), COALESCE(r.description, ''), COALESCE(r.revision, 0),
 		       COALESCE(rp.permission_key, '')
 		FROM auth_users AS u
@@ -486,6 +486,11 @@ func (s *Store) listUsersWithOptions(ctx context.Context, options application.Ac
 	legacy = legacy || (forceLegacy && (options.Cursor == "" || domain.IsCanonicalUUID(options.Cursor)))
 	args := []any{likePattern(options.Query)}
 	where := []string{"($1 = '' OR lower(u.name) LIKE '%' || $1 || '%' ESCAPE '\\' OR lower(u.email) LIKE '%' || $1 || '%' ESCAPE '\\')"}
+	if options.Status == "disabled" {
+		where = append(where, "u.disabled_at IS NOT NULL")
+	} else if options.Status == "active" {
+		where = append(where, "u.disabled_at IS NULL")
+	}
 	if options.RoleID != "" {
 		args = append(args, options.RoleID)
 		where = append(where, "EXISTS (SELECT 1 FROM auth_user_roles AS ur_filter WHERE ur_filter.user_id = u.id AND ur_filter.role_id = $"+strconv.Itoa(len(args))+"::uuid)")
@@ -512,13 +517,13 @@ func (s *Store) listUsersWithOptions(ctx context.Context, options application.Ac
 	}
 	query := fmt.Sprintf(`
 		WITH selected_users AS (
-			SELECT u.id, u.name, u.email, u.email_canonical, u.created_at, u.auth_version
+			SELECT u.id, u.name, u.email, u.email_canonical, u.created_at, u.auth_version, u.disabled_at
 			FROM auth_users AS u
 			WHERE %s
 			ORDER BY %s
 			LIMIT $%d
 		)
-		SELECT u.id::text, u.name, u.email, u.created_at, u.auth_version,
+		SELECT u.id::text, u.name, u.email, u.created_at, u.auth_version, (u.disabled_at IS NOT NULL),
 		       COALESCE(r.id::text, ''), COALESCE(r.system_key, ''), COALESCE(r.name, ''), COALESCE(r.description, ''), COALESCE(r.revision, 0),
 		       COALESCE(rp.permission_key, '')
 		FROM selected_users AS u
@@ -559,7 +564,7 @@ func scanUsers(ctx context.Context, db interface {
 		var user domain.AccessUser
 		var role domain.Role
 		var permission string
-		if err := rows.Scan(&user.User.ID, &user.User.Name, &user.User.Email, &user.User.CreatedAt, &user.AuthVersion, &role.ID, &role.SystemKey, &role.Name, &role.Description, &role.Revision, &permission); err != nil {
+		if err := rows.Scan(&user.User.ID, &user.User.Name, &user.User.Email, &user.User.CreatedAt, &user.AuthVersion, &user.User.Disabled, &role.ID, &role.SystemKey, &role.Name, &role.Description, &role.Revision, &permission); err != nil {
 			return application.UserPage{}, err
 		}
 		current := users[user.User.ID]
@@ -587,6 +592,19 @@ func scanUsers(ctx context.Context, db interface {
 		page.Items = append(page.Items, *users[id])
 	}
 	return page, nil
+}
+
+func (s *Store) DeactivateUserWithRevision(ctx context.Context, actorID, userID string, revision int64) (domain.AccessUser, error) {
+	return s.mutateUserLifecycle(ctx, actorID, userID, revision, "deactivate")
+}
+
+func (s *Store) ReactivateUserWithRevision(ctx context.Context, actorID, userID string, revision int64) (domain.AccessUser, error) {
+	return s.mutateUserLifecycle(ctx, actorID, userID, revision, "reactivate")
+}
+
+func (s *Store) DeleteUserWithRevision(ctx context.Context, actorID, userID string, revision int64) error {
+	_, err := s.mutateUserLifecycle(ctx, actorID, userID, revision, "delete")
+	return err
 }
 
 func (s *Store) ReplaceUserRoles(ctx context.Context, userID string, authVersion int64, roleIDs []string) (domain.AccessUser, error) {
@@ -656,7 +674,8 @@ func (s *Store) replaceUserRoles(ctx context.Context, actorID, userID string, au
 		}
 	}
 	var currentVersion int64
-	if err := tx.QueryRowContext(ctx, `SELECT auth_version FROM auth_users WHERE id = $1::uuid FOR UPDATE`, userID).Scan(&currentVersion); err != nil {
+	var targetDisabled bool
+	if err := tx.QueryRowContext(ctx, `SELECT auth_version, disabled_at IS NOT NULL FROM auth_users WHERE id = $1::uuid FOR UPDATE`, userID).Scan(&currentVersion, &targetDisabled); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.AccessUser{}, application.ErrUserNotFound
 		}
@@ -703,9 +722,9 @@ func (s *Store) replaceUserRoles(ctx context.Context, actorID, userID string, au
 			}
 		}
 	}
-	if currentSuper && !newHasSuper {
+	if currentSuper && !newHasSuper && !targetDisabled {
 		var holders int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM auth_user_roles WHERE role_id = $1::uuid`, superRoleID).Scan(&holders); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM auth_user_roles ur JOIN auth_users u ON u.id=ur.user_id WHERE ur.role_id = $1::uuid AND u.disabled_at IS NULL`, superRoleID).Scan(&holders); err != nil {
 			return domain.AccessUser{}, err
 		}
 		if holders <= 1 {
@@ -726,7 +745,7 @@ func (s *Store) replaceUserRoles(ctx context.Context, actorID, userID string, au
 		}
 	}
 	var user domain.AccessUser
-	if err := tx.QueryRowContext(ctx, `SELECT id::text, name, email, created_at, auth_version FROM auth_users WHERE id = $1::uuid`, userID).Scan(&user.User.ID, &user.User.Name, &user.User.Email, &user.User.CreatedAt, &user.AuthVersion); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id::text, name, email, created_at, auth_version, disabled_at IS NOT NULL FROM auth_users WHERE id = $1::uuid`, userID).Scan(&user.User.ID, &user.User.Name, &user.User.Email, &user.User.CreatedAt, &user.AuthVersion, &user.User.Disabled); err != nil {
 		return domain.AccessUser{}, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT r.id::text, COALESCE(r.system_key, ''), r.name, r.description, r.revision, COALESCE(rp.permission_key, '') FROM auth_user_roles ur JOIN auth_roles r ON r.id = ur.role_id LEFT JOIN auth_role_permissions rp ON rp.role_id = r.id WHERE ur.user_id = $1::uuid ORDER BY (r.system_key IS NULL), r.name_canonical, r.id, rp.permission_key`, userID)
@@ -824,6 +843,13 @@ func permissionSetContains(granted map[domain.PermissionKey]bool, required []dom
 }
 
 func effectivePermissionsTx(ctx context.Context, tx *sql.Tx, userID, superRoleID string) (bool, map[domain.PermissionKey]bool, error) {
+	var enabled bool
+	if err := tx.QueryRowContext(ctx, `SELECT disabled_at IS NULL FROM auth_users WHERE id=$1::uuid`, userID).Scan(&enabled); err != nil {
+		return false, nil, err
+	}
+	if !enabled {
+		return false, nil, application.ErrForbidden
+	}
 	var superAdmin bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM auth_user_roles WHERE user_id = $1::uuid AND role_id = $2::uuid)`, userID, superRoleID).Scan(&superAdmin); err != nil {
 		return false, nil, err
@@ -960,10 +986,10 @@ func (s *Store) createInvitation(ctx context.Context, actorID, createdBy, name, 
 	}
 	var invitation domain.Invitation
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO auth_user_invitations (name, email, email_canonical, selector, verifier_digest, locale, expires_at, created_by)
-		VALUES ($1, $2, lower($2), $3, $4, $5, clock_timestamp() + ($6 * INTERVAL '1 second'), $7::uuid)
-		RETURNING id::text, name, email, locale, expires_at, created_at, revision, created_by::text`, name, email, selector, digest, string(locale), ttl.Seconds(), createdBy).
-		Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy)
+		INSERT INTO auth_user_invitations (name, email, email_canonical, selector, verifier_digest, locale, expires_at, created_by, created_by_name, created_by_email, created_by_user_key)
+		SELECT $1, $2, lower($2), $3, $4, $5, clock_timestamp() + ($6 * INTERVAL '1 second'), u.id, u.name, u.email, u.id::text FROM auth_users u WHERE u.id=$7::uuid
+		RETURNING id::text, name, email, locale, expires_at, created_at, revision, COALESCE(created_by::text, created_by_user_key, ''), created_by_name, created_by_email, created_by IS NULL`, name, email, selector, digest, string(locale), ttl.Seconds(), createdBy).
+		Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy, &invitation.CreatedByName, &invitation.CreatedByEmail, &invitation.CreatorDeleted)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return domain.Invitation{}, application.ErrInvitationPending
@@ -1010,10 +1036,10 @@ func (s *Store) ListInvitations(ctx context.Context, cursor string, limit int) (
 func (s *Store) FindInvitation(ctx context.Context, id string) (domain.Invitation, error) {
 	var invitation domain.Invitation
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT id::text, name, email, locale, expires_at, created_at, revision, created_by::text
+		SELECT id::text, name, email, locale, expires_at, created_at, revision, COALESCE(created_by::text, created_by_user_key, ''), created_by_name, created_by_email, created_by IS NULL
 		FROM auth_user_invitations
 		WHERE id = $1::uuid`, id).
-		Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy); err != nil {
+		Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy, &invitation.CreatedByName, &invitation.CreatedByEmail, &invitation.CreatorDeleted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Invitation{}, application.ErrInvitationNotFound
 		}
@@ -1066,13 +1092,13 @@ func (s *Store) listInvitationsWithOptions(ctx context.Context, options applicat
 	}
 	query := fmt.Sprintf(`
 		WITH selected_invitations AS (
-			SELECT i.id, i.name, i.email, i.email_canonical, i.locale, i.expires_at, i.created_at, i.revision, i.created_by
+			SELECT i.id, i.name, i.email, i.email_canonical, i.locale, i.expires_at, i.created_at, i.revision, i.created_by, i.created_by_user_key, i.created_by_name, i.created_by_email
 			FROM auth_user_invitations AS i
 			WHERE %s
 			ORDER BY %s
 			LIMIT $%d
 		)
-		SELECT i.id::text, i.name, i.email, i.locale, i.expires_at, i.created_at, i.revision, i.created_by::text,
+		SELECT i.id::text, i.name, i.email, i.locale, i.expires_at, i.created_at, i.revision, COALESCE(i.created_by::text, i.created_by_user_key, ''),i.created_by_name,i.created_by_email,i.created_by IS NULL,
 		       COALESCE(r.id::text, ''), COALESCE(r.system_key, ''), COALESCE(r.name, ''), COALESCE(r.description, ''), COALESCE(r.revision, 0),
 		       COALESCE(rp.permission_key, '')
 		FROM selected_invitations AS i
@@ -1113,7 +1139,7 @@ func scanInvitations(ctx context.Context, db interface {
 		var invitation domain.Invitation
 		var role domain.Role
 		var permission string
-		if err := rows.Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy, &role.ID, &role.SystemKey, &role.Name, &role.Description, &role.Revision, &permission); err != nil {
+		if err := rows.Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy, &invitation.CreatedByName, &invitation.CreatedByEmail, &invitation.CreatorDeleted, &role.ID, &role.SystemKey, &role.Name, &role.Description, &role.Revision, &permission); err != nil {
 			return application.InvitationPage{}, err
 		}
 		current := invitations[invitation.ID]
@@ -1470,7 +1496,7 @@ func lockInvitationMutationScope(ctx context.Context, tx *sql.Tx, actorID, invit
 		return domain.Invitation{}, nil, false, nil, err
 	}
 	var invitation domain.Invitation
-	if err := tx.QueryRowContext(ctx, `SELECT id::text, name, email, locale, expires_at, created_at, revision, created_by::text FROM auth_user_invitations WHERE id = $1::uuid FOR UPDATE`, invitationID).Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id::text, name, email, locale, expires_at, created_at, revision, COALESCE(created_by::text, created_by_user_key, ''), created_by_name, created_by_email, created_by IS NULL FROM auth_user_invitations WHERE id = $1::uuid FOR UPDATE`, invitationID).Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.Locale, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.Revision, &invitation.CreatedBy, &invitation.CreatedByName, &invitation.CreatedByEmail, &invitation.CreatorDeleted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Invitation{}, nil, false, nil, application.ErrInvitationNotFound
 		}
@@ -1532,10 +1558,10 @@ func (s *Store) PreflightInvitation(ctx context.Context, selector, digest []byte
 func (s *Store) FindInvitationTarget(ctx context.Context, selector, digest []byte) (domain.Invitation, error) {
 	var invitation domain.Invitation
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id::text, name, email, expires_at, created_at, updated_at, revision, created_by::text
+		SELECT id::text, name, email, expires_at, created_at, updated_at, revision, COALESCE(created_by::text,created_by_user_key,''),created_by_name,created_by_email,created_by IS NULL
 		FROM auth_user_invitations
 		WHERE selector = $1 AND verifier_digest = $2 AND expires_at > clock_timestamp()`, selector, digest).
-		Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.UpdatedAt, &invitation.Revision, &invitation.CreatedBy)
+		Scan(&invitation.ID, &invitation.Name, &invitation.Email, &invitation.ExpiresAt, &invitation.CreatedAt, &invitation.UpdatedAt, &invitation.Revision, &invitation.CreatedBy, &invitation.CreatedByName, &invitation.CreatedByEmail, &invitation.CreatorDeleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Invitation{}, application.ErrInvitationInvalid
 	}

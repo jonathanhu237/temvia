@@ -27,7 +27,7 @@ export const adminTemplateFiles = [
   'src/features/access/access-components.tsx', 'src/features/access/access-error.tsx', 'src/features/access/access.test.tsx', 'src/features/access/data-table.tsx', 'src/features/access/drafts.ts', 'src/features/access/invitation-acceptance-form.tsx', 'src/features/access/invitations-page.tsx', 'src/features/access/queries.ts', 'src/features/access/roles-page.tsx', 'src/features/access/users-page.tsx',
   'src/features/auth/preferences-menu.tsx',
   'src/features/auth/session-monitor.tsx', 'src/features/auth/session-monitor.test.tsx',
-  'src/features/access/online-users-page.tsx', 'src/features/access/online-users-page.test.tsx',
+  'src/features/access/online-users-page.tsx', 'src/features/access/online-users-page.test.tsx', 'src/features/access/user-lifecycle.test.tsx',
   'src/routes/_authenticated/online-users.tsx',
   'src/hooks/use-mobile.tsx', 'src/index.css', 'src/lib/utils.ts', 'src/main.tsx', 'src/routeTree.gen.ts',
   'src/routes/-setup.test.ts',
@@ -41,7 +41,7 @@ export const adminTemplateFiles = [
   'src/shared/theme/index.test.tsx', 'src/shared/theme/index.tsx',
   'src/features/settings/email-settings-page.tsx', 'src/features/settings/operation-log-retention-card.tsx', 'src/features/settings/settings-navigation.tsx', 'src/features/settings/settings-section.tsx', 'src/features/settings/settings.test.tsx', 'src/features/settings/system-identity-page.test.tsx', 'src/features/settings/system-identity-page.tsx',
   'src/test/msw.ts', 'src/test/setup.ts',
-  'e2e/auth.spec.ts', 'e2e/online-users.spec.ts', 'e2e/system-identity.spec.ts',
+  'e2e/auth.spec.ts', 'e2e/online-users.spec.ts', 'e2e/system-identity.spec.ts', 'e2e/user-lifecycle.spec.ts',
 ];
 
 export const requiredTemplateFiles = [
@@ -63,6 +63,10 @@ export const requiredTemplateFiles = [
   'api/internal/auth/adapter/postgres/store_test.go', 'api/internal/auth/adapter/postgres/store_integration_test.go', 'api/internal/auth/adapter/postgres/limiter_test.go', 'api/internal/auth/adapter/postgres/settings.go', 'api/internal/auth/adapter/postgres/identity.go', 'api/internal/auth/adapter/postgres/identity_integration_test.go',
   'api/internal/auth/adapter/postgres/recovery.go', 'api/internal/auth/adapter/postgres/access.go', 'api/internal/auth/adapter/postgres/outbox.go', 'api/internal/auth/adapter/postgres/sessions.go', 'api/internal/auth/adapter/postgres/limiter.go', 'api/internal/auth/adapter/postgres/cleanup.go', 'api/internal/auth/adapter/postgres/state_integration_test.go',
   'api/migrations/000008_postgres_state.up.sql', 'api/migrations/000008_postgres_state.down.sql', 'api/migrations/000009_abuse_protection.up.sql', 'api/migrations/000009_abuse_protection.down.sql',
+  'api/migrations/000010_user_lifecycle.up.sql', 'api/migrations/000010_user_lifecycle.down.sql',
+  'api/internal/auth/application/user_lifecycle.go', 'api/internal/auth/adapter/postgres/user_lifecycle.go',
+  'api/internal/auth/adapter/postgres/user_lifecycle_integration_test.go', 'api/internal/auth/adapter/httpapi/user_lifecycle.go',
+  'api/internal/auth/adapter/httpapi/user_lifecycle_integration_test.go', 'api/internal/auth/adapter/httpapi/user_lifecycle_concurrency_test.go', 'api/internal/auth/adapter/httpapi/user_lifecycle_migration_test.go',
   'api/internal/auth/adapter/mail/smtp.go', 'api/internal/auth/adapter/mail/smtp_test.go',
   'api/internal/auth/adapter/httpapi/problem.go', 'api/internal/auth/adapter/httpapi/json.go', 'api/internal/auth/adapter/httpapi/operation_logs.go', 'api/internal/auth/adapter/httpapi/operation_log_test.go',
   'api/internal/auth/adapter/httpapi/routes.go', 'api/internal/auth/adapter/httpapi/response.go', 'api/internal/auth/adapter/httpapi/system_identity.go', 'api/internal/auth/adapter/httpapi/system_identity_http_test.go', 'api/internal/auth/adapter/httpapi/online.go', 'api/internal/auth/adapter/httpapi/online_test.go', 'api/internal/auth/adapter/httpapi/online_integration_test.go',

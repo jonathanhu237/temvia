@@ -29,6 +29,8 @@ const typeKeys: Record<string, string> = {
 }
 
 const codeKeys: Record<string, string> = {
+  account_disabled: 'problems:accountDisabled',
+  self_user_operation: 'problems:selfUserOperation',
   invalid_request: 'problems:invalidRequest',
   invalid_credentials: 'problems:invalidCredentials',
   unauthenticated: 'problems:unauthenticated',
@@ -83,6 +85,10 @@ export function isUnauthenticated(error: unknown): boolean {
   return error instanceof ApiProblemError && error.problem.status === 401 && (
     error.problem.type === '/problems/unauthenticated' || error.problem.code === 'unauthenticated'
   )
+}
+
+export function isAccountDisabled(error: unknown): boolean {
+  return error instanceof ApiProblemError && error.problem.status === 401 && error.problem.code === 'account_disabled'
 }
 
 export function isForbidden(error: unknown): boolean {

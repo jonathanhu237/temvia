@@ -8,6 +8,8 @@ var (
 	ErrAccountNotFound               = errors.New("account not found")
 	ErrInvalidCredentials            = errors.New("invalid credentials")
 	ErrUnauthenticated               = errors.New("unauthenticated")
+	ErrAccountDisabled               = errors.New("account disabled")
+	ErrSelfUserOperation             = errors.New("cannot deactivate or delete own account")
 	ErrRateLimited                   = errors.New("rate limited")
 	ErrDependencyUnavailable         = errors.New("dependency unavailable")
 	ErrPasswordHashBusy              = errors.New("password hashing capacity unavailable")

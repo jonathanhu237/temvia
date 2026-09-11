@@ -170,6 +170,9 @@ func TestStoreIntegrationRejectsNonExactSchemaVersions(t *testing.T) {
 }
 
 func resetAuthState(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `DELETE FROM auth_deleted_user_identities`); err != nil {
+		return err
+	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM auth_sessions`); err != nil {
 		return err
 	}

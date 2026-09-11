@@ -126,7 +126,7 @@ func DefaultPermissionCatalog() PermissionCatalog {
 		PermissionDefinition{Key: PermissionOnlineUsersRead, Resource: "online-users", Action: "read", LabelKey: "permissions.onlineUsers.read", Description: "View users with a valid sign-in session."},
 		PermissionDefinition{Key: PermissionOnlineUsersWrite, Resource: "online-users", Action: "write", LabelKey: "permissions.onlineUsers.write", Description: "Sign users out of all devices."},
 		PermissionDefinition{Key: PermissionUsersRead, Resource: "users", Action: "read", LabelKey: "permissions.users.read", Description: "View users and their assigned roles."},
-		PermissionDefinition{Key: PermissionUsersWrite, Resource: "users", Action: "write", LabelKey: "permissions.users.write", Description: "Assign roles to users."},
+		PermissionDefinition{Key: PermissionUsersWrite, Resource: "users", Action: "write", LabelKey: "permissions.users.write", Description: "Assign roles and deactivate, reactivate, or delete other users, including Super Admins."},
 		PermissionDefinition{Key: PermissionRolesRead, Resource: "roles", Action: "read", LabelKey: "permissions.roles.read", Description: "View roles and their grants."},
 		PermissionDefinition{Key: PermissionRolesWrite, Resource: "roles", Action: "write", LabelKey: "permissions.roles.write", Description: "Create, edit, and delete custom roles."},
 		PermissionDefinition{Key: PermissionInvitationsRead, Resource: "invitations", Action: "read", LabelKey: "permissions.invitations.read", Description: "View invitations and their status."},
@@ -353,16 +353,19 @@ type AccessUser struct {
 }
 
 type Invitation struct {
-	ID        string
-	Name      string
-	Email     string
-	Locale    Locale
-	Roles     []Role
-	ExpiresAt time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Revision  int64
-	CreatedBy string
+	ID             string
+	Name           string
+	Email          string
+	Locale         Locale
+	Roles          []Role
+	ExpiresAt      time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	Revision       int64
+	CreatedBy      string
+	CreatedByName  string
+	CreatedByEmail string
+	CreatorDeleted bool
 }
 
 func CanonicalRoleName(value string) string {

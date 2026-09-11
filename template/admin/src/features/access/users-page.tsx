@@ -4,6 +4,8 @@ import { Mail, Pencil, Save, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent } from '@/components/ui/card'
 import { DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Dialog } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -18,25 +20,29 @@ import { PageNavigation, RoleBadges, canAssignRole, formatDate, type AccessUser 
 import { usersOptions } from './queries'
 import { notifyRequestError, notifySuccess, readFailureFeedback, useRequestErrorToast } from '@/shared/feedback'
 
-export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = false }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean }) {
-  const { t, i18n } = useTranslation(['access', 'common'])
+export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = false, actorID }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean; actorID?: string }) {
+  const canAssign = canManage && (actorSuperAdmin || actorPermissions === undefined || actorPermissions.includes('roles.read'))
+  const { t, i18n } = useTranslation(['access', 'common', 'problems'])
   const queryClient = useQueryClient()
   const [userCursor, setUserCursor] = useState('')
   const [userHistory, setUserHistory] = useState<string[]>([])
   const [userSearch, setUserSearch] = useState('')
+  const [userStatus, setUserStatus] = useState<'active' | 'disabled' | ''>('')
   const [userSort, setUserSort] = useState<'name' | 'email' | 'roles' | 'createdAt'>('createdAt')
   const [userDirection, setUserDirection] = useState<'asc' | 'desc'>('desc')
-  const users = useQuery(usersOptions(api, { cursor: userCursor, q: userSearch, sort: userSort, direction: userDirection }))
+  const users = useQuery(usersOptions(api, { cursor: userCursor, q: userSearch, status: userStatus || undefined, sort: userSort, direction: userDirection }))
   const roleAdministration = useQuery({
     queryKey: ['access', 'roles'],
     queryFn: ({ signal }) => api.getRoles ? api.getRoles(signal) : Promise.reject(new Error('missing getRoles')),
     retry: false,
-    enabled: canManage,
+    enabled: canAssign,
     staleTime: 10_000,
   })
   useRequestErrorToast(users.error, users.isError, t, readFailureFeedback(users.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
-  useRequestErrorToast(roleAdministration.error, roleAdministration.isError && canManage, t, readFailureFeedback(roleAdministration.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
+  useRequestErrorToast(roleAdministration.error, roleAdministration.isError && canAssign, t, readFailureFeedback(roleAdministration.error, { unavailableTitle: t('unavailableTitle'), unavailableDescription: t('unavailableDescription'), forbiddenTitle: t('forbiddenTitle'), forbiddenDescription: t('forbiddenDescription') }))
   const [assignmentOpen, setAssignmentOpen] = useState(false)
+  const [deleteEmail, setDeleteEmail] = useState('')
+  const [lifecycleTarget, setLifecycleTarget] = useState<{ user: AccessUser; action: 'deactivate' | 'reactivate' | 'delete' }>()
   const [assignmentUser, setAssignmentUser] = useState<AccessUser | undefined>()
   const [assignmentGeneration, setAssignmentGeneration] = useState(0)
   const assignmentGenerationRef = useRef(0)
@@ -50,7 +56,7 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     setUserCursor(''); setUserHistory([])
   }
   const usersForbidden = users.isError && isForbidden(users.error)
-  const roleAdministrationForbidden = canManage && roleAdministration.isError && isForbidden(roleAdministration.error)
+  const roleAdministrationForbidden = canAssign && roleAdministration.isError && isForbidden(roleAdministration.error)
   const roleList = roleAdministrationForbidden ? [] : roleAdministration.data?.roles ?? []
   const activeAssignmentUser = assignmentUser ? users.data?.users.find((item) => item.id === assignmentUser.id) ?? assignmentUser : undefined
   const openAssignment = (user: AccessUser) => {
@@ -61,6 +67,24 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     setAssignmentOpen(true)
   }
 
+  const lifecycle = useMutation({
+    mutationFn: async ({ user, action }: { user: AccessUser; action: 'deactivate' | 'reactivate' | 'delete' }) => {
+      const mutate = action === 'deactivate' ? api.deactivateUser : action === 'reactivate' ? api.reactivateUser : api.deleteUser
+      if (!mutate) throw new Error('missing user lifecycle API')
+      return mutate(user.id, user.authVersion)
+    },
+    onSuccess: () => {
+      notifySuccess(t('lifecycleSaved'))
+      setLifecycleTarget(undefined)
+      setDeleteEmail('')
+      void queryClient.invalidateQueries({ queryKey: ['access'] })
+      void queryClient.invalidateQueries({ queryKey: ['online-users'] })
+    },
+    onError: (error) => {
+      notifyRequestError(error, t, { title: t('actions') })
+      if (error instanceof ApiProblemError && error.problem.status === 409) { setLifecycleTarget(undefined); setDeleteEmail(''); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }) }
+    },
+  })
   const userColumns = useMemo<ColumnDef<AccessUser, unknown>[]>(() => [
     {
       accessorKey: 'name',
@@ -71,6 +95,10 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
       accessorKey: 'email',
       header: ({ column }) => <SortableHeader column={column}>{t('inviteEmail')}</SortableHeader>,
       cell: ({ row }) => <span className="text-muted-foreground">{row.original.email}</span>,
+    },
+    {
+      id: 'status', header: t('status'), enableSorting: false,
+      cell: ({ row }) => <Badge variant={row.original.disabled ? 'secondary' : 'outline'}>{t(row.original.disabled ? 'disabledStatus' : 'activeStatus')}</Badge>,
     },
     {
       id: 'roles',
@@ -87,16 +115,21 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
       id: 'actions',
       enableSorting: false,
       header: () => <span>{t('actions')}</span>,
-      cell: ({ row }) => canManage && !roleAdministrationForbidden ? <Button type="button" variant="ghost" size="sm" onClick={() => openAssignment(row.original)}><Pencil aria-hidden="true" data-icon="inline-start" />{t('assignRoles')}</Button> : null,
+      cell: ({ row }) => canManage ? <div className="flex flex-wrap justify-end gap-1">
+        {canAssign && !roleAdministrationForbidden ? <Button type="button" variant="ghost" size="sm" onClick={() => openAssignment(row.original)}><Pencil aria-hidden="true" data-icon="inline-start" />{t('assignRoles')}</Button> : null}
+        <Button size="sm" variant="outline" disabled={lifecycle.isPending || users.isError || row.original.id === actorID} title={row.original.id === actorID ? t('problems:selfUserOperation') : undefined} onClick={() => { setDeleteEmail(''); setLifecycleTarget({ user: row.original, action: row.original.disabled ? 'reactivate' : 'deactivate' }) }}>{t(row.original.disabled ? 'reactivate' : 'deactivate')}</Button>
+        <Button size="sm" variant="destructive" disabled={lifecycle.isPending || users.isError || row.original.id === actorID} title={row.original.id === actorID ? t('problems:selfUserOperation') : undefined} onClick={() => { setDeleteEmail(''); setLifecycleTarget({ user: row.original, action: 'delete' }) }}>{t('deleteUser')}</Button>
+      </div> : null,
     },
-  ], [canManage, i18n.language, roleAdministrationForbidden, t])
+  ], [canManage, canAssign, actorID, users.isError, i18n.language, lifecycle.isPending, roleAdministrationForbidden, t])
 
-  if (users.isPending || (canManage && roleAdministration.isPending)) return <p role="status">{t('common:loading')}</p>
+  if (users.isPending || (canAssign && roleAdministration.isPending)) return <p role="status">{t('common:loading')}</p>
   return <section className="flex flex-col gap-5" aria-labelledby="users-title">
     <h1 id="users-title" className="text-2xl font-semibold tracking-tight">{t('usersTitle')}</h1>
     <Card>
       <CardContent className="pt-6">
         {users.isError && (usersForbidden || !users.data) ? <p role="status" className="text-sm text-muted-foreground">{usersForbidden ? t('forbiddenDescription') : t('common:refreshPage')}</p> : <>
+        <Field className="mb-4 max-w-xs"><FieldLabel htmlFor="user-status">{t('filterByStatus')}</FieldLabel><Select value={userStatus || 'all'} onValueChange={(value) => { setUserStatus(value === 'all' ? '' : value as 'active' | 'disabled'); setUserCursor(''); setUserHistory([]) }}><SelectTrigger id="user-status"><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t('allStatuses')}</SelectItem><SelectItem value="active">{t('activeStatus')}</SelectItem><SelectItem value="disabled">{t('disabledStatus')}</SelectItem></SelectGroup></SelectContent></Select></Field>
         <DataTable
           columns={userColumns}
           data={users.data?.users ?? []}
@@ -115,7 +148,15 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
         </>}
       </CardContent>
     </Card>
-    {!usersForbidden && !roleAdministrationForbidden ? <UserAssignmentDialog key={activeAssignmentUser?.id ?? 'none'} open={assignmentOpen} user={activeAssignmentUser} roles={roleList} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin} api={api} canManage={canManage} assignmentGeneration={assignmentGeneration} onClose={() => setAssignmentOpen(false)} onDone={(_userID, generation) => { if (generation !== assignmentGenerationRef.current) return; setAssignmentOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }); void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] }) }} /> : null}
+    <Dialog open={Boolean(lifecycleTarget)} onOpenChange={(open) => { if (!open && !lifecycle.isPending) { setLifecycleTarget(undefined); setDeleteEmail('') } }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>{lifecycleTarget?.action === 'delete' ? t('deleteUser') : lifecycleTarget?.action === 'deactivate' ? t('deactivate') : t('reactivate')}</DialogTitle><DialogDescription>{lifecycleTarget ? (lifecycleTarget.action === 'delete' ? t('deleteWarning') : lifecycleTarget.action === 'deactivate' ? t('confirmDeactivate', { name: lifecycleTarget.user.name }) : t('confirmReactivate', { name: lifecycleTarget.user.name })) : ''}</DialogDescription></DialogHeader>
+        {lifecycleTarget ? <p>{lifecycleTarget.user.name} · {lifecycleTarget.user.email}</p> : null}
+        {lifecycleTarget?.action === 'delete' ? <Field><FieldLabel htmlFor="delete-user-email">{t('deletePrompt', { email: lifecycleTarget.user.email })}</FieldLabel><Input id="delete-user-email" value={deleteEmail} disabled={lifecycle.isPending} onChange={(event) => setDeleteEmail(event.target.value)} /></Field> : null}
+        <DialogFooter><DialogClose asChild><Button type="button" variant="outline" disabled={lifecycle.isPending}>{t('common:cancel')}</Button></DialogClose><Button type="button" variant={lifecycleTarget?.action === 'delete' ? 'destructive' : 'default'} disabled={lifecycle.isPending || (lifecycleTarget?.action === 'delete' && deleteEmail !== lifecycleTarget.user.email)} onClick={() => { if (lifecycleTarget && !lifecycle.isPending && (lifecycleTarget.action !== 'delete' || deleteEmail === lifecycleTarget.user.email)) lifecycle.mutate(lifecycleTarget) }}>{lifecycleTarget?.action === 'delete' ? t('deleteUser') : lifecycleTarget?.action === 'deactivate' ? t('deactivate') : t('reactivate')}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    {canAssign && !usersForbidden && !roleAdministrationForbidden ? <UserAssignmentDialog key={activeAssignmentUser?.id ?? 'none'} open={assignmentOpen} user={activeAssignmentUser} roles={roleList} actorPermissions={actorPermissions} actorSuperAdmin={actorSuperAdmin} api={api} canManage={canManage} assignmentGeneration={assignmentGeneration} onClose={() => setAssignmentOpen(false)} onDone={(_userID, generation) => { if (generation !== assignmentGenerationRef.current) return; setAssignmentOpen(false); void queryClient.invalidateQueries({ queryKey: ['access', 'users'] }); void queryClient.invalidateQueries({ queryKey: ['auth', 'current-user'] }) }} /> : null}
   </section>
 }
 

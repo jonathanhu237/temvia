@@ -82,6 +82,10 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "validation_failed", "", validationFields(err))
 	case applicationError(err, application.ErrInvalidCredentials):
 		writeProblem(w, http.StatusUnauthorized, "invalid-credentials")
+	case applicationError(err, application.ErrAccountDisabled):
+		writeProblemWithCode(w, http.StatusUnauthorized, "unauthenticated", "account_disabled", "", nil)
+	case applicationError(err, application.ErrSelfUserOperation):
+		writeProblemWithCode(w, http.StatusForbidden, "forbidden", "self_user_operation", "", nil)
 	case applicationError(err, application.ErrUnauthenticated):
 		writeProblem(w, http.StatusUnauthorized, "unauthenticated")
 	case applicationError(err, application.ErrInvalidSetupToken):

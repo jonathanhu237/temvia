@@ -294,17 +294,17 @@ func TestOnlineHTTPConcurrentKickRejectsStaleLogin(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("concurrent login did not finish after session creation was released")
 	}
-	if loginResponse.Code != http.StatusOK {
+	if loginResponse.Code != http.StatusUnauthorized {
 		t.Fatalf("stale concurrent login status = %d, body=%s", loginResponse.Code, loginResponse.Body.String())
 	}
-	staleCookie := sessionCookieFromResponse(t, loginResponse)
-	sessionCookies = append(sessionCookies, staleCookie)
+	// Session creation now rejects stale authority before issuing a credential.
+	if len(loginResponse.Result().Cookies()) != 0 { t.Fatal("stale login issued a cookie") }
 
 	if users := onlineHTTPList(t, managerHandler, managerCookie); findOnlineHTTPUserOptional(users, fixture.targetID) != nil {
 		t.Fatalf("stale concurrent login remained online: %+v", users)
 	}
 	for path := range map[string]struct{}{"/api/auth/session-status": {}, "/api/auth/me": {}} {
-		if response := onlineHTTPRequest(managerHandler, http.MethodGet, path, ``, staleCookie); response.Code != http.StatusUnauthorized {
+		if response := onlineHTTPRequest(managerHandler, http.MethodGet, path, ``, nil); response.Code != http.StatusUnauthorized {
 			t.Errorf("stale concurrent login %s status = %d, want 401", path, response.Code)
 		}
 	}

@@ -16,6 +16,7 @@ type User struct {
 	Name      string
 	Email     string
 	CreatedAt time.Time
+	Disabled  bool
 }
 
 type Account struct {

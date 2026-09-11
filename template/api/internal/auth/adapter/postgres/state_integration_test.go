@@ -26,7 +26,7 @@ func TestStateIntegrationSessionsPersistTouchWithoutTouchAndCleanup(t *testing.T
 		t.Fatal(err)
 	}
 	const userID = "019535d9-3df7-79fb-b466-fa907fa17f90"
-	if _, err := db.ExecContext(ctx, `INSERT INTO auth_users (id, name, email, email_canonical, password_hash) VALUES ($1::uuid, 'State User', 'state@example.com', 'state@example.com', 'hash')`, userID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO auth_users (id, name, email, email_canonical, password_hash, auth_version) VALUES ($1::uuid, 'State User', 'state@example.com', 'state@example.com', 'hash', 4)`, userID); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Config{
@@ -98,7 +98,7 @@ func TestStateIntegrationSessionsPersistTouchWithoutTouchAndCleanup(t *testing.T
 	shortConfig.SessionAbsoluteTimeout = 250 * time.Millisecond
 	absoluteStore := NewStore(db, shortConfig)
 	absoluteCredential := integrationCredential('a')
-	if err := absoluteStore.CreateVersioned(ctx, absoluteCredential, userID, 5); err != nil {
+	if err := absoluteStore.CreateVersioned(ctx, absoluteCredential, userID, 4); err != nil {
 		t.Fatal(err)
 	}
 	if got, _, err := absoluteStore.ResolveVersioned(ctx, absoluteCredential); err != nil || got != userID {

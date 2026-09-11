@@ -82,8 +82,11 @@ export interface ApiClient {
 	createRole?(input: { name: string; description: string; permissions: string[] }, signal?: AbortSignal): Promise<Role>
 	replaceRole?(id: string, input: { name: string; description: string; permissions: string[]; revision: number }, signal?: AbortSignal): Promise<Role>
 	deleteRole?(id: string, signal?: AbortSignal): Promise<void>
-	getUsers?(options?: { cursor?: string; limit?: number; q?: string; roleId?: string; sort?: string; direction?: 'asc' | 'desc' }, signal?: AbortSignal): Promise<{ users: Array<{ id: string; name: string; email: string; createdAt: string; authVersion: number; roles: Role[] }>; nextCursor?: string }>
-	replaceUserRoles?(id: string, input: { roleIds: string[]; authVersion: number }, signal?: AbortSignal): Promise<{ user: { id: string; name: string; email: string; createdAt: string; authVersion: number; roles: Role[] } }>
+	getUsers?(options?: { cursor?: string; limit?: number; q?: string; roleId?: string; status?: 'active' | 'disabled'; sort?: string; direction?: 'asc' | 'desc' }, signal?: AbortSignal): Promise<{ users: Array<{ id: string; name: string; email: string; createdAt: string; authVersion: number; disabled: boolean; roles: Role[] }>; nextCursor?: string }>
+	replaceUserRoles?(id: string, input: { roleIds: string[]; authVersion: number }, signal?: AbortSignal): Promise<{ user: { id: string; name: string; email: string; createdAt: string; authVersion: number; disabled: boolean; roles: Role[] } }>
+	deactivateUser?(id: string, authVersion: number, signal?: AbortSignal): Promise<void>
+	reactivateUser?(id: string, authVersion: number, signal?: AbortSignal): Promise<void>
+	deleteUser?(id: string, authVersion: number, signal?: AbortSignal): Promise<void>
 	getInvitations?(options?: { cursor?: string; limit?: number; q?: string; roleId?: string; status?: 'pending' | 'expired'; sort?: string; direction?: 'asc' | 'desc' }, signal?: AbortSignal): Promise<{ invitations: Invitation[]; nextCursor?: string }>
 	createInvitation?(input: { name: string; email: string; roleIds: string[] }, signal?: AbortSignal): Promise<{ invitation: Invitation }>
 	resendInvitation?(id: string, signal?: AbortSignal): Promise<{ invitation: Invitation }>
@@ -210,10 +213,13 @@ export function createApiClient(): ApiClient {
 		replaceRole: async (id, input, signal) => (await request(`/api/roles/${encodeURIComponent(id)}`, roleResponseSchema, { method: 'PUT', body: roleMutationInputSchema.parse(input), signal, expectedStatus: 200 })).role,
 		deleteRole: async (id, signal) => { await request(`/api/roles/${encodeURIComponent(id)}`, { parse: (value: unknown) => value as undefined }, { method: 'DELETE', signal, expectedStatus: 204 }) },
 		getUsers: async (options, signal) => {
-			const query = new URLSearchParams(); if (options?.cursor) query.set('cursor', options.cursor); if (options?.limit !== undefined) query.set('limit', String(options.limit)); if (options?.q) query.set('q', options.q); if (options?.roleId) query.set('roleId', options.roleId); if (options?.sort) query.set('sort', options.sort); if (options?.direction) query.set('direction', options.direction)
+			const query = new URLSearchParams(); if (options?.cursor) query.set('cursor', options.cursor); if (options?.limit !== undefined) query.set('limit', String(options.limit)); if (options?.q) query.set('q', options.q); if (options?.roleId) query.set('roleId', options.roleId); if (options?.status) query.set('status', options.status); if (options?.sort) query.set('sort', options.sort); if (options?.direction) query.set('direction', options.direction)
 			return request(`/api/users${query.size ? `?${query.toString()}` : ''}`, usersResponseSchema, { signal, expectedStatus: 200 })
 		},
 		replaceUserRoles: async (id, input, signal) => request(`/api/users/${encodeURIComponent(id)}/roles`, userRoleResponseSchema, { method: 'PUT', body: assignmentInputSchema.parse(input), signal, expectedStatus: 200 }),
+		deactivateUser: async (id, authVersion, signal) => { await request(`/api/users/${encodeURIComponent(id)}/deactivate`, { parse: () => undefined }, { method: 'POST', body: { authVersion }, signal, expectedStatus: 200 }) },
+		reactivateUser: async (id, authVersion, signal) => { await request(`/api/users/${encodeURIComponent(id)}/reactivate`, { parse: () => undefined }, { method: 'POST', body: { authVersion }, signal, expectedStatus: 200 }) },
+		deleteUser: async (id, authVersion, signal) => { await request(`/api/users/${encodeURIComponent(id)}`, { parse: () => undefined }, { method: 'DELETE', body: { authVersion }, signal, expectedStatus: 204 }) },
 		getInvitations: async (options, signal) => {
 			const query = new URLSearchParams(); if (options?.cursor) query.set('cursor', options.cursor); if (options?.limit !== undefined) query.set('limit', String(options.limit)); if (options?.q) query.set('q', options.q); if (options?.roleId) query.set('roleId', options.roleId); if (options?.status) query.set('status', options.status); if (options?.sort) query.set('sort', options.sort); if (options?.direction) query.set('direction', options.direction)
 			return request(`/api/user-invitations${query.size ? `?${query.toString()}` : ''}`, invitationsResponseSchema, { signal, expectedStatus: 200 })

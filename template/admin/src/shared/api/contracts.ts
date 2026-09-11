@@ -71,12 +71,14 @@ export const accessUserSchema = z.object({
   email: z.string(),
   createdAt: z.string(),
   authVersion: z.number().int().positive(),
+  disabled: z.boolean().default(false),
   roles: z.array(roleSchema),
 }).strict()
 
 export const usersResponseSchema = z.object({ users: z.array(accessUserSchema), nextCursor: z.string().optional() }).strict()
 export const userRoleResponseSchema = z.object({ user: accessUserSchema }).strict()
 export const invitationSchema = z.object({
+  creator: z.object({ id: z.string().optional(), name: z.string().optional(), email: z.string().optional(), deleted: z.boolean().optional() }).optional(),
   id: z.string().uuid(),
   name: z.string(),
   email: z.string(),
@@ -158,13 +160,14 @@ export const systemIdentitySchema = z.object({
 export type SystemIdentity = z.infer<typeof systemIdentitySchema>
 export const systemIdentityResponseSchema = systemIdentitySchema
 
-export const operationActorSchema = z.object({ id: z.string().optional(), name: z.string().optional(), email: z.string().optional(), kind: z.string().optional(), label: z.string().optional() }).strict()
+export const operationActorSchema = z.object({ deleted: z.boolean().optional(), id: z.string().optional(), name: z.string().optional(), email: z.string().optional(), kind: z.string().optional(), label: z.string().optional() }).strict()
 export const operationLogSchema = z.object({
   id: z.string().uuid(),
   actor: operationActorSchema,
   action: z.string(),
   objectType: z.string(),
   objectId: z.string().optional(),
+  objectDeleted: z.boolean().optional(),
   result: z.enum(['success', 'failure']),
   occurredAt: z.string(),
   sourceIp: z.string().optional(),

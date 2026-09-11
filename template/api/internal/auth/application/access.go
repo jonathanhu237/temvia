@@ -54,6 +54,12 @@ type InvitationInput struct {
 // AccessStore contains state-changing operations for the auth capability. A
 // concrete PostgreSQL adapter implements this alongside the authentication and
 // mail-outbox ports, while the application layer only sees domain values.
+type VersionedUserLifecycleStore interface {
+	DeactivateUserWithRevision(context.Context, string, string, int64) (domain.AccessUser, error)
+	ReactivateUserWithRevision(context.Context, string, string, int64) (domain.AccessUser, error)
+	DeleteUserWithRevision(context.Context, string, string, int64) error
+}
+
 type AccessStore interface {
 	ListRoles(context.Context) ([]domain.Role, error)
 	ListRoleOptions(context.Context) ([]RoleOption, error)
@@ -1069,7 +1075,7 @@ func normalizeAccessListOptions(options AccessListOptions, invitations bool) (Ac
 		return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "roleId", Code: "invalid_role"}}}
 	}
 	options.Status = strings.TrimSpace(options.Status)
-	if !invitations && options.Status != "" {
+	if !invitations && options.Status != "" && options.Status != "active" && options.Status != "disabled" {
 		return AccessListOptions{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "status", Code: "invalid_value"}}}
 	}
 	if invitations && options.Status != "" && options.Status != "pending" && options.Status != "expired" {
