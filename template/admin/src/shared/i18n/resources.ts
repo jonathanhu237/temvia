@@ -394,6 +394,7 @@ const english = {
     requestCancelled: 'The request was cancelled.',
     malformedResponse: 'The API returned an unexpected response. Try again or contact the operator.',
     mailNotConfigured: 'Email service is not configured. Contact an administrator.',
+    invalidMailSettings: 'Email settings are invalid. If you changed the SMTP host, port, or username, enter a new password; to use an unauthenticated connection, explicitly clear the saved password.',
     permissionScope: 'You can only grant permissions that you already have.',
     fields: {
       required: 'This field is required.',
@@ -818,6 +819,7 @@ const chinese: typeof english = {
     requestCancelled: '请求已取消。',
     malformedResponse: 'API 返回了异常响应，请重试或联系维护者。',
     mailNotConfigured: '邮件服务尚未配置，请联系管理员。',
+    invalidMailSettings: '邮件设置无效。如果修改了 SMTP 主机、端口或用户名，请输入新密码；如需使用无认证连接，请明确清除已保存的密码。',
     permissionScope: '你只能授予自己已经拥有的权限。',
     fields: {
       required: '此字段为必填项。',

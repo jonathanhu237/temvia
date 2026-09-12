@@ -21,6 +21,9 @@ Shared administrative configuration that applies throughout a Temvia administrat
 **Email configuration**:
 The shared delivery settings and default language for email sent by a Temvia administration app.
 
+**Email configuration management**:
+The administrative capability to configure and test email delivery. It permits using existing SMTP credentials for their configured connection, but does not grant access to retrieve those credentials.
+
 **System name（系统名称）**:
 The single shared display name identifying an administration app across its pages, browser titles, and system emails. It is freely named without a prescribed language and stays the same regardless of interface or email language.
 

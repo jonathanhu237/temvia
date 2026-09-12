@@ -38,6 +38,21 @@ describe('localized problem mapping', () => {
     expect(translateProblem(new Error('private'), i18n.t.bind(i18n))).toBe('Something went wrong. Try again.')
   })
 
+  it('localizes the SMTP credential boundary guidance in both languages', async () => {
+    await initializeI18n()
+    const error = new ApiProblemError({
+      type: '/problems/validation-failed',
+      title: 'diagnostic title',
+      status: 422,
+      code: 'invalid_mail_settings',
+    })
+    await i18n.changeLanguage('en')
+    expect(problemMessageKey(error)).toBe('problems:invalidMailSettings')
+    expect(translateProblem(error, i18n.t.bind(i18n))).toContain('enter a new password')
+    await i18n.changeLanguage('zh-CN')
+    expect(translateProblem(error, i18n.t.bind(i18n))).toContain('输入新密码')
+  })
+
   it('adds localized server field guidance to a request error', async () => {
     await initializeI18n()
     const error = new ApiProblemError({

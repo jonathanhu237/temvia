@@ -123,7 +123,7 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
     'api/internal/auth/adapter/postgres/store_test.go', 'api/internal/auth/adapter/postgres/store_integration_test.go', 'api/internal/auth/adapter/postgres/limiter_test.go',
     'api/internal/auth/adapter/postgres/recovery.go', 'api/internal/auth/adapter/postgres/access.go', 'api/internal/auth/adapter/postgres/outbox.go',
     'api/internal/auth/adapter/postgres/sessions.go', 'api/internal/auth/adapter/postgres/limiter.go', 'api/internal/auth/adapter/postgres/cleanup.go', 'api/internal/auth/adapter/postgres/state_integration_test.go',
-    'api/migrations/000008_postgres_state.up.sql', 'api/migrations/000008_postgres_state.down.sql', 'api/migrations/000009_abuse_protection.up.sql', 'api/migrations/000009_abuse_protection.down.sql',
+    'api/migrations/000008_postgres_state.up.sql', 'api/migrations/000008_postgres_state.down.sql', 'api/migrations/000009_abuse_protection.up.sql', 'api/migrations/000009_abuse_protection.down.sql', 'api/migrations/000010_user_lifecycle.up.sql', 'api/migrations/000010_user_lifecycle.down.sql',
     'api/internal/auth/adapter/mail/smtp.go', 'api/internal/auth/adapter/mail/smtp_test.go',
     'api/internal/auth/adapter/httpapi/problem.go', 'api/internal/auth/adapter/httpapi/json.go',
     'api/internal/auth/adapter/httpapi/routes.go', 'api/internal/auth/adapter/httpapi/response.go', 'api/internal/auth/adapter/httpapi/system_identity.go', 'api/internal/auth/adapter/httpapi/system_identity_http_test.go',
@@ -155,7 +155,7 @@ async function readTemplate(root: string, modulePath: string): Promise<TemplateF
     'admin/src/shared/api/problems.test.ts', 'admin/src/shared/api/problems.ts',
     'admin/src/shared/bootstrap/setup-authority.test.ts', 'admin/src/shared/bootstrap/setup-authority.ts',
     'admin/src/shared/i18n/index.test.ts', 'admin/src/shared/i18n/index.ts', 'admin/src/shared/i18n/resources.ts',
-    'admin/src/test/msw.ts', 'admin/src/test/setup.ts', 'admin/e2e/auth.spec.ts', 'admin/e2e/system-identity.spec.ts',
+    'admin/src/test/msw.ts', 'admin/src/test/setup.ts', 'admin/e2e/auth.spec.ts', 'admin/e2e/first-run.spec.ts', 'admin/e2e/system-identity.spec.ts',
   ]) {
     if (!files.some((file) => file.name === required)) {
       throw new Error(`Template is incomplete: missing ${required}. Reinstall create-temvia.`);

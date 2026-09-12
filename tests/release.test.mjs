@@ -58,7 +58,7 @@ test('rerunning an already published source resumes bookkeeping without another 
 });
 
 // Exercise the actual publication commands without accessing npm or GitHub.
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -94,7 +94,7 @@ if (${JSON.stringify(command)} === 'gh' && args[0] === 'api') console.log('[[]]'
   let calls = (await readFile(join(directory, 'calls.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   const npm = calls.find(call => call.command === 'npm');
   assert.equal(npm.args[0], 'publish');
-  assert.equal(npm.args[1], join(directory, '.release/create-temvia-0.3.0.tgz'));
+  assert.equal(npm.args[1], await realpath(join(directory, '.release/create-temvia-0.3.0.tgz')));
   assert.ok(calls.some(call => call.command === 'git' && call.args[0] === 'push'));
   result = invoke('finalize', {});
   assert.equal(result.status, 0, result.stderr);

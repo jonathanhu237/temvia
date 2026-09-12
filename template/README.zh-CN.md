@@ -10,8 +10,9 @@
 Compose 主路径需要带 Compose v2 的 Docker、Make、Node.js 24 或更新版本
 （用于生成器及跨平台密钥生成）。先启动 Docker 引擎。
 macOS 缺少 Make 时安装 Xcode Command Line Tools。
-完整首次使用流程目前仅在 macOS 测试过；Linux 与 WSL2 尚未完整验证，
-原生 Windows PowerShell 不属于这条使用路径。
+发布流程会在 Ubuntu runner 上使用全新 Compose 项目、PostgreSQL 数据卷和 Chromium
+执行一次这条路径。这只是一路 CI 验证，不是对所有 Linux／WSL2 或生产环境兼容性的承诺。
+本地完整首次使用流程已在 macOS 测试；原生 Windows PowerShell 不属于这条使用路径。
 容器外开发 API 需要 Go 1.27 或更新版本，开发前端需要 pnpm 11.24.0。
 
 ## 首次启动
@@ -182,13 +183,46 @@ docker compose up -d api admin
 ```
 
 生产不要使用 `make up`，它会启用开发 Mailpit。使用真实 SMTP。
-升级应用前停止 API、备份 PostgreSQL、执行全部新迁移后再启动新 API：
+升级应用时请按停机和备份顺序操作。API 停止后保持 PostgreSQL 运行，
+每一步命令成功完成后再执行下一步：
 
 ```sh
+(
+set -eu
+umask 077
+
+# 1. 在更换镜像或数据库结构前停止 API。
 docker compose stop api
+
+# 2. 在项目之外创建私有持久备份目录，不使用 /tmp。
+backup_dir="$(mktemp -d "${HOME:?}/temvia-backup.XXXXXX")"
+chmod 700 "$backup_dir"
+backup_file="$backup_dir/temvia-$(date -u +%Y%m%dT%H%M%SZ).sql"
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > "$backup_file.partial"
+chmod 600 "$backup_file.partial"
+mv "$backup_file.partial" "$backup_file"
+printf '备份已写入 %s\n' "$backup_file"
+
+# 3. 从更新后的源码重新构建 API、后台和迁移镜像。
+make build
+
+# 4. 显式执行全部正向迁移；失败时子 shell 立即停止。
 make migrate-up
+
+# 5. 只有迁移成功后才启动已重新构建的服务。
 docker compose up -d api admin
+)
 ```
+
+子 shell 在任一步失败后停止，不会关闭当前交互终端。
+带 `.partial` 后缀的文件表示备份失败，不能用于恢复。
+成功的备份应保留在持久存储中，并复制到受保护的异机备份位置；示例不自动管理备份保留期。
+
+升级前请将 `.env`、`EMAIL_SETTINGS_ENCRYPTION_KEY`、
+`PASSWORD_RESET_TOKEN_KEY` 和 `INVITATION_TOKEN_KEY` 单独备份到受保护的密钥存储，
+不要提交这些值，也不要把它们放入公开备份。构建或迁移失败时必须停止流程，
+先检查错误，并根据回滚计划恢复数据库及匹配的镜像，不要启动与数据库结构不兼容的 API。
+不要执行 `docker compose down -v`，PostgreSQL 数据卷中保存着应用数据。
 
 回滚前检查受影响的每项迁移并匹配 API 版本，不要把执行一次 down 当成通用回滚方案。
 数据库与加密／签名密钥分别备份。

@@ -103,10 +103,14 @@ func TestSettingsSaveEncryptsPasswordAndReloadsRuntime(t *testing.T) {
 	}
 }
 
-func TestSettingsSaveUsesOptimisticRevisionAndPreservesOmittedPassword(t *testing.T) {
+func TestSettingsSaveUsesOptimisticRevisionAndPreservesOmittedPasswordForSameIdentity(t *testing.T) {
 	store := &settingsStoreFake{}
 	box, _ := NewAESGCMSecretBox(bytes.Repeat([]byte{0x31}, 32))
-	service := NewSettingsManagement(store, box, func(SMTPSettings) (Mailer, error) { return &settingsMailerFake{}, nil }, nil)
+	var captured []SMTPSettings
+	service := NewSettingsManagement(store, box, func(settings SMTPSettings) (Mailer, error) {
+		captured = append(captured, settings)
+		return &settingsMailerFake{}, nil
+	}, nil)
 	password := "secret-password"
 	first := validEmailSettingsInput(0)
 	first.Password = &password
@@ -122,13 +126,164 @@ func TestSettingsSaveUsesOptimisticRevisionAndPreservesOmittedPassword(t *testin
 		t.Fatalf("stale save reached store = %d calls", store.saveCalls)
 	}
 	second := validEmailSettingsInput(1)
-	second.Host = "smtp-2.example.com"
+	second.FromName = "Operations Mailer"
+	second.DefaultLocale = "zh-CN"
 	view, err := service.SaveEmailSettings(context.Background(), second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if view.Revision != 2 || !bytes.Equal(store.current.PasswordCiphertext, originalCiphertext) {
 		t.Fatalf("preserved password or revision failed: view=%#v", view)
+	}
+	if len(captured) != 2 || captured[1].Password != password {
+		t.Fatalf("same-identity save did not reuse the password: %#v", captured)
+	}
+}
+
+func TestSettingsSMTPIdentityTrimsWhitespaceButPreservesCase(t *testing.T) {
+	store := &settingsStoreFake{}
+	box, _ := NewAESGCMSecretBox(bytes.Repeat([]byte{0x45}, 32))
+	var captured []SMTPSettings
+	service := NewSettingsManagement(store, box, func(settings SMTPSettings) (Mailer, error) {
+		captured = append(captured, settings)
+		return &settingsMailerFake{}, nil
+	}, nil)
+	password := "old-secret"
+	first := validEmailSettingsInput(0)
+	first.Host = " smtp.example.com "
+	first.Username = " mailer "
+	first.Password = &password
+	if _, err := service.SaveEmailSettings(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	same := validEmailSettingsInput(1)
+	same.Host = "smtp.example.com "
+	same.Username = "mailer"
+	if _, err := service.SaveEmailSettings(context.Background(), same); err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 2 || captured[1].Password != password {
+		t.Fatalf("trimmed identity did not reuse the password: %#v", captured)
+	}
+	changedCase := validEmailSettingsInput(2)
+	changedCase.Host = "SMTP.example.com"
+	if _, err := service.SaveEmailSettings(context.Background(), changedCase); !errors.Is(err, ErrInvalidMailSettings) {
+		t.Fatalf("case-changed host error = %v", err)
+	}
+	changedUserCase := validEmailSettingsInput(2)
+	changedUserCase.Username = "MAILER"
+	if _, err := service.SaveEmailSettings(context.Background(), changedUserCase); !errors.Is(err, ErrInvalidMailSettings) {
+		t.Fatalf("case-changed username error = %v", err)
+	}
+	if len(captured) != 2 {
+		t.Fatalf("case changes reached the mailer factory: %#v", captured)
+	}
+}
+
+func TestSettingsRejectsPasswordReuseAfterSMTPIdentityChanges(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		mutate func(*EmailSettingsInput)
+	}{
+		{name: "host", mutate: func(input *EmailSettingsInput) { input.Host = "smtp-other.example.com" }},
+		{name: "port", mutate: func(input *EmailSettingsInput) { input.Port = 2525 }},
+		{name: "username", mutate: func(input *EmailSettingsInput) { input.Username = "other-mailer" }},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := &settingsStoreFake{}
+			box, _ := NewAESGCMSecretBox(bytes.Repeat([]byte{0x42}, 32))
+			var captured []SMTPSettings
+			service := NewSettingsManagement(store, box, func(settings SMTPSettings) (Mailer, error) {
+				captured = append(captured, settings)
+				return &settingsMailerFake{}, nil
+			}, nil)
+			password := "old-secret"
+			first := validEmailSettingsInput(0)
+			first.Password = &password
+			if _, err := service.SaveEmailSettings(context.Background(), first); err != nil {
+				t.Fatal(err)
+			}
+			before := append([]byte(nil), store.current.PasswordCiphertext...)
+			changed := validEmailSettingsInput(1)
+			testCase.mutate(&changed)
+			if _, err := service.SaveEmailSettings(context.Background(), changed); !errors.Is(err, ErrInvalidMailSettings) {
+				t.Fatalf("changed-identity save error = %v", err)
+			}
+			if store.saveCalls != 1 || !bytes.Equal(store.current.PasswordCiphertext, before) {
+				t.Fatalf("rejected save changed state: calls=%d record=%#v", store.saveCalls, store.current)
+			}
+			if err := service.TestEmailSettings(context.Background(), changed, "admin@example.com"); !errors.Is(err, ErrInvalidMailSettings) {
+				t.Fatalf("changed-identity test error = %v", err)
+			}
+			if len(captured) != 1 || captured[0].Password != password {
+				t.Fatalf("rejected test handed a credential to the new connection: %#v", captured)
+			}
+
+			newPassword := "new-secret"
+			changed.Password = &newPassword
+			if _, err := service.SaveEmailSettings(context.Background(), changed); err != nil {
+				t.Fatalf("explicit replacement save error = %v", err)
+			}
+			if len(captured) != 2 || captured[1].Password != newPassword || captured[1].Host != changed.Host || captured[1].Username != changed.Username {
+				t.Fatalf("replacement save settings = %#v", captured)
+			}
+		})
+	}
+}
+
+func TestSettingsIdentityChangeCanExplicitlyClearPasswordForUnauthenticatedSMTP(t *testing.T) {
+	store := &settingsStoreFake{}
+	box, _ := NewAESGCMSecretBox(bytes.Repeat([]byte{0x43}, 32))
+	var captured []SMTPSettings
+	service := NewSettingsManagement(store, box, func(settings SMTPSettings) (Mailer, error) {
+		captured = append(captured, settings)
+		return &settingsMailerFake{}, nil
+	}, nil)
+	password := "old-secret"
+	first := validEmailSettingsInput(0)
+	first.Password = &password
+	if _, err := service.SaveEmailSettings(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	cleared := validEmailSettingsInput(1)
+	cleared.Host = "mailpit"
+	cleared.Port = 1025
+	cleared.Username = ""
+	cleared.ClearPassword = true
+	if _, err := service.SaveEmailSettings(context.Background(), cleared); err != nil {
+		t.Fatalf("clear save error = %v", err)
+	}
+	if len(captured) != 2 || captured[1].Password != "" || captured[1].Username != "" || store.current.PasswordCiphertext != nil {
+		t.Fatalf("clear save retained credentials: captured=%#v record=%#v", captured, store.current)
+	}
+	if err := service.TestEmailSettings(context.Background(), cleared, "admin@example.com"); err != nil {
+		t.Fatalf("clear test error = %v", err)
+	}
+	if len(captured) != 3 || captured[2].Password != "" || captured[2].Username != "" {
+		t.Fatalf("clear test used credentials: %#v", captured)
+	}
+}
+
+func TestSettingsTestRejectsStaleRevisionBeforeDecryptingSavedPassword(t *testing.T) {
+	store := &settingsStoreFake{}
+	box, _ := NewAESGCMSecretBox(bytes.Repeat([]byte{0x44}, 32))
+	var captured []SMTPSettings
+	service := NewSettingsManagement(store, box, func(settings SMTPSettings) (Mailer, error) {
+		captured = append(captured, settings)
+		return &settingsMailerFake{}, nil
+	}, nil)
+	password := "old-secret"
+	first := validEmailSettingsInput(0)
+	first.Password = &password
+	if _, err := service.SaveEmailSettings(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	stale := validEmailSettingsInput(0)
+	if err := service.TestEmailSettings(context.Background(), stale, "admin@example.com"); !errors.Is(err, ErrStaleRevision) {
+		t.Fatalf("stale test error = %v", err)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("stale test created a new mailer: %#v", captured)
 	}
 }
 
@@ -210,6 +365,48 @@ func TestSettingsSerializesRuntimeReloadAfterConcurrentSaves(t *testing.T) {
 	}
 	if store.current == nil || store.current.Host != "smtp-b.example.com" || store.current.Revision != 2 {
 		t.Fatalf("final settings = %#v", store.current)
+	}
+}
+
+func TestSettingsTestSendsWithReplacementAndSameIdentityPassword(t *testing.T) {
+	store := &settingsStoreFake{}
+	box, _ := NewAESGCMSecretBox(bytes.Repeat([]byte{0x46}, 32))
+	var captured []SMTPSettings
+	var mailers []*settingsMailerFake
+	service := NewSettingsManagement(store, box, func(settings SMTPSettings) (Mailer, error) {
+		captured = append(captured, settings)
+		mailer := &settingsMailerFake{}
+		mailers = append(mailers, mailer)
+		return mailer, nil
+	}, nil)
+	oldPassword := "old-secret"
+	first := validEmailSettingsInput(0)
+	first.Password = &oldPassword
+	if _, err := service.SaveEmailSettings(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+
+	// An unchanged connection may test the current draft without sending the
+	// encrypted password back through the form.
+	sameIdentity := validEmailSettingsInput(1)
+	if err := service.TestEmailSettings(context.Background(), sameIdentity, "same@example.com"); err != nil {
+		t.Fatalf("same-identity test error = %v", err)
+	}
+	if len(captured) != 2 || captured[1].Password != oldPassword || len(mailers[1].messages) != 1 || mailers[1].messages[0].To != "same@example.com" {
+		t.Fatalf("same-identity test settings/messages = %#v / %#v", captured, mailers)
+	}
+
+	// A changed connection must use the explicitly supplied replacement and
+	// the test must remain a send-only operation.
+	replacement := "replacement-secret"
+	changed := validEmailSettingsInput(1)
+	changed.Host = "smtp-new.example.com"
+	changed.Password = &replacement
+	if err := service.TestEmailSettings(context.Background(), changed, "replacement@example.com"); err != nil {
+		t.Fatalf("replacement test error = %v", err)
+	}
+	if store.saveCalls != 1 || len(captured) != 3 || captured[2].Password != replacement || captured[2].Host != changed.Host || len(mailers[2].messages) != 1 || mailers[2].messages[0].To != "replacement@example.com" {
+		t.Fatalf("replacement test side effects = saves:%d settings:%#v mailers:%#v", store.saveCalls, captured, mailers)
 	}
 }
 

@@ -31,15 +31,14 @@ npm 版本和 `v0.x.y` 标签才是已发布版本；无需每次手改 package.
 1. 按提交计算版本，验证版本规则。
 2. 运行生成器类型检查、构建、CLI 和 Git 测试；API 测试、vet 和构建；后台 lint、类型检查、单元测试和构建。
 3. 对实际 npm tarball 做安装、生成项目、文件清单和模块替换验收。
-4. 发布通过验收的同一个 tarball；创建源码标签、GitHub Release，附安装包和 SHA-256。
-5. 等待 npm latest 更新，通过公开 `pnpm create temvia@latest` 验证生成入口。
+4. 在全新的 Compose 项目和空 PostgreSQL 数据卷中构建生成的 API、后台及迁移镜像，执行全部迁移，并用 Chromium 从 API 日志中的初始化链接创建管理员后明确登录。该门禁为必需步骤，任何迁移缺失、服务、初始化或登录失败都会使 job 失败。
+5. 发布通过验收的同一个 tarball；创建源码标签、GitHub Release，附安装包和 SHA-256。
+6. 等待 npm latest 更新，通过公开 `pnpm create temvia@latest` 验证生成入口。
 
 同一分支的运行排队执行，不中断正在发布的版本。若较新的源码已先发布，旧运行只构建，
 不会将 npm 回退。registry 查询或源码历史异常时失败，不猜测版本。
 
-这套自动流程替代原先每次发布都要手动勾选的 macOS 验收门槛。
-它不代表每个版本都通过完整 macOS/浏览器验收，也不包含需要 `TEST_POSTGRES_DSN` 的真实数据库集成测试。
-涉及安装、部署或关键业务流程的变更，仍应额外做相应验收；首次使用需填写四项秘密配置。
+必需的首次启动门禁在 Ubuntu GitHub Actions runner 上针对将要发布的同一个 tarball 执行；这不是完整的 macOS／浏览器兼容性承诺。涉及安装、部署或关键业务流程的变更，仍应额外做相应验收。门禁也不执行需要 `TEST_POSTGRES_DSN` 的数据库集成测试。首次使用需填写四项秘密配置。
 
 ## GitHub 配置
 

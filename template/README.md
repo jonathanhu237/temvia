@@ -11,8 +11,11 @@ yours to change or remove.
 For the Compose route: Docker with Compose v2, Make, and Node.js 24 or later
 (for the generator and portable secret generation). Start the Docker engine.
 On macOS install Make using Xcode Command Line Tools if needed.
-Only the complete macOS first-run route has been tested. Linux and WSL2 are
-not fully verified; native Windows PowerShell is outside this route.
+The release workflow exercises this route once on an Ubuntu runner with a
+fresh Compose project, PostgreSQL volume, and Chromium browser. That is one CI
+path, not a general Linux/WSL2 or production compatibility claim. The complete
+local first-run route has been tested on macOS; native Windows PowerShell is
+outside this route.
 
 ## First run
 
@@ -139,14 +142,50 @@ be configured with `INVITATION_LINK_TTL` up to seven days. Run all current migra
 the database and inspect each affected migration before choosing the matching
 API version; blindly applying one down migration is not a general rollback plan.
 
-For an application upgrade, stop the API, back up PostgreSQL, run the new
-migration explicitly, then start the new API:
+For an application upgrade, use this stop-and-back-up sequence. Keep the
+PostgreSQL service running while the API is stopped, and run each command only
+after the previous one succeeds:
 
 ```sh
+(
+set -eu
+umask 077
+
+# 1. Stop the API before changing its image or schema.
 docker compose stop api
+
+# 2. Use a private, persistent directory outside the project, not /tmp.
+backup_dir="$(mktemp -d "${HOME:?}/temvia-backup.XXXXXX")"
+chmod 700 "$backup_dir"
+backup_file="$backup_dir/temvia-$(date -u +%Y%m%dT%H%M%SZ).sql"
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > "$backup_file.partial"
+chmod 600 "$backup_file.partial"
+mv "$backup_file.partial" "$backup_file"
+printf 'Backup written to %s\n' "$backup_file"
+
+# 3. Build fresh API, admin, and migration images from the updated source.
+make build
+
+# 4. Apply all forward migrations explicitly. Failure stops this subshell.
 make migrate-up
+
+# 5. Start the rebuilt services only after migration succeeds.
 docker compose up -d api admin
+)
 ```
+
+The subshell stops on any failed step without closing your interactive shell.
+A `.partial` dump indicates a failed backup and must not be used for restore.
+Keep successful backups on persistent storage and copy them to your protected
+off-host backup storage; the example does not automate backup retention.
+
+Back up `.env`, `EMAIL_SETTINGS_ENCRYPTION_KEY`, `PASSWORD_RESET_TOKEN_KEY`,
+and `INVITATION_TOKEN_KEY` separately in a protected secret store before the
+upgrade; never commit those values or place them in a public backup. A failed
+build or migration must stop the procedure: inspect the error and restore the
+database and matching images according to your rollback plan rather than
+starting a schema-incompatible API. Do not use `docker compose down -v`; the
+PostgreSQL volume contains the application data.
 
 ## Deactivate, reactivate, and delete users
 

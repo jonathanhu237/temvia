@@ -134,9 +134,7 @@ func (s *SettingsManagement) SaveEmailSettings(ctx context.Context, input EmailS
 	}
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
-	if input.Password != nil && *input.Password == "" && !input.ClearPassword {
-		input.Password = nil
-	}
+	input = normalizeEmailSettingsInput(input)
 	if err := validateEmailSettingsInput(input, s.production); err != nil {
 		return EmailSettingsView{}, err
 	}
@@ -158,30 +156,18 @@ func (s *SettingsManagement) SaveEmailSettings(ctx context.Context, input EmailS
 		DefaultLocale: domain.Locale(input.DefaultLocale),
 		Revision:      input.Revision,
 	}
-	if input.ClearPassword {
-		if input.Password != nil {
-			return EmailSettingsView{}, ErrInvalidMailSettings
-		}
-		record.PasswordCiphertext = nil
-	} else if input.Password != nil {
-		if s.cipher == nil {
-			return EmailSettingsView{}, ErrDependencyUnavailable
-		}
-		ciphertext, err := s.cipher.Encrypt([]byte(*input.Password))
-		if err != nil {
-			return EmailSettingsView{}, dependencyError(err)
-		}
-		record.PasswordCiphertext = ciphertext
-	} else if hasCurrent {
-		record.PasswordCiphertext = append([]byte(nil), current.PasswordCiphertext...)
+	password, ciphertext, err := s.resolveSMTPPassword(input, current, hasCurrent, true)
+	if err != nil {
+		return EmailSettingsView{}, err
 	}
-	if !validSMTPCredentials(record.Username, len(record.PasswordCiphertext) > 0) {
+	record.PasswordCiphertext = ciphertext
+	if !validSMTPCredentials(record.Username, password != "") {
 		return EmailSettingsView{}, ErrInvalidMailSettings
 	}
 	// Build and validate the SMTP client before committing the row. A bad
 	// connection setting must not leave a saved configuration that the runtime
 	// cannot activate.
-	mailer, err := s.mailerForRecord(record)
+	mailer, err := s.mailerForSMTPSettings(record, password)
 	if err != nil {
 		return EmailSettingsView{}, err
 	}
@@ -265,6 +251,7 @@ func (s *SettingsManagement) testEmailSettings(ctx context.Context, actorID stri
 	if s == nil || s.factory == nil {
 		return ErrDependencyUnavailable
 	}
+	input = normalizeEmailSettingsInput(input)
 	if err := validateEmailSettingsInput(input, s.production); err != nil {
 		return err
 	}
@@ -286,34 +273,39 @@ func (s *SettingsManagement) testEmailSettings(ctx context.Context, actorID stri
 			return ErrRateLimited
 		}
 	}
-	password := ""
-	if input.Password != nil {
-		password = *input.Password
+	var current EmailSettingsRecord
+	hasCurrent := false
+	if s.store == nil && input.Password == nil && !input.ClearPassword && strings.TrimSpace(input.Username) != "" {
+		return ErrDependencyUnavailable
 	}
-	if input.Password == nil && !input.ClearPassword && strings.TrimSpace(input.Username) != "" {
-		if s.store == nil {
-			return ErrDependencyUnavailable
+	if s.store != nil && input.Password == nil && !input.ClearPassword {
+		current, err = s.store.GetEmailSettings(ctx)
+		if errors.Is(err, ErrMailNotConfigured) {
+			// Preserve the existing unsaved no-auth snapshot behavior. An
+			// omitted password with a username still needs a persisted
+			// credential to reuse; an explicitly supplied password takes the
+			// branch above and does not depend on the saved configuration.
+			if strings.TrimSpace(input.Username) != "" {
+				return ErrMailNotConfigured
+			}
+			err = nil
+		} else if err != nil {
+			return dependencyError(err)
+		} else {
+			hasCurrent = true
 		}
-		current, currentErr := s.store.GetEmailSettings(ctx)
-		if errors.Is(currentErr, ErrMailNotConfigured) {
-			return ErrMailNotConfigured
-		}
-		if currentErr != nil {
-			return dependencyError(currentErr)
-		}
-		if input.Revision != current.Revision {
+		// A no-auth test snapshot has no secret or runtime credential to
+		// protect, so retain the pre-existing ability to test it without a
+		// revision. Any path that could reuse or discard a saved credential
+		// remains covered by optimistic revision checking.
+		needsRevision := hasCurrent && (strings.TrimSpace(input.Username) != "" || len(current.PasswordCiphertext) > 0)
+		if input.Revision < 0 || (needsRevision && input.Revision != current.Revision) {
 			return ErrStaleRevision
 		}
-		if len(current.PasswordCiphertext) > 0 {
-			if s.cipher == nil {
-				return ErrDependencyUnavailable
-			}
-			plain, decryptErr := s.cipher.Decrypt(current.PasswordCiphertext)
-			if decryptErr != nil {
-				return dependencyError(decryptErr)
-			}
-			password = string(plain)
-		}
+	}
+	password, _, err := s.resolveSMTPPassword(input, current, hasCurrent, false)
+	if err != nil {
+		return err
 	}
 	if !validSMTPCredentials(strings.TrimSpace(input.Username), password != "") {
 		return ErrInvalidMailSettings
@@ -364,10 +356,7 @@ func (s *SettingsManagement) applyRuntime(record EmailSettingsRecord) error {
 }
 
 func (s *SettingsManagement) mailerForRecord(record EmailSettingsRecord) (Mailer, error) {
-	if s.factory == nil {
-		return nil, nil
-	}
-	password := []byte(nil)
+	password := ""
 	if len(record.PasswordCiphertext) > 0 {
 		if s.cipher == nil {
 			return nil, ErrDependencyUnavailable
@@ -376,9 +365,16 @@ func (s *SettingsManagement) mailerForRecord(record EmailSettingsRecord) (Mailer
 		if err != nil {
 			return nil, dependencyError(err)
 		}
-		password = plain
+		password = string(plain)
 	}
-	mailer, err := s.factory(SMTPSettings{Host: record.Host, Port: record.Port, Security: record.Security, Username: record.Username, Password: string(password), FromAddress: record.FromAddress, FromName: record.FromName})
+	return s.mailerForSMTPSettings(record, password)
+}
+
+func (s *SettingsManagement) mailerForSMTPSettings(record EmailSettingsRecord, password string) (Mailer, error) {
+	if s.factory == nil {
+		return nil, nil
+	}
+	mailer, err := s.factory(SMTPSettings{Host: record.Host, Port: record.Port, Security: record.Security, Username: record.Username, Password: password, FromAddress: record.FromAddress, FromName: record.FromName})
 	if err != nil {
 		return nil, dependencyError(err)
 	}
@@ -387,6 +383,71 @@ func (s *SettingsManagement) mailerForRecord(record EmailSettingsRecord) (Mailer
 
 func emailSettingsView(record EmailSettingsRecord) EmailSettingsView {
 	return EmailSettingsView{Configured: true, Host: record.Host, Port: record.Port, Security: record.Security, Username: record.Username, PasswordSet: len(record.PasswordCiphertext) > 0, FromAddress: record.FromAddress, FromName: record.FromName, DefaultLocale: record.DefaultLocale, Revision: record.Revision, UpdatedAt: record.UpdatedAt}
+}
+
+func normalizeEmailSettingsInput(input EmailSettingsInput) EmailSettingsInput {
+	// An empty password from the form means "leave the saved credential
+	// alone" unless the caller explicitly requested a clear. Both save and
+	// test go through this normalization so they cannot disagree about the
+	// meaning of an omitted password.
+	if input.Password != nil && *input.Password == "" && !input.ClearPassword {
+		input.Password = nil
+	}
+	return input
+}
+
+// sameSMTPIdentity defines the boundary at which an omitted password may be
+// reused. Security mode and sender metadata are deliberately not part of the
+// identity: changing those values does not send the saved secret to another
+// host or login account. Hosts are compared by their supplied names rather
+// than DNS resolution, and usernames use the existing trim-only normalization.
+func sameSMTPIdentity(input EmailSettingsInput, current EmailSettingsRecord) bool {
+	return strings.TrimSpace(input.Host) == strings.TrimSpace(current.Host) &&
+		input.Port == current.Port &&
+		strings.TrimSpace(input.Username) == strings.TrimSpace(current.Username)
+}
+
+// resolveSMTPPassword resolves the submitted credential exactly once for both
+// the persistence and test paths. A password is reused only when the SMTP
+// host, port, and username are unchanged. Changing that identity while a saved
+// password exists requires an explicit replacement or clear. The resolved
+// credentials must still satisfy validSMTPCredentials before use.
+func (s *SettingsManagement) resolveSMTPPassword(input EmailSettingsInput, current EmailSettingsRecord, hasCurrent, persist bool) (string, []byte, error) {
+	if input.ClearPassword {
+		return "", nil, nil
+	}
+	if input.Password != nil {
+		password := *input.Password
+		if !persist {
+			return password, nil, nil
+		}
+		if s.cipher == nil {
+			return "", nil, ErrDependencyUnavailable
+		}
+		ciphertext, err := s.cipher.Encrypt([]byte(password))
+		if err != nil {
+			return "", nil, dependencyError(err)
+		}
+		return password, ciphertext, nil
+	}
+	if hasCurrent && !sameSMTPIdentity(input, current) && len(current.PasswordCiphertext) > 0 {
+		// Dropping an old secret while changing the connection must be an
+		// explicit action. This keeps the existing no-auth configuration
+		// contract (clearPassword plus an empty username) visible to callers
+		// instead of silently turning a credentialed connection into one.
+		return "", nil, ErrInvalidMailSettings
+	}
+	if hasCurrent && strings.TrimSpace(input.Username) != "" && sameSMTPIdentity(input, current) && len(current.PasswordCiphertext) > 0 {
+		if s.cipher == nil {
+			return "", nil, ErrDependencyUnavailable
+		}
+		plain, err := s.cipher.Decrypt(current.PasswordCiphertext)
+		if err != nil {
+			return "", nil, dependencyError(err)
+		}
+		return string(plain), append([]byte(nil), current.PasswordCiphertext...), nil
+	}
+	return "", nil, nil
 }
 
 func validateEmailSettingsInput(input EmailSettingsInput, production bool) error {

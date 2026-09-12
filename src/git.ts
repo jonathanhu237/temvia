@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import type { SpawnSyncReturns } from 'node:child_process';
 
-export type RepositoryState = 'existing' | 'new';
+export type RepositoryState = 'existing' | 'new' | 'unavailable';
 
 export interface Git {
   inspect(directory: string): RepositoryState;
@@ -46,6 +46,12 @@ export function createGit(run: GitRunner = runGit): Git {
   return {
     inspect(directory) {
       const result = run(['rev-parse', '--is-inside-work-tree'], directory);
+      // Git is an optional convenience for project generation. An absent
+      // executable is different from a Git command that ran and found
+      // malformed metadata, so only the spawn ENOENT case is downgraded.
+      if (result.error && 'code' in result.error && result.error.code === 'ENOENT') {
+        return 'unavailable';
+      }
       checkProcess(result);
       if (result.status === 0 && result.stdout.trim() === 'true') {
         return 'existing';

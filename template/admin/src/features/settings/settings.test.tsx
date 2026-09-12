@@ -136,6 +136,34 @@ describe('email settings page', () => {
     expect(toast.success).toHaveBeenCalledWith('Email settings saved.')
   })
 
+  it('explains an identity-bound password failure and retries with replacement credentials', async () => {
+    const saveEmailSettings = vi.fn()
+      .mockRejectedValueOnce(new ApiProblemError({ type: '/problems/validation-failed', title: 'validation failed', status: 422, code: 'invalid_mail_settings' }))
+      .mockResolvedValueOnce({ configured: true, host: 'smtp-new.example.com', port: 587, security: 'starttls', username: 'mailer', passwordSet: true, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 4 })
+    const api = mockApi({
+      getEmailSettings: vi.fn().mockResolvedValue({ configured: true, host: 'smtp-old.example.com', port: 587, security: 'starttls', username: 'mailer', passwordSet: true, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 3 }),
+      saveEmailSettings,
+    })
+    const user = userEvent.setup()
+    renderWithQueryClient(<EmailSettingsPage api={api} />)
+
+    await screen.findByRole('heading', { name: 'System settings' })
+    const host = screen.getByLabelText('SMTP host')
+    await user.clear(host)
+    await user.type(host, 'smtp-new.example.com')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(saveEmailSettings).toHaveBeenNthCalledWith(1, expect.objectContaining({ host: 'smtp-new.example.com', username: 'mailer', password: undefined, revision: 3 })))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Email settings could not be saved.', { description: expect.stringContaining('enter a new password') }))
+    const replacement = screen.getByLabelText('Replace password')
+    expect(replacement).toBeEnabled()
+    await user.type(replacement, 'replacement-secret')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(saveEmailSettings).toHaveBeenNthCalledWith(2, expect.objectContaining({ host: 'smtp-new.example.com', username: 'mailer', password: 'replacement-secret', revision: 3 })))
+    expect(toast.success).toHaveBeenCalledWith('Email settings saved.')
+  })
+
   it('keeps fields and mutation controls unavailable to settings readers', async () => {
     const api = mockApi({
       getEmailSettings: vi.fn().mockResolvedValue({ configured: true, host: 'smtp.example.com', port: 587, security: 'starttls', username: 'mailer', passwordSet: true, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 3 }),

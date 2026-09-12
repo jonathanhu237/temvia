@@ -41,7 +41,7 @@ export const adminTemplateFiles = [
   'src/shared/theme/index.test.tsx', 'src/shared/theme/index.tsx',
   'src/features/settings/email-settings-page.tsx', 'src/features/settings/operation-log-retention-card.tsx', 'src/features/settings/settings-navigation.tsx', 'src/features/settings/settings-section.tsx', 'src/features/settings/settings.test.tsx', 'src/features/settings/system-identity-page.test.tsx', 'src/features/settings/system-identity-page.tsx',
   'src/test/msw.ts', 'src/test/setup.ts',
-  'e2e/auth.spec.ts', 'e2e/online-users.spec.ts', 'e2e/system-identity.spec.ts', 'e2e/user-lifecycle.spec.ts',
+  'e2e/auth.spec.ts', 'e2e/first-run.spec.ts', 'e2e/online-users.spec.ts', 'e2e/system-identity.spec.ts', 'e2e/user-lifecycle.spec.ts',
 ];
 
 export const requiredTemplateFiles = [

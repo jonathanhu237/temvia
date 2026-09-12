@@ -18,8 +18,8 @@ Options:
   -v, --version    Show the CLI version
 
 Use a new or empty directory. Git is initialized only outside an existing
-working tree. No files are staged or committed, no remotes are added, and no
-dependencies or services are started.
+working tree when Git is available; Git is optional. No files are staged or
+committed, no remotes are added, and no dependencies or services are started.
 
 Module paths use a lowercase domain and ordinary ASCII path segments; /v2
 and later major-version suffixes are supported. Schemes, whitespace, dot
@@ -68,8 +68,13 @@ function quotePath(value: string): string {
 }
 
 export function nextSteps(result: GenerateResult): string {
+  const repositoryMessage = result.repository === 'existing'
+    ? 'Using the existing Git working tree; no nested repository created.'
+    : result.repository === 'new'
+      ? 'Initialized Git; no files staged or committed.'
+      : 'Git was not found; generated the project without initializing a repository. Install Git and run git init when you are ready.'
   return `Created ${result.directory}
-${result.repository === 'existing' ? 'Using the existing Git working tree; no nested repository created.' : 'Initialized Git; no files staged or committed.'}
+${repositoryMessage}
 
 Container backend:
   cd ${quotePath(result.directory)}

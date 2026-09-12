@@ -187,11 +187,13 @@ test('write failure removes only owned unchanged files and retains concurrent co
   assert.deepEqual(git.calls.map(([operation]) => operation), ['inspect']);
 });
 
-test('missing Git fails before writes; init failure preserves generated project', async (t) => {
+test('missing Git is optional; init failure still preserves generated project', async (t) => {
   const cwd = await temporaryDirectory(t);
   const missing = createGit(() => ({ error: Object.assign(new Error('not found'), { code: 'ENOENT' }) }));
-  await assert.rejects(generate({ directory: 'missing-git', modulePath, cwd }, missing), /Git is required/);
-  await assert.rejects(fs.stat(join(cwd, 'missing-git')), { code: 'ENOENT' });
+  const result = await generate({ directory: 'missing-git', modulePath, cwd }, missing);
+  assert.equal(result.repository, 'unavailable');
+  assert.ok(await fs.stat(join(cwd, 'missing-git/api/go.mod')));
+  await assert.rejects(fs.stat(join(cwd, 'missing-git/.git')), { code: 'ENOENT' });
   const failing = { ...fakeGit(), init() { throw new Error('permission denied'); } };
   await assert.rejects(generate({ directory: 'retained', modulePath, cwd }, failing), /Git initialization failed.*permission denied.*retained/);
   assert.ok(await fs.stat(join(cwd, 'retained/api/go.mod')));
@@ -201,6 +203,7 @@ test('Git inspection distinguishes a working tree from expected absence and unex
   const result = (status, stdout, stderr = '') => ({ status, stdout, stderr, signal: null });
   assert.equal(createGit(() => result(0, 'true\n')).inspect('/target'), 'existing');
   assert.equal(createGit(() => result(128, '', 'fatal: not a git repository (or any of the parent directories): .git\n')).inspect('/target'), 'new');
+  assert.equal(createGit(() => ({ error: Object.assign(new Error('not found'), { code: 'ENOENT' }) })).inspect('/target'), 'unavailable');
   for (const response of [
     result(128, '', 'fatal: detected dubious ownership'),
     result(128, '', 'fatal: invalid gitfile format'),

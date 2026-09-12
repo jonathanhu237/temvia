@@ -69,6 +69,15 @@ test('actual npm tarball installs without dev dependencies and its mapped bin ge
   }
   await assertAdminBaseline(join(output, 'admin'));
   assert.equal(command('git', ['ls-files'], { cwd: output, env }), '');
+  const generatedGitignore = await fs.readFile(join(output, '.gitignore'), 'utf8');
+  assert.match(generatedGitignore, /^backups\/$/m, 'database backups are excluded from generated Git projects');
+  for (const guide of [await fs.readFile(join(output, 'README.md'), 'utf8'), await fs.readFile(join(output, 'README.zh-CN.md'), 'utf8')]) {
+    assert.match(guide, /mktemp -d/);
+    assert.match(guide, /umask 077/);
+    assert.match(guide, /chmod 700/);
+    assert.match(guide, /chmod 600/);
+    assert.doesNotMatch(guide, /mkdir -p backups/);
+  }
   for (const unwanted of [
     'package.json', 'pnpm-workspace.yaml', 'web', 'admin/node_modules',
     'admin/pnpm-lock.yaml', 'admin/_gitignore', 'admin/_oxlintrc.json',

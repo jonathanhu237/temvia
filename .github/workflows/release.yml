@@ -17,7 +17,7 @@ jobs:
   verify:
     name: Verify and package
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     outputs:
       version: ${{ steps.metadata.outputs.version }}
       release: ${{ steps.metadata.outputs.release }}
@@ -95,6 +95,11 @@ jobs:
           mkdir -p "$(dirname "$TEMVIA_TEST_TARBALL")"
           pnpm test:package
           test -s "$TEMVIA_TEST_TARBALL"
+
+      - name: Run the mandatory first-run acceptance on the tested tarball
+        env:
+          TEMVIA_TEST_TARBALL: ${{ github.workspace }}/.release/create-temvia-${{ steps.metadata.outputs.version }}.tgz
+        run: node scripts/first-run-acceptance.mjs "$TEMVIA_TEST_TARBALL"
 
       - name: Record and upload the tested tarball
         id: artifact

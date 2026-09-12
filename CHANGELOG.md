@@ -6,11 +6,17 @@
 - A single system name, refined user action menus, clearer login validation and an aligned online-user toolbar.
 - A minimal personalized home page for every signed-in role.
 - Automatic builds on push and commit-based npm releases from main, with verified tarballs, source tags and retry checks.
+- The generated migration image now carries every forward and reverse migration; Git remains optional for generation while real Git errors stay visible.
+- Saved SMTP passwords are reused only for the unchanged host, port, and username; changed identities require a replacement or explicit clear.
+- A mandatory Ubuntu fresh-Compose browser gate now initializes and explicitly logs in from the exact release tarball before publication.
 
 - 新增用户停用、恢复和删除，覆盖会话失效与历史身份保留。
 - 统一系统名称，优化用户操作菜单、登录校验反馈与在线用户工具栏。
 - 首页统一为当前用户的简洁欢迎信息。
 - 每次 push 自动构建，main 按提交类型自动升版发布，保留安装包验收、源码标签和重试校验。
+- 迁移镜像自动包含全部正向与逆向迁移；Git 在生成器中保持可选，但真正的 Git 错误仍会明确报告。
+- 已保存 SMTP 密码只在主机、端口和用户名不变时复用；身份变化后必须替换密码或明确清除。
+- 发布前新增 Ubuntu 全新 Compose 浏览器门禁，使用实际发布 tarball 完成初始化和明确登录。
 
 ## 0.2.0
 
@@ -27,11 +33,12 @@
 - 补充 HTTP/PostgreSQL 集成测试、前端错误提示测试及双语部署文档。
 
 Generated projects remain independent source copies and do not automatically
-receive these changes. Complete the documented macOS tarball first-run acceptance
-for the final release commit before publishing.
+receive these changes. Complete the documented tarball first-run acceptance for
+the final release commit before publishing; the release gate covers its Ubuntu
+CI route, not every operating system or production environment.
 
 已生成项目仍是独立源码副本，不会自动接收这些变更。发布前需针对最终发布提交的
-tarball 完成文档规定的 macOS 首次启动验收。
+tarball 完成文档规定的首次启动验收；发布门禁覆盖 Ubuntu CI 路径，不代表所有操作系统或生产环境。
 
 ## 0.1.0
 

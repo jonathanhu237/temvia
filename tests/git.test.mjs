@@ -89,15 +89,16 @@ test('target outside caller repository is standalone even with inherited Git con
   assert.deepEqual(await snapshot(repo), before);
 });
 
-test('missing Git, bare repositories, and invalid Git metadata fail without output', async (t) => {
+test('missing Git is optional while bare and invalid metadata still fail', async (t) => {
   const f = await fixture(t);
   const absent = join(f.directory, 'missing-git');
   const missing = spawnSync(process.execPath, [cli, absent, '--module', modulePath], {
     cwd: f.directory, env: { ...f.env, PATH: '' }, encoding: 'utf8',
   });
-  assert.equal(missing.status, 1);
-  assert.match(missing.stderr, /Git is required/);
-  await assert.rejects(fs.stat(absent), { code: 'ENOENT' });
+  assert.equal(missing.status, 0, missing.stderr);
+  assert.match(missing.stdout, /Git was not found.*without initializing a repository/s);
+  assert.ok(await fs.stat(join(absent, 'api/go.mod')));
+  await assert.rejects(fs.stat(join(absent, '.git')), { code: 'ENOENT' });
 
   const bare = join(f.directory, 'bare.git');
   f.git(['init', '--quiet', '--bare', bare]);

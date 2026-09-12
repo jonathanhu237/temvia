@@ -30,9 +30,12 @@ then use the setup link from the API logs to create an administrator and log in.
 Docker Compose is the main first-run route; the same guide covers development
 and production configuration separately.
 
-The complete first-run flow has only been tested on macOS. Linux and WSL2 are
-not yet fully verified; native Windows PowerShell is not a supported first-run
-route. Component tests on Linux do not constitute a full installation check.
+The release workflow also exercises the exact tarball through a fresh Compose,
+PostgreSQL and Chromium first-run route on an Ubuntu runner. This is one CI
+route, not a general Linux/WSL2 or production compatibility claim. The local
+complete first-run route has been tested on macOS; native Windows PowerShell is
+not a supported first-run route. Component tests do not constitute a full
+installation check.
 
 ## Ownership and maintenance
 

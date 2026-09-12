@@ -25,9 +25,10 @@ cd my-project
 填写四项秘密配置、构建容器、执行迁移并启动服务，从 API 日志找到初始化链接，
 创建管理员后登录。Docker Compose 是首次启动主路径；指南另有开发和生产部署说明。
 
-完整首次使用流程目前仅在 macOS 测试过。Linux 和 WSL2 尚未完整验证；
-原生 Windows PowerShell 不属于支持的首次使用路径。
-Linux 上的组件测试不代表完整安装验收。
+发布流程还会在 Ubuntu runner 上，使用实际 tarball、全新 Compose、PostgreSQL
+和 Chromium 执行首次启动路径。这只是一路 CI 验证，不是对所有 Linux／WSL2 或生产环境
+兼容性的承诺。本地完整首次使用流程已在 macOS 测试；原生 Windows PowerShell 不属于
+支持的首次使用路径。Linux 上的组件测试不代表完整安装验收。
 
 ## 所有权与维护
 

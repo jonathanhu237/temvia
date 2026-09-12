@@ -50,6 +50,7 @@ const codeKeys: Record<string, string> = {
   service_unavailable: 'problems:serviceUnavailable',
   mail_not_configured: 'problems:mailNotConfigured',
   permission_scope_forbidden: 'problems:permissionScope',
+  invalid_mail_settings: 'problems:invalidMailSettings',
 }
 
 const fieldKeys: Record<string, string> = {
@@ -121,6 +122,10 @@ export function isInvalidPasswordResetToken(error: unknown): boolean {
 
 export function problemMessageKey(error: unknown): string {
   if (error instanceof ApiProblemError) {
+    // SMTP credential-boundary failures share the validation problem type, so
+    // use their stable operation code for actionable guidance. Preserve the
+    // existing type-first mapping for every other problem.
+    if (error.problem.code === 'invalid_mail_settings') return codeKeys[error.problem.code]
     return typeKeys[error.problem.type] ?? codeKeys[error.problem.code ?? ''] ?? 'problems:generic'
   }
   if (error instanceof ApiTransportError) {
