@@ -29,7 +29,7 @@ The shared visual symbol identifying an administration app on its pages and brow
 _Avoid_: ICON
 
 **Operational warning**:
-A current system condition shown on the home page that needs administrative attention, such as missing email configuration.
+A current system condition that needs administrative attention, such as missing email configuration.
 _Avoid_: Notification history, audit log
 
 **Password reset link**:

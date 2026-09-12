@@ -302,11 +302,11 @@ test.describe('administrator authentication', () => {
     await expect(page.getByRole('menuitem', { name: /Appearance settings|Language settings/ })).toHaveCount(0)
     await page.keyboard.press('Escape')
     await selectPreference(page, 'Language settings', '简体中文')
-    await expect(page.getByRole('heading', { name: '主页' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '首页' })).toBeVisible()
 
     await page.setViewportSize({ width: 390, height: 844 })
     await page.getByRole('button', { name: '菜单' }).click()
-    await expect(page.getByRole('link', { name: '主页' })).toBeVisible()
+    await expect(page.getByRole('link', { name: '首页' })).toBeVisible()
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.reload()
 

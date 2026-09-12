@@ -432,7 +432,7 @@ const chinese: typeof english = {
   },
 
   common: {
-    home: '主页',
+    home: '首页',
     settings: '系统设置',
     systemMonitoring: '系统监控',
     configureSettings: '配置系统设置',
@@ -503,7 +503,7 @@ const chinese: typeof english = {
     sessionUnavailableTitle: '无法检查登录状态',
     sessionUnavailableDescription: 'API 暂时不可用或返回了异常响应。当前会话仍会保留。',
     sessionExpired: '登录已失效，请重新登录。',
-    homeTitle: '主页',
+    homeTitle: '首页',
     welcome: '欢迎回来，{{name}}。',
     operationalWarningTitle: '需要处理',
     operationalWarningUnavailableTitle: '无法获取系统提醒',

@@ -189,8 +189,7 @@ Administrators with the `operation-logs.read` permission can open Operation
 history from the authenticated navigation. The page supports time, actor UUID,
 action, result, object type, and object ID filters, cursor pagination, and a
 localized detail view. Successful and failed in-scope actions each produce one
-best-effort result record; a storage outage can leave a gap, and the home page
-shows the recorder state when the current user can read it. History is retained
+best-effort result record; a storage outage can leave a gap. History is retained
 for 180 days by default. Super Admins or users with `settings.write` can change
 the value between 1 and 3650 days in System settings; cleanup runs hourly and
 uses a bounded database operation.

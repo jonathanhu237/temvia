@@ -142,7 +142,7 @@ describe('localized problem mapping', () => {
   it('selects Chinese resources and synchronizes document metadata', async () => {
     await i18n.changeLanguage('zh-CN')
     document.documentElement.lang = i18n.language
-    expect(i18n.t('common:home')).toBe('主页')
+    expect(i18n.t('common:home')).toBe('首页')
   })
 
   it('requires both stable identity and HTTP status for auth control flow', () => {
