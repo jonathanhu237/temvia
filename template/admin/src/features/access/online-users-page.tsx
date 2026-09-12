@@ -36,12 +36,15 @@ export function OnlineUsersPage({ api, actorID, canManage }: { api: ApiClient; a
     { accessorKey: 'lastSeenAt', header: t('lastSeen'), cell: ({ row }) => <time dateTime={row.original.lastSeenAt}>{formatDate(row.original.lastSeenAt, i18n.language)}</time> },
     { id: 'actions', header: t('access:actions'), cell: ({ row }) => canManage ? <Button variant="outline" size="sm" disabled={forceSignOut.isPending || users.isError} onClick={() => setTarget(row.original)}>{t('forceSignOut')}</Button> : null },
   ]
+  const refreshButton = <Button variant="outline" disabled={users.isFetching} onClick={() => void users.refetch()}>{t('refresh')}</Button>
   return <section className="flex flex-col gap-5" aria-labelledby="online-title">
     <h1 id="online-title" className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
     <Card>
-      <CardContent className="pt-6">
-        <Button variant="outline" disabled={users.isFetching} onClick={() => void users.refetch()}>{t('refresh')}</Button>
-        {users.isPending ? <p role="status">{t('common:loading')}</p> : users.isError ? <p role="status">{t('loadFailed')}</p> : <DataTable columns={columns} data={users.data?.users ?? []} search={search} onSearchChange={setSearch} searchPlaceholder={t('access:searchUsers')} clearSearchLabel={t('access:clearSearch')} emptyMessage={search ? t('access:noSearchResults') : t('empty')} />}
+      <CardContent className="flex flex-col gap-4 pt-6">
+        {users.isPending || users.isError ? <>
+          <div className="flex justify-end">{refreshButton}</div>
+          <p role="status">{users.isPending ? t('common:loading') : t('loadFailed')}</p>
+        </> : <DataTable columns={columns} data={users.data?.users ?? []} search={search} onSearchChange={setSearch} searchPlaceholder={t('access:searchUsers')} clearSearchLabel={t('access:clearSearch')} emptyMessage={search ? t('access:noSearchResults') : t('empty')} toolbar={refreshButton} />}
       </CardContent>
     </Card>
     <AlertDialog open={Boolean(target) && canManage} onOpenChange={(open) => { if (!open && !forceSignOut.isPending) setTarget(undefined) }}>
