@@ -19,6 +19,7 @@
     "check": "tsc --noEmit",
     "build": "tsc",
     "test": "node --test tests/cli.test.mjs",
+    "test:release": "node --test tests/release.test.mjs",
     "test:git": "node --test tests/git.test.mjs",
     "test:package": "pnpm build && node --test tests/package.test.mjs",
     "prepack": "pnpm build"

@@ -50,8 +50,8 @@ pnpm test:git
 pnpm test:package
 ```
 
-维护者通过 GitHub Actions 主动发布，具体见[发布流程](docs/releasing.zh-CN.md)。
-首个公开版本目标为 0.1.0。
+每次 push 自动构建验证；main 上的新功能或修复通过验证后自动升版本并发布到 npm，
+具体规则见[发布流程](docs/releasing.zh-CN.md)。
 
 ## 许可
 

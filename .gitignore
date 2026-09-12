@@ -18,3 +18,5 @@ test-results/
 /template/admin/pnpm-workspace.yaml
 /template/admin/package-lock.json
 /template/admin/yarn.lock
+
+.release/

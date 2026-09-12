@@ -57,8 +57,8 @@ pnpm test:git
 pnpm test:package
 ```
 
-See [release procedure](docs/releasing.md) for maintainer-triggered GitHub
-Actions publishing. Version 0.1.0 is the first public release target.
+Every push builds and verifies the package. Features and fixes on main automatically
+bump the version and publish to npm after verification. See the [release procedure](docs/releasing.md).
 
 ## License
 

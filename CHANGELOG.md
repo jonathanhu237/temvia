@@ -1,5 +1,17 @@
 # Changelog / 版本记录
 
+## 0.3.0
+
+- User deactivation, reactivation and deletion, including session invalidation and historical identity preservation.
+- A single system name, refined user action menus, clearer login validation and an aligned online-user toolbar.
+- A minimal personalized home page for every signed-in role.
+- Automatic builds on push and commit-based npm releases from main, with verified tarballs, source tags and retry checks.
+
+- 新增用户停用、恢复和删除，覆盖会话失效与历史身份保留。
+- 统一系统名称，优化用户操作菜单、登录校验反馈与在线用户工具栏。
+- 首页统一为当前用户的简洁欢迎信息。
+- 每次 push 自动构建，main 按提交类型自动升版发布，保留安装包验收、源码标签和重试校验。
+
 ## 0.2.0
 
 - Basic abuse protection for login, password recovery, setup, invitations and test email, with operation-specific limits and trusted proxy handling.
