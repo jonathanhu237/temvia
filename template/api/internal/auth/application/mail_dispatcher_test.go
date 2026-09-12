@@ -139,6 +139,40 @@ func TestMailDispatcherReconstructsResetLinkAndUsesStableMessageID(t *testing.T)
 	}
 }
 
+func TestMailDispatcherReconstructsEmailChangeCode(t *testing.T) {
+	resetKey := bytes.Repeat([]byte{0x61}, 32)
+	emailKey := bytes.Repeat([]byte{0x71}, 32)
+	selector := bytes.Repeat([]byte{0x17}, domain.EmailChangeSelectorBytes)
+	code, digest, err := domain.NewEmailChangeMaterial(emailKey, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(100, 0)
+	outbox := &dispatcherOutboxFake{job: &MailJob{
+		ID:                  "00000000-0000-4000-8000-000000000002",
+		Kind:                MailEmailChangeCode,
+		Name:                "Ada",
+		Email:               "new@example.com",
+		Locale:              domain.LocaleEnglish,
+		EmailChangeSelector: selector,
+		VerifierDigest:      digest,
+		CreatedAt:           created,
+		ExpiresAt:           created.Add(10 * time.Minute),
+	}}
+	mailer := &dispatcherMailerFake{}
+	dispatcher := NewMailDispatcher(outbox, mailer, &fakeRandom{value: 9}, resetKey, "https://admin.example", time.Second, 30*time.Second, time.Second, time.Minute, bytes.Repeat([]byte{0x62}, 32), emailKey)
+	dispatcher.now = func() time.Time { return created.Add(time.Minute) }
+	if err := dispatcher.ProcessOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !outbox.sent || mailer.message.To != "new@example.com" || !strings.Contains(mailer.message.Text, code) {
+		t.Fatalf("email-change delivery = %#v, message=%q", outbox, mailer.message.Text)
+	}
+	if strings.Contains(mailer.message.Text, string(emailKey)) {
+		t.Fatal("email-change key leaked into mail")
+	}
+}
+
 func TestMailDispatcherPreservesLinkDeadlineAcrossRetries(t *testing.T) {
 	resetKey := bytes.Repeat([]byte{0x61}, 32)
 	invitationKey := bytes.Repeat([]byte{0x62}, 32)

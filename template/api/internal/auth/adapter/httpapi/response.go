@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"example.com/temvia/api/internal/auth/application"
@@ -15,9 +16,13 @@ type userEnvelope struct {
 }
 
 type userResponseBody struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	Locale        string `json:"locale,omitempty"`
+	AvatarURL     string `json:"avatarUrl,omitempty"`
+	HasAvatar     bool   `json:"hasAvatar"`
+	AvatarVersion int64  `json:"avatarVersion,omitempty"`
 }
 
 type roleResponseBody struct {
@@ -83,13 +88,17 @@ type roleEnvelope struct {
 }
 
 type accessUserResponseBody struct {
-	ID          string             `json:"id"`
-	Name        string             `json:"name"`
-	Email       string             `json:"email"`
-	CreatedAt   string             `json:"createdAt"`
-	AuthVersion int64              `json:"authVersion"`
-	Disabled    bool               `json:"disabled"`
-	Roles       []roleResponseBody `json:"roles"`
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`
+	Email         string             `json:"email"`
+	CreatedAt     string             `json:"createdAt"`
+	AuthVersion   int64              `json:"authVersion"`
+	Disabled      bool               `json:"disabled"`
+	Locale        string             `json:"locale,omitempty"`
+	AvatarURL     string             `json:"avatarUrl,omitempty"`
+	HasAvatar     bool               `json:"hasAvatar"`
+	AvatarVersion int64              `json:"avatarVersion,omitempty"`
+	Roles         []roleResponseBody `json:"roles"`
 }
 
 type usersResponse struct {
@@ -149,7 +158,7 @@ func principalResponse(principal domain.Principal) principalEnvelope {
 	for _, permission := range principal.Permissions {
 		permissions = append(permissions, string(permission))
 	}
-	return principalEnvelope{User: userResponseBody{ID: principal.User.ID, Name: principal.User.Name, Email: principal.User.Email}, Roles: roles, Permissions: permissions, SuperAdmin: principal.SuperAdmin}
+	return principalEnvelope{User: userResponseBodyFor(principal.User), Roles: roles, Permissions: permissions, SuperAdmin: principal.SuperAdmin}
 }
 
 func roleResponse(role domain.Role) roleResponseBody {
@@ -172,7 +181,7 @@ func accessUserResponse(user domain.AccessUser) accessUserResponseBody {
 	for _, role := range user.Roles {
 		roles = append(roles, roleResponse(role))
 	}
-	return accessUserResponseBody{ID: user.User.ID, Name: user.User.Name, Email: user.User.Email, CreatedAt: user.User.CreatedAt.UTC().Format(time.RFC3339Nano), AuthVersion: user.AuthVersion, Disabled: user.User.Disabled, Roles: roles}
+	return accessUserResponseBody{ID: user.User.ID, Name: user.User.Name, Email: user.User.Email, CreatedAt: user.User.CreatedAt.UTC().Format(time.RFC3339Nano), AuthVersion: user.AuthVersion, Disabled: user.User.Disabled, Locale: string(user.User.Locale), AvatarURL: avatarURL(user.User), HasAvatar: user.User.HasAvatar, AvatarVersion: user.User.AvatarVersion, Roles: roles}
 }
 
 func invitationResponse(invitation domain.Invitation) invitationResponseBody {
@@ -184,7 +193,18 @@ func invitationResponse(invitation domain.Invitation) invitationResponseBody {
 }
 
 func userResponse(user domain.User) userEnvelope {
-	return userEnvelope{User: userResponseBody{ID: user.ID, Name: user.Name, Email: user.Email}}
+	return userEnvelope{User: userResponseBodyFor(user)}
+}
+
+func userResponseBodyFor(user domain.User) userResponseBody {
+	return userResponseBody{ID: user.ID, Name: user.Name, Email: user.Email, Locale: string(user.Locale), AvatarURL: avatarURL(user), HasAvatar: user.HasAvatar, AvatarVersion: user.AvatarVersion}
+}
+
+func avatarURL(user domain.User) string {
+	if !user.HasAvatar || user.ID == "" || user.AvatarVersion <= 0 {
+		return ""
+	}
+	return "/api/users/" + user.ID + "/avatar?v=" + strconv.FormatInt(user.AvatarVersion, 10)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

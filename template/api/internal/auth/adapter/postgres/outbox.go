@@ -22,29 +22,36 @@ func (s *Store) ClaimMail(ctx context.Context, leaseToken string, leaseDuration 
 	var kind string
 	var locale string
 	var selector []byte
+	var emailChangeSelector []byte
 	var digest []byte
 	var invitationID sql.NullString
+	var emailChangeRequestID sql.NullString
 	var attempts int
 	err = tx.QueryRowContext(ctx, `
 		SELECT o.id::text, o.kind, COALESCE(o.user_id::text, ''), o.invitation_id::text,
-		       COALESCE(u.name, i.name), COALESCE(u.email, i.email), o.locale,
-		       o.reset_selector, COALESCE(r.verifier_digest, i.verifier_digest), o.attempt_count + 1, o.created_at, o.expires_at
+		       COALESCE(u.name, i.name), COALESCE(o.recipient_email, u.email, i.email), o.locale,
+		       o.reset_selector, o.email_change_selector, COALESCE(r.verifier_digest, e.verifier_digest, i.verifier_digest),
+		       o.email_change_request_id::text, o.attempt_count + 1, o.created_at, o.expires_at
 		FROM auth_mail_outbox AS o
 		LEFT JOIN auth_users AS u ON u.id = o.user_id
 		LEFT JOIN auth_user_invitations AS i ON i.id = o.invitation_id
 		LEFT JOIN auth_password_resets AS r
 		  ON r.user_id = o.user_id AND r.selector = o.reset_selector
+		LEFT JOIN auth_email_change_requests AS e
+		  ON e.id = o.email_change_request_id AND e.selector = o.email_change_selector
 		WHERE o.sent_at IS NULL AND o.canceled_at IS NULL AND o.dead_at IS NULL
 		  AND o.available_at <= clock_timestamp()
 		  AND (o.lease_expires_at IS NULL OR o.lease_expires_at <= clock_timestamp())
 		  AND o.expires_at > clock_timestamp()
 		  AND (o.kind = 'password_changed'
 		       OR (o.kind = 'password_reset' AND r.user_id IS NOT NULL AND r.expires_at > clock_timestamp())
-		       OR (o.kind = 'user_invitation' AND i.id IS NOT NULL AND i.expires_at > clock_timestamp()))
+		       OR (o.kind = 'user_invitation' AND i.id IS NOT NULL AND i.expires_at > clock_timestamp())
+		       OR (o.kind = 'email_change_code' AND e.id IS NOT NULL AND e.expires_at > clock_timestamp())
+		       OR o.kind = 'email_changed')
 		ORDER BY o.created_at, o.id
 		FOR UPDATE OF o SKIP LOCKED
 		LIMIT 1`,
-	).Scan(&job.ID, &kind, &job.UserID, &invitationID, &job.Name, &job.Email, &locale, &selector, &digest, &attempts, &job.CreatedAt, &job.ExpiresAt)
+	).Scan(&job.ID, &kind, &job.UserID, &invitationID, &job.Name, &job.Email, &locale, &selector, &emailChangeSelector, &digest, &emailChangeRequestID, &attempts, &job.CreatedAt, &job.ExpiresAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			if err := tx.Commit(); err != nil {
@@ -69,8 +76,15 @@ func (s *Store) ClaimMail(ctx context.Context, leaseToken string, leaseDuration 
 	if invitationID.Valid {
 		job.InvitationID = invitationID.String
 	}
+	if emailChangeRequestID.Valid {
+		job.EmailChangeRequestID = emailChangeRequestID.String
+	}
 	job.Locale = domain.Locale(locale)
-	job.ResetSelector = append([]byte(nil), selector...)
+	if job.Kind == application.MailEmailChangeCode {
+		job.EmailChangeSelector = append([]byte(nil), emailChangeSelector...)
+	} else {
+		job.ResetSelector = append([]byte(nil), selector...)
+	}
 	job.VerifierDigest = append([]byte(nil), digest...)
 	job.InvitationSelector = append([]byte(nil), selector...)
 	job.InvitationVerifierDigest = append([]byte(nil), digest...)
@@ -184,6 +198,22 @@ func (s *Store) SweepMail(ctx context.Context) error {
 		)
 		DELETE FROM auth_password_resets AS r
 		WHERE r.user_id IN (SELECT user_id FROM expired)`, outboxMaintenanceBatchSize); err != nil {
+		return err
+	}
+	// Expired email-change requests are no longer useful authorities. Removing
+	// them also cascades their unsent code tasks, while the bounded batch keeps
+	// maintenance from monopolizing the database.
+	if _, err := tx.ExecContext(ctx, `
+		WITH expired AS (
+			SELECT r.id
+			FROM auth_email_change_requests AS r
+			WHERE r.expires_at <= clock_timestamp()
+			ORDER BY r.expires_at, r.id
+			FOR UPDATE OF r SKIP LOCKED
+			LIMIT $1
+		)
+		DELETE FROM auth_email_change_requests AS r
+		WHERE r.id IN (SELECT id FROM expired)`, outboxMaintenanceBatchSize); err != nil {
 		return err
 	}
 	return tx.Commit()

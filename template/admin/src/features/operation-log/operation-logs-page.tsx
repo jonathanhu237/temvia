@@ -30,8 +30,9 @@ const knownActions = [
   'auth.login', 'auth.logout', 'auth.password_reset.request', 'auth.password_reset.complete', 'auth.invitation.accept', 'auth.setup.complete',
   'roles.create', 'roles.update', 'roles.delete', 'users.roles.update', 'users.sessions.revoke', 'users.deactivate', 'users.reactivate', 'users.delete', 'invitations.create', 'invitations.resend', 'invitations.revoke',
   'settings.email.update', 'settings.email.test', 'settings.operation_log_retention.update',
+  'auth.profile.name.update', 'auth.profile.avatar.update', 'auth.profile.avatar.delete', 'auth.profile.password.update', 'auth.profile.email.request', 'auth.profile.email.resend', 'auth.profile.email.update',
 ]
-const knownObjectTypes = ['session', 'account', 'password_reset', 'password', 'invitation', 'role', 'user', 'email_settings', 'operation_log_settings']
+const knownObjectTypes = ['session', 'account', 'password_reset', 'password', 'invitation', 'email_change', 'role', 'user', 'email_settings', 'operation_log_settings']
 const initialFilters: Filters = { action: '', objectType: '', objectId: '', actorId: '', from: '', to: '', result: '' }
 
 export function OperationLogsPage({ api, userID }: { api: ApiClient; userID: string }) {

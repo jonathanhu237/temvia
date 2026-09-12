@@ -2,11 +2,16 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
-const sectionIds = ['identity-settings-title', 'email-settings-title', 'retention-settings-title'] as const
+const defaultSectionIds = ['identity-settings-title', 'email-settings-title', 'retention-settings-title'] as const
 
-export function SettingsNavigation() {
-  const { t } = useTranslation(['settings', 'operationLog'])
-  const [active, setActive] = useState<string>(sectionIds[0])
+type SettingsNavigationProps = {
+  sectionIds?: readonly string[]
+  labels?: readonly string[]
+}
+
+export function SettingsNavigation({ sectionIds = defaultSectionIds, labels }: SettingsNavigationProps = {}) {
+  const { t } = useTranslation(['settings', 'operationLog', 'common'])
+  const [active, setActive] = useState<string>(sectionIds[0] ?? '')
 
   useEffect(() => {
     let frame = 0
@@ -33,7 +38,7 @@ export function SettingsNavigation() {
     }
   }, [])
 
-  const labels = [t('identity.title'), t('email.title'), t('operationLog:retentionTitle')]
+  const navigationLabels = labels ?? [t('identity.title'), t('email.title'), t('operationLog:retentionTitle')]
   return <nav aria-label={t('onThisPage')} className="sticky top-6 hidden self-start pt-24 xl:block">
     <ul className="flex flex-col border-l border-border">
       {sectionIds.map((id, index) => <li key={id}>
@@ -44,7 +49,7 @@ export function SettingsNavigation() {
           heading.focus({ preventScroll: true })
           heading.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' })
           setActive(id)
-        }}>{labels[index]}</a>
+        }}>{navigationLabels[index]}</a>
       </li>)}
     </ul>
   </nav>

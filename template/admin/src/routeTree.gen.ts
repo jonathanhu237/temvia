@@ -19,6 +19,7 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedInvitationsRouteImport } from './routes/_authenticated/invitations'
 import { Route as AuthenticatedOnlineUsersRouteImport } from './routes/_authenticated/online-users'
 import { Route as AuthenticatedOperationLogsRouteImport } from './routes/_authenticated/operation-logs'
+import { Route as AuthenticatedPersonalSettingsRouteImport } from './routes/_authenticated/personal-settings'
 import { Route as AuthenticatedRolesRouteImport } from './routes/_authenticated/roles'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
@@ -75,6 +76,12 @@ const AuthenticatedOperationLogsRoute =
     path: '/operation-logs',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedPersonalSettingsRoute =
+  AuthenticatedPersonalSettingsRouteImport.update({
+    id: '/personal-settings',
+    path: '/personal-settings',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedRolesRoute = AuthenticatedRolesRouteImport.update({
   id: '/roles',
   path: '/roles',
@@ -101,6 +108,7 @@ export interface FileRoutesByFullPath {
   '/invitations': typeof AuthenticatedInvitationsRoute
   '/online-users': typeof AuthenticatedOnlineUsersRoute
   '/operation-logs': typeof AuthenticatedOperationLogsRoute
+  '/personal-settings': typeof AuthenticatedPersonalSettingsRoute
   '/roles': typeof AuthenticatedRolesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -114,6 +122,7 @@ export interface FileRoutesByTo {
   '/invitations': typeof AuthenticatedInvitationsRoute
   '/online-users': typeof AuthenticatedOnlineUsersRoute
   '/operation-logs': typeof AuthenticatedOperationLogsRoute
+  '/personal-settings': typeof AuthenticatedPersonalSettingsRoute
   '/roles': typeof AuthenticatedRolesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -130,6 +139,7 @@ export interface FileRoutesById {
   '/_authenticated/invitations': typeof AuthenticatedInvitationsRoute
   '/_authenticated/online-users': typeof AuthenticatedOnlineUsersRoute
   '/_authenticated/operation-logs': typeof AuthenticatedOperationLogsRoute
+  '/_authenticated/personal-settings': typeof AuthenticatedPersonalSettingsRoute
   '/_authenticated/roles': typeof AuthenticatedRolesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
@@ -147,6 +157,7 @@ export interface FileRouteTypes {
     | '/invitations'
     | '/online-users'
     | '/operation-logs'
+    | '/personal-settings'
     | '/roles'
     | '/settings'
     | '/users'
@@ -160,6 +171,7 @@ export interface FileRouteTypes {
     | '/invitations'
     | '/online-users'
     | '/operation-logs'
+    | '/personal-settings'
     | '/roles'
     | '/settings'
     | '/users'
@@ -175,6 +187,7 @@ export interface FileRouteTypes {
     | '/_authenticated/invitations'
     | '/_authenticated/online-users'
     | '/_authenticated/operation-logs'
+    | '/_authenticated/personal-settings'
     | '/_authenticated/roles'
     | '/_authenticated/settings'
     | '/_authenticated/users'
@@ -262,6 +275,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOperationLogsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/personal-settings': {
+      id: '/_authenticated/personal-settings'
+      path: '/personal-settings'
+      fullPath: '/personal-settings'
+      preLoaderRoute: typeof AuthenticatedPersonalSettingsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/roles': {
       id: '/_authenticated/roles'
       path: '/roles'
@@ -290,6 +310,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedInvitationsRoute: typeof AuthenticatedInvitationsRoute
   AuthenticatedOnlineUsersRoute: typeof AuthenticatedOnlineUsersRoute
   AuthenticatedOperationLogsRoute: typeof AuthenticatedOperationLogsRoute
+  AuthenticatedPersonalSettingsRoute: typeof AuthenticatedPersonalSettingsRoute
   AuthenticatedRolesRoute: typeof AuthenticatedRolesRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
@@ -300,6 +321,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedInvitationsRoute: AuthenticatedInvitationsRoute,
   AuthenticatedOnlineUsersRoute: AuthenticatedOnlineUsersRoute,
   AuthenticatedOperationLogsRoute: AuthenticatedOperationLogsRoute,
+  AuthenticatedPersonalSettingsRoute: AuthenticatedPersonalSettingsRoute,
   AuthenticatedRolesRoute: AuthenticatedRolesRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,

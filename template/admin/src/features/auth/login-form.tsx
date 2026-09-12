@@ -9,6 +9,7 @@ import { FieldGroup } from '@/components/ui/field'
 import { ApiProblemError, type ApiClient } from '@/shared/api/client'
 import { fieldProblemFor, translateRateLimitedProblem } from '@/shared/api/problems'
 import { currentUserQueryKey } from './queries'
+import { changeAccountLocale, i18n } from '@/shared/i18n'
 import { loginFormSchema, normalizeLoginValues, type LoginFormValues } from './schemas'
 import { PasswordField, TextField } from './form-fields'
 
@@ -24,9 +25,10 @@ export function LoginForm({ api, onSuccess }: { api: ApiClient; onSuccess: () =>
   })
   const mutation = useMutation({
     retry: false,
-    mutationFn: (values: LoginFormValues) => api.login(normalizeLoginValues(values)),
+    mutationFn: (values: LoginFormValues) => api.login({ ...normalizeLoginValues(values), locale: i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en' }),
     onSuccess: (user) => {
       queryClient.setQueryData(currentUserQueryKey, user)
+      if (user.locale === 'en' || user.locale === 'zh-CN') void changeAccountLocale(user.locale)
       onSuccess()
     },
   })

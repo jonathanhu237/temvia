@@ -21,8 +21,11 @@ func TestLoadDefaultsAndModes(t *testing.T) {
 	if c.ShutdownTimeout != 30*time.Second {
 		t.Fatalf("shutdown timeout = %s, want 30s", c.ShutdownTimeout)
 	}
-	if c.LoginGlobalCapacity != 60 || c.LoginIPCapacity != 30 || c.PasswordResetIPCapacity != 30 || c.SetupIPCapacity != 10 || c.TestEmailRecipientCapacity != 3 {
+	if c.LoginGlobalCapacity != 60 || c.LoginIPCapacity != 30 || c.PasswordResetIPCapacity != 30 || c.SetupIPCapacity != 10 || c.TestEmailRecipientCapacity != 3 || c.EmailChangeActorCapacity != 5 || c.EmailChangeActorRefill != time.Hour || c.EmailChangeRecipientCapacity != 3 || c.EmailChangeRecipientRefill != 20*time.Minute {
 		t.Fatalf("abuse-protection defaults = %#v", c)
+	}
+	if len(c.EmailChangeCodeKey) != 32 || string(c.EmailChangeCodeKey) == string(c.PasswordResetTokenKey) {
+		t.Fatalf("email-change key was not purpose-separated: %#v", c.EmailChangeCodeKey)
 	}
 	values["SHUTDOWN_TIMEOUT"] = "7s"
 	c, err = Load(env(values))
@@ -50,6 +53,34 @@ func TestLoadDefaultsAndModes(t *testing.T) {
 	}
 }
 
+func TestLoadEmailChangeSettings(t *testing.T) {
+	values := map[string]string{
+		"POSTGRES_PASSWORD":        "pg-secret",
+		"PASSWORD_RESET_TOKEN_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"INVITATION_TOKEN_KEY":     "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+	}
+	c, err := Load(env(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.EmailChangeCodeKey) != 32 || c.EmailChangeActorCapacity != 5 || c.EmailChangeActorRefill != time.Hour || c.EmailChangeRecipientCapacity != 3 || c.EmailChangeRecipientRefill != 20*time.Minute {
+		t.Fatalf("email-change defaults = %#v", c)
+	}
+
+	values["EMAIL_CHANGE_CODE_KEY"] = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
+	values["EMAIL_CHANGE_RATE_LIMIT_ACTOR_CAPACITY"] = "7"
+	values["EMAIL_CHANGE_RATE_LIMIT_ACTOR_REFILL_INTERVAL"] = "2m"
+	values["EMAIL_CHANGE_RATE_LIMIT_RECIPIENT_CAPACITY"] = "9"
+	values["EMAIL_CHANGE_RATE_LIMIT_RECIPIENT_REFILL_INTERVAL"] = "30m"
+	c, err = Load(env(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.EmailChangeCodeKey) != 32 || c.EmailChangeCodeKey[0] != 2 || c.EmailChangeActorCapacity != 7 || c.EmailChangeActorRefill != 2*time.Minute || c.EmailChangeRecipientCapacity != 9 || c.EmailChangeRecipientRefill != 30*time.Minute {
+		t.Fatalf("email-change overrides = %#v", c)
+	}
+}
+
 func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 	base := map[string]string{"POSTGRES_PASSWORD": "pg-secret", "PASSWORD_RESET_TOKEN_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "INVITATION_TOKEN_KEY": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"}
 	for name, change := range map[string]func(map[string]string){
@@ -66,6 +97,7 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		"unsafe database name":         func(v map[string]string) { v["POSTGRES_DB"] = "database/name" },
 		"unsafe database user":         func(v map[string]string) { v["POSTGRES_USER"] = "user@example" },
 		"invalid invitation key":       func(v map[string]string) { v["INVITATION_TOKEN_KEY"] = "not-base64" },
+		"reused email-change key":      func(v map[string]string) { v["EMAIL_CHANGE_CODE_KEY"] = v["PASSWORD_RESET_TOKEN_KEY"] },
 		"invitation ttl above maximum": func(v map[string]string) { v["INVITATION_LINK_TTL"] = "8d" },
 		"zero login ip capacity":       func(v map[string]string) { v["LOGIN_RATE_LIMIT_IP_CAPACITY"] = "0" },
 		"short setup refill":           func(v map[string]string) { v["SETUP_RATE_LIMIT_IP_REFILL_INTERVAL"] = "500us" },

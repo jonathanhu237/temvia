@@ -25,6 +25,7 @@ type SetupInput struct {
 	Name     string
 	Email    string
 	Password string
+	Locale   domain.Locale
 	// SourceIP is supplied by the trusted HTTP adapter, never by JSON input.
 	SourceIP string
 }
@@ -131,7 +132,16 @@ func (s *Setup) Complete(ctx context.Context, input SetupInput) (domain.User, er
 		}
 		return domain.User{}, dependencyError(err)
 	}
-	user, err := s.store.Complete(ctx, digest[:], name, email, hash)
+	locale := input.Locale
+	if !locale.Valid() {
+		locale = domain.LocaleEnglish
+	}
+	var user domain.User
+	if localized, ok := s.store.(SetupLocaleStore); ok {
+		user, err = localized.CompleteWithLocale(ctx, digest[:], name, email, hash, locale)
+	} else {
+		user, err = s.store.Complete(ctx, digest[:], name, email, hash)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrSetupComplete), errors.Is(err, ErrInvalidSetupToken), errors.Is(err, ErrEmailAlreadyRegistered):
@@ -161,7 +171,7 @@ func dependencyError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, ErrAccountDisabled) || errors.Is(err, ErrSelfUserOperation) || errors.Is(err, ErrSetupComplete) || errors.Is(err, ErrInvalidSetupToken) || errors.Is(err, ErrInvalidPasswordResetToken) || errors.Is(err, ErrEmailAlreadyRegistered) || errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrRateLimited) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrPasswordHashBusy) || errors.Is(err, ErrDependencyUnavailable) || errors.Is(err, ErrForbidden) || errors.Is(err, ErrRoleNotFound) || errors.Is(err, ErrRoleAlreadyExists) || errors.Is(err, ErrUserNotFound) || errors.Is(err, ErrInvitationNotFound) || errors.Is(err, ErrOperationLogNotFound) || errors.Is(err, ErrRoleInUse) || errors.Is(err, ErrImmutableRole) || errors.Is(err, ErrLastSuperAdmin) || errors.Is(err, ErrStaleRevision) || errors.Is(err, ErrInvalidRoleSet) || errors.Is(err, ErrInvitationPending) || errors.Is(err, ErrInvitationInvalid) || errors.Is(err, ErrSystemIdentityNotConfigured) || errors.Is(err, ErrInvalidSystemIdentity) {
+	if errors.Is(err, ErrAccountDisabled) || errors.Is(err, ErrSelfUserOperation) || errors.Is(err, ErrSetupComplete) || errors.Is(err, ErrInvalidSetupToken) || errors.Is(err, ErrInvalidPasswordResetToken) || errors.Is(err, ErrEmailAlreadyRegistered) || errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrRateLimited) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrPasswordHashBusy) || errors.Is(err, ErrDependencyUnavailable) || errors.Is(err, ErrForbidden) || errors.Is(err, ErrRoleNotFound) || errors.Is(err, ErrRoleAlreadyExists) || errors.Is(err, ErrUserNotFound) || errors.Is(err, ErrInvitationNotFound) || errors.Is(err, ErrOperationLogNotFound) || errors.Is(err, ErrRoleInUse) || errors.Is(err, ErrImmutableRole) || errors.Is(err, ErrLastSuperAdmin) || errors.Is(err, ErrStaleRevision) || errors.Is(err, ErrInvalidRoleSet) || errors.Is(err, ErrInvitationPending) || errors.Is(err, ErrInvitationInvalid) || errors.Is(err, ErrSystemIdentityNotConfigured) || errors.Is(err, ErrInvalidSystemIdentity) || errors.Is(err, ErrEmailChangeNotFound) || errors.Is(err, ErrInvalidEmailChange) || errors.Is(err, ErrInvalidEmailChangeCode) || errors.Is(err, ErrEmailChangeExpired) || errors.Is(err, ErrEmailChangeResendTooSoon) || errors.Is(err, ErrEmailChangeAttemptsExceeded) || errors.Is(err, ErrAvatarNotFound) || errors.Is(err, ErrMailNotConfigured) {
 		return err
 	}
 	return fmt.Errorf("%w: %v", ErrDependencyUnavailable, err)

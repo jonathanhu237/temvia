@@ -1,5 +1,5 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Activity, ChevronDown, History, House, LogOut, Mail, Monitor, Settings, ShieldCheck, UserRound, Users } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Activity, ChevronDown, History, House, LogOut, Mail, Monitor, Settings, ShieldCheck, UserCog, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
@@ -21,7 +21,6 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
-import { PreferencesButtons } from './preferences-menu'
 import { translateProblemWithFields } from '@/shared/api/problems'
 import { notifyRequestError, notifySuccess } from '@/shared/feedback'
 import type { ApiClient } from '@/shared/api/client'
@@ -29,10 +28,18 @@ import { currentUserQueryKey } from './queries'
 import type { User } from '@/shared/api/contracts'
 import { clearAccessDrafts, useAccessDraftStore } from '@/features/access/drafts'
 import { IdentityMark } from '@/features/identity/system-identity'
+import { UserAvatar } from './user-avatar'
+import { changeAccountLocale, restoreGuestLocale } from '@/shared/i18n'
 
-export function AuthenticatedShell({ api, user, children }: { api: ApiClient; user: User; children: React.ReactNode }) {
+export function AuthenticatedShell({ api, user: initialUser, children }: { api: ApiClient; user: User; children: React.ReactNode }) {
   const { t } = useTranslation(['common', 'auth', 'problems', 'access', 'operationLog', 'onlineUsers'])
   const queryClient = useQueryClient()
+  // Subscribe to the cache entry populated by the authenticated route loader.
+  // Mutations from personal settings can then update the account area without
+  // requiring a full route reload; disabled fetching keeps the loader as the
+  // single source of network reads for this shell.
+  const currentUserQuery = useQuery({ queryKey: currentUserQueryKey, queryFn: ({ signal }) => api.me(signal), enabled: false })
+  const user = currentUserQuery.data ?? initialUser
   const navigate = useNavigate()
   const location = useLocation()
   const hasOnlineUsersAccess = Boolean(user.superAdmin || user.permissions?.includes('online-users.read'))
@@ -50,9 +57,13 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
   const accessMenuExpanded = accessMenuOpen || accessMenuActive
   const monitoringMenuExpanded = monitoringMenuOpen || monitoringMenuActive
   useEffect(() => {
+    void changeAccountLocale(user.locale === 'zh-CN' ? 'zh-CN' : 'en')
+  }, [user.id, user.locale])
+  useEffect(() => {
     const previousOwnerID = useAccessDraftStore.getState().ownerID
     if (previousOwnerID && previousOwnerID !== user.id) {
       queryClient.removeQueries({ queryKey: ['access'] })
+      queryClient.removeQueries({ queryKey: ['personal-profile', previousOwnerID] })
       queryClient.removeQueries({ queryKey: ['operational-warnings', previousOwnerID] })
       queryClient.removeQueries({ queryKey: ['operation-log-status', previousOwnerID] })
       queryClient.removeQueries({ queryKey: ['operation-logs', previousOwnerID] })
@@ -71,12 +82,14 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
       queryClient.removeQueries({ queryKey: currentUserQueryKey })
       queryClient.removeQueries({ queryKey: ['access'] })
       if (ownerID) {
+        queryClient.removeQueries({ queryKey: ['personal-profile', ownerID] })
         queryClient.removeQueries({ queryKey: ['operational-warnings', ownerID] })
         queryClient.removeQueries({ queryKey: ['operation-log-status', ownerID] })
         queryClient.removeQueries({ queryKey: ['operation-logs', ownerID] })
         queryClient.removeQueries({ queryKey: ['operation-log', ownerID] })
         queryClient.removeQueries({ queryKey: ['settings', 'operation-log-retention', ownerID] })
       }
+      void restoreGuestLocale()
       notifySuccess(t('auth:logoutSuccess'))
       void navigate({ to: '/login', replace: true })
     },
@@ -97,6 +110,14 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
                     <Link to="/" aria-current={location.pathname === '/' ? 'page' : undefined}>
                       <House aria-hidden="true" data-icon="inline-start" />
                       <span>{t('home')}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={location.pathname.startsWith('/personal-settings')} tooltip={t('personalSettings')}>
+                    <Link to="/personal-settings" aria-current={location.pathname.startsWith('/personal-settings') ? 'page' : undefined}>
+                      <UserCog aria-hidden="true" data-icon="inline-start" />
+                      <span>{t('personalSettings')}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -137,9 +158,7 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent" aria-label={`${user.name}, ${t('menu')}`}>
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-sidebar-accent text-xs font-semibold text-sidebar-accent-foreground">
-                  {user.name.slice(0, 1).toUpperCase()}
-                </span>
+                <UserAvatar user={user} className="size-8 rounded-md" />
                 <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left group-data-[collapsible=icon]:hidden">
                   <span className="w-full truncate text-sm font-medium">{user.name}</span>
                   <span className="w-full truncate text-xs text-muted-foreground">{user.email}</span>
@@ -165,9 +184,8 @@ export function AuthenticatedShell({ api, user, children }: { api: ApiClient; us
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger aria-label={t('menu')} />
             <div className="h-4 w-px bg-border" aria-hidden="true" />
-            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/online-users') ? t('onlineUsers:title') : location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : location.pathname.startsWith('/settings') ? t('settings') : location.pathname.startsWith('/operation-logs') ? t('operationLog:title') : t('home')}</p>
+            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/personal-settings') ? t('personalSettings') : location.pathname.startsWith('/online-users') ? t('onlineUsers:title') : location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : location.pathname.startsWith('/settings') ? t('settings') : location.pathname.startsWith('/operation-logs') ? t('operationLog:title') : t('home')}</p>
           </div>
-          <PreferencesButtons className="shrink-0" />
         </header>
         <div className="flex min-h-[calc(100dvh-3.5rem)] flex-1 flex-col gap-5 p-4 sm:p-6 lg:p-8">
           {children}

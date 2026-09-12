@@ -9,6 +9,10 @@ export type AccessUser = {
   id: string
   name: string
   email: string
+  locale?: 'en' | 'zh-CN'
+  avatarUrl?: string
+  hasAvatar?: boolean
+  avatarVersion?: number
   createdAt: string
   authVersion: number
   disabled: boolean

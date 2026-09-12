@@ -5,6 +5,7 @@ import { SessionError } from '@/features/auth/session-error'
 import { currentUserOptions } from '@/features/auth/queries'
 import { isUnauthenticated } from '@/shared/api/problems'
 import { clearAccessDrafts } from '@/features/access/drafts'
+import { restoreGuestLocale } from '@/shared/i18n'
 
 export const Route = createFileRoute('/_authenticated')({
   loader: async ({ context }) => {
@@ -14,8 +15,10 @@ export const Route = createFileRoute('/_authenticated')({
     } catch (error) {
       if (isUnauthenticated(error)) {
         clearAccessDrafts()
+        void restoreGuestLocale()
         context.queryClient.removeQueries({ queryKey: ['auth', 'current-user'] })
         context.queryClient.removeQueries({ queryKey: ['access'] })
+        context.queryClient.removeQueries({ queryKey: ['personal-profile'] })
         context.queryClient.removeQueries({ queryKey: ['operational-warnings'] })
         context.queryClient.removeQueries({ queryKey: ['operation-log-status'] })
         context.queryClient.removeQueries({ queryKey: ['operation-logs'] })

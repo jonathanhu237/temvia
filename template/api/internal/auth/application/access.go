@@ -912,6 +912,12 @@ type InvitationTargetStore interface {
 	FindInvitationTarget(context.Context, []byte, []byte) (domain.Invitation, error)
 }
 
+// InvitationLocaleStore lets acceptance persist the locale captured when the
+// invitation was created without changing the legacy acceptance seam.
+type InvitationLocaleStore interface {
+	CompleteInvitationWithLocale(context.Context, []byte, []byte, string, domain.Locale) error
+}
+
 func NewInvitationAcceptance(store AccessStore, hasher PasswordHasher, key []byte, limiters ...InvitationAcceptLimiter) *InvitationAcceptance {
 	var limiter InvitationAcceptLimiter
 	if len(limiters) > 0 {
@@ -986,11 +992,21 @@ func (a *InvitationAcceptance) completeWithTarget(ctx context.Context, sourceIP,
 		}
 		return domain.Invitation{}, dependencyError(err)
 	}
-	if err := a.store.CompleteInvitation(ctx, selector, digest, hash); err != nil {
-		if errors.Is(err, ErrInvitationInvalid) || errors.Is(err, ErrEmailAlreadyRegistered) {
+	locale := target.Locale
+	if !locale.Valid() {
+		locale = domain.LocaleEnglish
+	}
+	var completeErr error
+	if localized, ok := a.store.(InvitationLocaleStore); ok {
+		completeErr = localized.CompleteInvitationWithLocale(ctx, selector, digest, hash, locale)
+	} else {
+		completeErr = a.store.CompleteInvitation(ctx, selector, digest, hash)
+	}
+	if completeErr != nil {
+		if errors.Is(completeErr, ErrInvitationInvalid) || errors.Is(completeErr, ErrEmailAlreadyRegistered) {
 			return domain.Invitation{}, ErrInvitationInvalid
 		}
-		return domain.Invitation{}, dependencyError(err)
+		return domain.Invitation{}, dependencyError(completeErr)
 	}
 	return target, nil
 }

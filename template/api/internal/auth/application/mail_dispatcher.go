@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/hex"
@@ -21,25 +23,32 @@ type activeMailDelivery struct {
 }
 
 type MailDispatcher struct {
-	outbox        MailOutboxStore
-	mailer        Mailer
-	random        RandomSource
-	tokenKey      []byte
-	invitationKey []byte
-	publicURL     string
-	pollInterval  time.Duration
-	lease         time.Duration
-	retryInitial  time.Duration
-	retryMax      time.Duration
-	maxAttempts   int
-	now           func() time.Time
-	identity      SystemIdentityProvider
+	outbox         MailOutboxStore
+	mailer         Mailer
+	random         RandomSource
+	tokenKey       []byte
+	invitationKey  []byte
+	emailChangeKey []byte
+	publicURL      string
+	pollInterval   time.Duration
+	lease          time.Duration
+	retryInitial   time.Duration
+	retryMax       time.Duration
+	maxAttempts    int
+	now            func() time.Time
+	identity       SystemIdentityProvider
 
 	mu              sync.Mutex
 	stopping        bool
 	stopCh          chan struct{}
 	shutdownContext context.Context
 	active          *activeMailDelivery
+}
+
+func derivePurposeKey(master []byte, purpose string) []byte {
+	mac := hmac.New(sha256.New, master)
+	_, _ = mac.Write([]byte(purpose))
+	return mac.Sum(nil)
 }
 
 func (d *MailDispatcher) SetSystemIdentityProvider(identity SystemIdentityProvider) {
@@ -65,6 +74,13 @@ func NewMailDispatcher(outbox MailOutboxStore, mailer Mailer, random RandomSourc
 	}
 	if len(invitationKeys) > 0 {
 		dispatcher.invitationKey = append([]byte(nil), invitationKeys[0]...)
+	}
+	if len(invitationKeys) > 1 {
+		dispatcher.emailChangeKey = append([]byte(nil), invitationKeys[1]...)
+	} else if len(tokenKey) == 32 {
+		// Keep the legacy constructor source-compatible without reusing the
+		// password-reset key as an email-change authority.
+		dispatcher.emailChangeKey = derivePurposeKey(tokenKey, "temvia-email-change-code-key-v1")
 	}
 	return dispatcher
 }
@@ -205,6 +221,15 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 			return nil
 		case errors.Is(err, ErrInvitationInvalid):
 			discarded, discardErr := d.outbox.DiscardMail(ackCtx, job.ID, job.LeaseToken, "invalid_invitation")
+			if discardErr != nil {
+				return dependencyError(discardErr)
+			}
+			if !discarded {
+				return nil
+			}
+			return nil
+		case errors.Is(err, ErrInvalidEmailChange):
+			discarded, discardErr := d.outbox.DiscardMail(ackCtx, job.ID, job.LeaseToken, "invalid_email_change")
 			if discardErr != nil {
 				return dependencyError(discardErr)
 			}
@@ -360,6 +385,23 @@ func (d *MailDispatcher) compose(ctx context.Context, job MailJob) (OutgoingMail
 	if job.Kind == MailPasswordChanged {
 		return changedMail(message, job.CreatedAt, job.Locale), nil
 	}
+	if job.Kind == MailEmailChanged {
+		return emailChangedMail(message, job.CreatedAt, job.Locale), nil
+	}
+	if job.Kind == MailEmailChangeCode {
+		if len(job.EmailChangeSelector) != domain.EmailChangeSelectorBytes || len(job.VerifierDigest) != domain.PasswordResetVerifierBytes || len(d.emailChangeKey) != 32 {
+			return OutgoingMail{}, ErrInvalidEmailChange
+		}
+		_, materialDigest, err := domain.NewEmailChangeMaterial(d.emailChangeKey, job.EmailChangeSelector)
+		if err != nil || subtle.ConstantTimeCompare(materialDigest, job.VerifierDigest) != 1 {
+			return OutgoingMail{}, ErrInvalidEmailChange
+		}
+		code, err := domain.EmailChangeCode(d.emailChangeKey, job.EmailChangeSelector)
+		if err != nil {
+			return OutgoingMail{}, ErrInvalidEmailChange
+		}
+		return emailChangeCodeMail(message, code, job.Locale, job.ExpiresAt), nil
+	}
 	if job.Kind == MailUserInvitation {
 		if len(job.ResetSelector) != 16 || len(job.VerifierDigest) != 32 || len(d.invitationKey) != 32 {
 			return OutgoingMail{}, ErrInvitationInvalid
@@ -380,7 +422,7 @@ func (d *MailDispatcher) compose(ctx context.Context, job MailJob) (OutgoingMail
 
 func (d *MailDispatcher) handleDeliveryFailure(ctx context.Context, job MailJob, err error) error {
 	var deliveryErr *MailDeliveryError
-	if (job.Kind == MailPasswordReset || job.Kind == MailUserInvitation) && !d.now().Before(job.ExpiresAt) {
+	if (job.Kind == MailPasswordReset || job.Kind == MailUserInvitation || job.Kind == MailEmailChangeCode) && !d.now().Before(job.ExpiresAt) {
 		discarded, updateErr := d.outbox.DiscardMail(ctx, job.ID, job.LeaseToken, "expired")
 		if updateErr != nil {
 			return dependencyError(updateErr)
@@ -416,7 +458,7 @@ func (d *MailDispatcher) handleDeliveryFailure(ctx context.Context, job MailJob,
 	code := "permanent"
 	if deliveryErr != nil {
 		switch deliveryErr.Code {
-		case "temporary", "permanent", "expired", "superseded", "invalid_reset", "invalid_invitation", "dependency":
+		case "temporary", "permanent", "expired", "superseded", "invalid_reset", "invalid_invitation", "invalid_email_change", "dependency":
 			code = deliveryErr.Code
 		}
 	}
@@ -567,6 +609,36 @@ func mailFrame(locale domain.Locale, systemName, badge, body string) string {
 <tr><td bgcolor="#FFFFFF" style="padding:22px 40px 30px;border-top:1px solid #EAECF0;background:#FFFFFF;"><p style="margin:0 0 5px;color:#344054;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;line-height:20px;">` + html.EscapeString(footerTitle) + `</p><p style="margin:0;color:#98A2B3;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:18px;">` + html.EscapeString(footerCopy) + `</p></td></tr>
 </table></td></tr></table>
 </body></html>`
+}
+
+func emailChangeCodeMail(message OutgoingMail, code string, locale domain.Locale, expiresAt time.Time) OutgoingMail {
+	systemName := mailSystemName(message)
+	expiry := formatMailExpiry(expiresAt)
+	if locale == domain.LocaleChinese {
+		message.Subject = systemName + " 邮箱验证码"
+		message.Text = systemName + " · 账户安全\n\n邮箱变更验证码\n\n您好，" + message.Name + "：\n\n你正在修改账户邮箱。验证码为：" + code + "\n\n验证码将在 " + expiry + " 失效。请勿将验证码提供给任何人。"
+		message.HTML = mailFrame(locale, systemName, "邮箱变更", `<h1 style="margin:18px 0 16px;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:30px;line-height:38px;">验证你的新邮箱</h1><p style="color:#475467;font-size:16px;line-height:26px;">您好，`+html.EscapeString(message.Name)+`：</p><p style="color:#475467;font-size:16px;line-height:26px;">请输入下面的验证码完成邮箱变更：</p><p style="font-family:ui-monospace,monospace;font-size:32px;font-weight:800;letter-spacing:8px;color:#101828;">`+html.EscapeString(code)+`</p><p style="color:#667085;font-size:13px;line-height:20px;">验证码有效至 `+html.EscapeString(expiry)+`。请勿转发。</p>`)
+		return message
+	}
+	message.Subject = "Your " + systemName + " email verification code"
+	message.Text = systemName + " · ACCOUNT SECURITY\n\nEMAIL CHANGE VERIFICATION\n\nHello " + message.Name + ",\n\nYour verification code is: " + code + "\n\nIt expires at " + expiry + ". Never share this code with anyone."
+	message.HTML = mailFrame(locale, systemName, "EMAIL CHANGE", `<h1 style="margin:18px 0 16px;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:30px;line-height:38px;">Verify your new email</h1><p style="color:#475467;font-size:16px;line-height:26px;">Hello `+html.EscapeString(message.Name)+`,</p><p style="color:#475467;font-size:16px;line-height:26px;">Enter this verification code to finish changing your email:</p><p style="font-family:ui-monospace,monospace;font-size:32px;font-weight:800;letter-spacing:8px;color:#101828;">`+html.EscapeString(code)+`</p><p style="color:#667085;font-size:13px;line-height:20px;">This code expires at `+html.EscapeString(expiry)+`. Never share it.</p>`)
+	return message
+}
+
+func emailChangedMail(message OutgoingMail, changedAt time.Time, locale domain.Locale) OutgoingMail {
+	systemName := mailSystemName(message)
+	when := changedAt.UTC().Format("2006-01-02 15:04:05 UTC")
+	if locale == domain.LocaleChinese {
+		message.Subject = systemName + " 邮箱已修改"
+		message.Text = systemName + " · 账户安全\n\n邮箱已修改\n\n您好，" + message.Name + "：\n\n你的邮箱已于 " + when + " 修改。如果这不是你发起的操作，请立即联系管理员。"
+		message.HTML = mailFrame(locale, systemName, "安全状态 · 邮箱已修改", `<h1 style="margin:18px 0 16px;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:30px;line-height:38px;">邮箱已修改</h1><p style="color:#475467;font-size:16px;line-height:26px;">您好，`+html.EscapeString(message.Name)+`：</p><p style="color:#475467;font-size:16px;line-height:26px;">你的账户邮箱已于 `+html.EscapeString(when)+` 修改。如果这不是你发起的操作，请立即联系管理员。</p>`)
+		return message
+	}
+	message.Subject = "Your " + systemName + " email was changed"
+	message.Text = systemName + " · ACCOUNT SECURITY\n\nEMAIL CHANGED\n\nHello " + message.Name + ",\n\nYour account email was changed at " + when + ". If you did not make this change, contact your administrator immediately."
+	message.HTML = mailFrame(locale, systemName, "SECURITY STATUS · EMAIL CHANGED", `<h1 style="margin:18px 0 16px;color:#101828;font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;font-size:30px;line-height:38px;">Your email was changed</h1><p style="color:#475467;font-size:16px;line-height:26px;">Hello `+html.EscapeString(message.Name)+`,</p><p style="color:#475467;font-size:16px;line-height:26px;">Your account email was changed at `+html.EscapeString(when)+`. If you did not make this change, contact your administrator immediately.</p>`)
+	return message
 }
 
 func changedMailBody(locale domain.Locale, name, when, systemName string) string {

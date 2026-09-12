@@ -50,6 +50,42 @@ func TestPasswordResetTokenRejectsMalformedAndNonCanonicalValues(t *testing.T) {
 	}
 }
 
+func TestEmailChangeCodeMaterialIsKeyedAndReconstructible(t *testing.T) {
+	key := bytes.Repeat([]byte{0x42}, PasswordResetVerifierBytes)
+	selector := bytes.Repeat([]byte{0x13}, EmailChangeSelectorBytes)
+	code, digest, err := NewEmailChangeMaterial(key, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(code) != 6 || code < "000000" || code > "999999" {
+		t.Fatalf("code = %q, want six decimal digits", code)
+	}
+	reconstructed, err := EmailChangeCode(key, selector)
+	if err != nil || reconstructed != code {
+		t.Fatalf("EmailChangeCode() = %q, %v; want %q", reconstructed, err, code)
+	}
+	presented, err := EmailChangePresentedDigest(key, selector, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(presented, digest) {
+		t.Fatal("presented code digest does not match the persisted keyed verifier")
+	}
+	for _, invalid := range []string{"", "short", "12345", "1234567", "１２３４５６"} {
+		if _, err := EmailChangePresentedDigest(key, selector, invalid); err != nil {
+			// The digest helper is deliberately format-agnostic; the application
+			// boundary validates the six-digit presentation.
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := NewEmailChangeMaterial(key[:31], selector); err == nil {
+		t.Fatal("invalid key length accepted")
+	}
+	if _, err := EmailChangeCode(key, selector[:15]); err == nil {
+		t.Fatal("invalid selector length accepted")
+	}
+}
+
 func TestName(t *testing.T) {
 	got, err := NewName(" \u0065\u0301  Ada  ")
 	if err != nil || got != "é  Ada" {

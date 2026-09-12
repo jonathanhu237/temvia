@@ -14,6 +14,18 @@ type SetupStore interface {
 	Complete(context.Context, []byte, domain.Name, domain.Email, string) (domain.User, error)
 }
 
+// SetupLocaleStore is an additive seam used by the PostgreSQL adapter to
+// persist the first administrator's account language atomically with setup.
+type SetupLocaleStore interface {
+	CompleteWithLocale(context.Context, []byte, domain.Name, domain.Email, string, domain.Locale) (domain.User, error)
+}
+
+// AccountLocaleStore initializes legacy NULL locales only after successful
+// password verification. A non-NULL locale is never overwritten at login.
+type AccountLocaleStore interface {
+	InitializeLocale(context.Context, string, domain.Locale) (domain.Account, error)
+}
+
 type AccountStore interface {
 	FindByCanonicalEmail(context.Context, string) (domain.Account, error)
 	FindPublicByID(context.Context, string) (domain.User, error)
@@ -104,6 +116,8 @@ const (
 	MailPasswordReset   MailKind = "password_reset"
 	MailPasswordChanged MailKind = "password_changed"
 	MailUserInvitation  MailKind = "user_invitation"
+	MailEmailChangeCode MailKind = "email_change_code"
+	MailEmailChanged    MailKind = "email_changed"
 )
 
 type MailJob struct {
@@ -115,9 +129,11 @@ type MailJob struct {
 	Email                    string
 	Locale                   domain.Locale
 	ResetSelector            []byte
+	EmailChangeSelector      []byte
 	VerifierDigest           []byte
 	InvitationSelector       []byte
 	InvitationVerifierDigest []byte
+	EmailChangeRequestID     string
 	Attempts                 int
 	LeaseToken               string
 	CreatedAt                time.Time
@@ -141,6 +157,7 @@ type OutgoingMail struct {
 	Name       string
 	To         string
 	Locale     domain.Locale
+	ChangedAt  time.Time
 	Subject    string
 	Text       string
 	HTML       string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"time"
 
 	"example.com/temvia/api/internal/auth/domain"
@@ -26,11 +27,14 @@ type SessionRevocationStore interface {
 }
 
 type OnlineUser struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Email        string    `json:"email"`
-	LastSeenAt   time.Time `json:"lastSeenAt"`
-	SessionCount int       `json:"sessionCount"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Email         string    `json:"email"`
+	AvatarURL     string    `json:"avatarUrl,omitempty"`
+	HasAvatar     bool      `json:"hasAvatar"`
+	AvatarVersion int64     `json:"avatarVersion,omitempty"`
+	LastSeenAt    time.Time `json:"lastSeenAt"`
+	SessionCount  int       `json:"sessionCount"`
 }
 
 func (a *Authentication) OnlineUsers(ctx context.Context, actorID string) ([]OnlineUser, error) {
@@ -70,7 +74,10 @@ func (a *Authentication) OnlineUsers(ctx context.Context, actorID string) ([]Onl
 		if err != nil {
 			return nil, dependencyError(err)
 		}
-		user := OnlineUser{ID: id, Name: account.User.Name, Email: account.User.Email}
+		user := OnlineUser{ID: id, Name: account.User.Name, Email: account.User.Email, HasAvatar: account.User.HasAvatar, AvatarVersion: account.User.AvatarVersion}
+		if account.User.HasAvatar {
+			user.AvatarURL = "/api/users/" + id + "/avatar?v=" + strconv.FormatInt(account.User.AvatarVersion, 10)
+		}
 		for _, item := range items {
 			if item.AuthVersion <= 0 || item.AuthVersion != account.AuthVersion {
 				continue

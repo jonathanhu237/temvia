@@ -51,6 +51,10 @@ const codeKeys: Record<string, string> = {
   mail_not_configured: 'problems:mailNotConfigured',
   permission_scope_forbidden: 'problems:permissionScope',
   invalid_mail_settings: 'problems:invalidMailSettings',
+  invalid_email_change: 'problems:emailChangeInvalid',
+  email_change_resend_too_soon: 'problems:emailChangeResendTooSoon',
+  invalid_email_change_code: 'problems:emailChangeCodeInvalid',
+  email_change_attempts_exceeded: 'problems:emailChangeAttemptsExceeded',
 }
 
 const fieldKeys: Record<string, string> = {
@@ -78,6 +82,8 @@ const fieldKeys: Record<string, string> = {
   control_character: 'problems:fields.invalidValue',
   invalid_icon: 'problems:fields.invalidIcon',
   unsupported_type: 'problems:fields.unsupportedImageType',
+  same_email: 'problems:fields.sameEmail',
+  invalid_code: 'problems:fields.invalidCode',
 }
 
 export function fieldMessageKey(code: string | undefined): string {
@@ -122,11 +128,12 @@ export function isInvalidPasswordResetToken(error: unknown): boolean {
 
 export function problemMessageKey(error: unknown): string {
   if (error instanceof ApiProblemError) {
-    // SMTP credential-boundary failures share the validation problem type, so
-    // use their stable operation code for actionable guidance. Preserve the
-    // existing type-first mapping for every other problem.
-    if (error.problem.code === 'invalid_mail_settings') return codeKeys[error.problem.code]
-    return typeKeys[error.problem.type] ?? codeKeys[error.problem.code ?? ''] ?? 'problems:generic'
+    // Some personal-security failures share the validation or rate-limit
+    // envelope but still need an actionable message. Preserve the existing
+    // type-first behavior for all other problem codes.
+    const code = error.problem.code ?? ''
+    if (code === 'invalid_mail_settings' || code === 'invalid_email_change' || code === 'email_change_resend_too_soon' || code === 'invalid_email_change_code' || code === 'email_change_attempts_exceeded') return codeKeys[code]
+    return typeKeys[error.problem.type] ?? codeKeys[code] ?? 'problems:generic'
   }
   if (error instanceof ApiTransportError) {
     return error.aborted ? 'problems:requestCancelled' : 'problems:network'

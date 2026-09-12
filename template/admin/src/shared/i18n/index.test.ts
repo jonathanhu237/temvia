@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { changeLocale, i18n, initializeI18n, LOCALE_STORAGE_KEY, selectInitialLocale } from './index'
+import { changeAccountLocale, changeLocale, i18n, initializeI18n, LOCALE_STORAGE_KEY, restoreGuestLocale, selectInitialLocale } from './index'
 
 describe('locale selection', () => {
   beforeEach(() => window.localStorage.clear())
@@ -25,6 +25,20 @@ describe('locale selection', () => {
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('en')
     expect(document.documentElement).toHaveAttribute('lang', 'en')
     expect(document.documentElement).toHaveAttribute('dir', 'ltr')
+  })
+
+  it('keeps account locale out of guest storage and restores the guest locale after logout', async () => {
+    await initializeI18n()
+    await changeLocale('en')
+    await changeAccountLocale('zh-CN')
+    expect(i18n.language).toBe('zh-CN')
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('en')
+    window.dispatchEvent(new StorageEvent('storage', { key: LOCALE_STORAGE_KEY, newValue: 'zh-CN' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(i18n.language).toBe('zh-CN')
+    await restoreGuestLocale()
+    expect(i18n.language).toBe('en')
+    expect(document.documentElement).toHaveAttribute('lang', 'en')
   })
 
   it('applies a locale changed in another same-origin tab', async () => {

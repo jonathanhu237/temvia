@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import type { ApiClient } from '@/shared/api/client'
 import { isAccountDisabled, isUnauthenticated } from '@/shared/api/problems'
 import { clearAccessDrafts } from '@/features/access/drafts'
+import { restoreGuestLocale } from '@/shared/i18n'
 
 // Keep the heartbeat separate from route-loader data: an expired session must
 // redirect even while the user stays on the same page.
@@ -19,6 +20,7 @@ export function SessionMonitor({ api, userID }: { api: ApiClient; userID: string
     toast.error(isAccountDisabled(session.error) ? t('problems:accountDisabled') : t('sessionExpired'))
     clearAccessDrafts()
     client.clear()
+    void restoreGuestLocale()
     void navigate({ to: '/login', replace: true })
   }, [session.error, client, navigate, t])
   return null

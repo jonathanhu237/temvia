@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"example.com/temvia/api/internal/auth/application"
@@ -50,6 +51,7 @@ var problemCatalog = map[string]struct {
 	"internal-error":               {"Internal Server Error"},
 	"service-unavailable":          {"Service Unavailable"},
 	"mail-not-configured":          {"Mail Service Not Configured"},
+	"avatar-not-found":             {"Avatar Not Found"},
 	"permission-scope":             {"Permission Outside Actor Scope"},
 }
 
@@ -102,6 +104,16 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusConflict, "setup-complete")
 	case applicationError(err, application.ErrEmailAlreadyRegistered):
 		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "validation_failed", "", []domain.FieldError{{Field: "email", Code: "email_already_registered"}})
+	case applicationError(err, application.ErrInvalidEmailChangeCode):
+		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "invalid_email_change_code", "", []domain.FieldError{{Field: "code", Code: "invalid_code"}})
+	case applicationError(err, application.ErrInvalidEmailChange), applicationError(err, application.ErrEmailChangeExpired):
+		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "invalid_email_change", "", nil)
+	case applicationError(err, application.ErrEmailChangeAttemptsExceeded):
+		writeProblemWithCode(w, http.StatusUnprocessableEntity, "validation-failed", "email_change_attempts_exceeded", "", nil)
+	case applicationError(err, application.ErrEmailChangeResendTooSoon):
+		writeProblemWithCode(w, http.StatusTooManyRequests, "rate-limited", "email_change_resend_too_soon", "", nil)
+	case applicationError(err, application.ErrAvatarNotFound):
+		writeProblem(w, http.StatusNotFound, "avatar-not-found")
 	case applicationError(err, application.ErrRateLimited):
 		writeProblemWithCode(w, http.StatusTooManyRequests, "rate-limited", "rate_limited", "", nil)
 	case applicationError(err, application.ErrDependencyUnavailable), applicationError(err, application.ErrPasswordHashBusy):
@@ -116,7 +128,7 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblemWithCode(w, http.StatusUnprocessableEntity, "invalid-system-identity", "invalid_system_identity", "", nil)
 	case applicationError(err, application.ErrForbidden):
 		writeProblem(w, http.StatusForbidden, "forbidden")
-	case applicationError(err, application.ErrRoleNotFound), applicationError(err, application.ErrUserNotFound), applicationError(err, application.ErrInvitationNotFound), applicationError(err, application.ErrOperationLogNotFound):
+	case applicationError(err, application.ErrRoleNotFound), applicationError(err, application.ErrUserNotFound), applicationError(err, application.ErrInvitationNotFound), applicationError(err, application.ErrOperationLogNotFound), applicationError(err, application.ErrEmailChangeNotFound):
 		writeProblem(w, http.StatusNotFound, "not-found")
 	case applicationError(err, application.ErrRoleInUse):
 		writeProblemWithCode(w, http.StatusConflict, "role-in-use", "role_in_use", "", nil)
@@ -138,11 +150,17 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 }
 
 func isValidation(err error) bool {
-	_, ok := err.(*domain.ValidationErrors)
-	return ok
+	var validationErr *domain.ValidationErrors
+	return errors.As(err, &validationErr)
 }
 
-func validationFields(err error) []domain.FieldError { return err.(*domain.ValidationErrors).Items }
+func validationFields(err error) []domain.FieldError {
+	var validationErr *domain.ValidationErrors
+	if errors.As(err, &validationErr) {
+		return validationErr.Items
+	}
+	return nil
+}
 
 func applicationError(err, target error) bool {
 	for err != nil {

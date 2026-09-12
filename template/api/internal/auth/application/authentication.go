@@ -14,6 +14,7 @@ const sessionIDBytes = 32
 type LoginInput struct {
 	Email    string
 	Password string
+	Locale   domain.Locale
 	// SourceIP is supplied by the trusted HTTP adapter, never by JSON input.
 	SourceIP string
 }
@@ -94,6 +95,14 @@ func (a *Authentication) Login(ctx context.Context, input LoginInput) (domain.Us
 	}
 	if err := createErr; err != nil {
 		return domain.User{}, "", dependencyError(err)
+	}
+	if accountLocales, ok := a.accounts.(AccountLocaleStore); ok && !account.User.Locale.Valid() && input.Locale.Valid() {
+		localized, err := accountLocales.InitializeLocale(ctx, account.User.ID, input.Locale)
+		if err != nil {
+			_ = a.sessions.Delete(ctx, sessionID)
+			return domain.User{}, "", dependencyError(err)
+		}
+		account = localized
 	}
 	return account.User, sessionID, nil
 }

@@ -5,6 +5,10 @@ export const userSchema = z
     id: z.string().uuid(),
     name: z.string(),
     email: z.string(),
+    locale: z.enum(['en', 'zh-CN']).optional(),
+    avatarUrl: z.string().optional(),
+    hasAvatar: z.boolean().default(false),
+    avatarVersion: z.number().int().nonnegative().optional(),
     roles: z.array(z.lazy(() => roleSchema)).optional(),
     permissions: z.array(z.string()).optional(),
     superAdmin: z.boolean().optional(),
@@ -46,7 +50,7 @@ export type PermissionCombination = { key: string; labelKey: string; description
 export type RoleOption = z.infer<typeof roleOptionSchema>
 
 export const principalEnvelopeSchema = z.object({
-  user: z.object({ id: z.string().uuid(), name: z.string(), email: z.string() }).strict(),
+  user: z.object({ id: z.string().uuid(), name: z.string(), email: z.string(), locale: z.enum(['en', 'zh-CN']).optional(), avatarUrl: z.string().optional(), hasAvatar: z.boolean().default(false), avatarVersion: z.number().int().nonnegative().optional() }).strict(),
   roles: z.array(roleSchema),
   permissions: z.array(z.string()),
   superAdmin: z.boolean(),
@@ -69,6 +73,10 @@ export const accessUserSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
   email: z.string(),
+  locale: z.enum(['en', 'zh-CN']).optional(),
+  avatarUrl: z.string().optional(),
+  hasAvatar: z.boolean().default(false),
+  avatarVersion: z.number().int().nonnegative().optional(),
   createdAt: z.string(),
   authVersion: z.number().int().positive(),
   disabled: z.boolean().default(false),
@@ -76,6 +84,7 @@ export const accessUserSchema = z.object({
 }).strict()
 
 export const usersResponseSchema = z.object({ users: z.array(accessUserSchema), nextCursor: z.string().optional() }).strict()
+export type AccessUser = z.infer<typeof accessUserSchema>
 export const userRoleResponseSchema = z.object({ user: accessUserSchema }).strict()
 export const invitationSchema = z.object({
   creator: z.object({ id: z.string().optional(), name: z.string().optional(), email: z.string().optional(), deleted: z.boolean().optional() }).optional(),
@@ -108,11 +117,12 @@ export const setupInputSchema = z
     name: z.string(),
     email: z.string(),
     password: z.string(),
+    locale: z.enum(['en', 'zh-CN']).optional(),
   })
   .strict()
 
 export const loginInputSchema = z
-  .object({ email: z.string(), password: z.string() })
+  .object({ email: z.string(), password: z.string(), locale: z.enum(['en', 'zh-CN']).optional() })
   .strict()
 
 export const passwordResetRequestInputSchema = z
@@ -212,7 +222,24 @@ export type ProblemDetails = z.infer<typeof problemDetailsSchema>
 export type FieldProblem = z.infer<typeof fieldProblemSchema>
 
 export const onlineUsersResponseSchema = z.object({ users: z.array(z.object({
-  id: z.string().uuid(), name: z.string(), email: z.string(),
+  id: z.string().uuid(), name: z.string(), email: z.string(), avatarUrl: z.string().optional(), hasAvatar: z.boolean().default(false), avatarVersion: z.number().int().nonnegative().optional(),
   lastSeenAt: z.string().datetime(), sessionCount: z.number().int().positive(),
-})) })
+}).strict()) }).strict()
+
+export const emailChangeSchema = z.object({
+  id: z.string().uuid(),
+  oldEmail: z.string(),
+  newEmail: z.string(),
+  expiresAt: z.string().datetime(),
+  resendAvailableAt: z.string().datetime(),
+  attemptsRemaining: z.number().int().nonnegative(),
+  revision: z.number().int().positive(),
+}).strict()
+export type EmailChange = z.infer<typeof emailChangeSchema>
+export const personalProfileResponseSchema = z.object({ user: userSchema, emailChange: emailChangeSchema.nullable().optional() }).strict()
+export const emailChangeResponseSchema = z.object({ emailChange: emailChangeSchema }).strict()
+export const personalEmailChangeStatusSchema = z.object({ emailChange: emailChangeSchema.nullable() }).strict()
+export const personalPasswordInputSchema = z.object({ currentPassword: z.string(), newPassword: z.string(), confirmPassword: z.string() }).strict()
+export const personalEmailChangeInputSchema = z.object({ currentPassword: z.string(), newEmail: z.string() }).strict()
+export const personalEmailVerifyInputSchema = z.object({ requestId: z.string().uuid(), code: z.string() }).strict()
 export type OnlineUser = z.infer<typeof onlineUsersResponseSchema>['users'][number]

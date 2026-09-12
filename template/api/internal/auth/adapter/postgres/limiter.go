@@ -118,6 +118,16 @@ func (s *Store) AllowTestEmail(ctx context.Context, actorID, canonicalEmail stri
 	})
 }
 
+// AllowEmailChange charges both the authenticated account and destination
+// address. This prevents switching destinations to evade an actor quota and
+// switching accounts to evade protection for one recipient.
+func (s *Store) AllowEmailChange(ctx context.Context, actorID, canonicalEmail string) (bool, error) {
+	return s.allowBusinessBuckets(ctx, "email-change", []rateLimitSpec{
+		actorSpec(actorID, s.emailChangeActorCapacity, s.emailChangeActorRefill),
+		recipientSpec(canonicalEmail, s.emailChangeRecipientCapacity, s.emailChangeRecipientRefill),
+	})
+}
+
 func (s *Store) allowAttemptAndBuckets(ctx context.Context, namespace string, attempt rateLimitSpec, business []rateLimitSpec) (bool, error) {
 	if err := validateRateLimitSpecs(append([]rateLimitSpec{attempt}, business...)); err != nil {
 		return false, err
@@ -442,4 +452,5 @@ var (
 	_ application.InvitationAcceptLimiter         = (*Store)(nil)
 	_ application.InvitationSendLimiter           = (*Store)(nil)
 	_ application.TestEmailLimiter                = (*Store)(nil)
+	_ application.EmailChangeLimiter              = (*Store)(nil)
 )

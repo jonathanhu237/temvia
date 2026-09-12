@@ -11,6 +11,7 @@ import { fieldProblemFor, isInvalidSetupToken, isSetupComplete, translateRateLim
 import { clearSetupAuthority } from '@/shared/bootstrap/setup-authority'
 import { setupFormSchema, normalizeSetupValues, type SetupFormValues } from './schemas'
 import { PasswordField, TextField } from './form-fields'
+import { i18n } from '@/shared/i18n'
 
 export function SetupForm({ api, token, onSuccess, onInvalidAuthority, onSetupComplete }: { api: ApiClient; token: string; onSuccess: () => void; onInvalidAuthority?: () => void; onSetupComplete?: () => void }) {
   const { t } = useTranslation(['auth', 'problems'])
@@ -24,7 +25,7 @@ export function SetupForm({ api, token, onSuccess, onInvalidAuthority, onSetupCo
   })
   const mutation = useMutation({
     retry: false,
-    mutationFn: (values: SetupFormValues) => api.setup({ token, ...normalizeSetupValues(values) }),
+    mutationFn: (values: SetupFormValues) => api.setup({ token, ...normalizeSetupValues(values), locale: i18n.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en' }),
     onSuccess: () => {
       clearSetupAuthority()
       void queryClient.invalidateQueries({ queryKey: ['setup', 'status'] })

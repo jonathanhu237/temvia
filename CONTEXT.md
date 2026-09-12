@@ -35,6 +35,15 @@ _Avoid_: ICON
 A current system condition that needs administrative attention, such as missing email configuration.
 _Avoid_: Notification history, audit log
 
+**Personal settings（个人设置）**:
+A user's own profile, account security, and interface preferences: name, avatar, password, sign-in email, theme, and interface language. These settings are separate from shared System settings.
+
+**Interface language（界面语言）**:
+The language of a user's authenticated interface, retained with their account and changeable by that user. An invited user's initial interface language comes from their invitation email; it is distinct from the system-wide Default email language.
+
+**Sign-in email change（更换登录邮箱）**:
+An account holder's replacement of their sign-in email, authorized by their current password and verification of the new email. The old address remains the sign-in email until verification succeeds; access to the old mailbox is not required, and it receives a notification after the change.
+
 **Password reset link**:
 A single-use link that lets an account holder choose a new password after requesting password recovery.
 

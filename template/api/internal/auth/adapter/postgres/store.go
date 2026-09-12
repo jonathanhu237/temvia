@@ -14,45 +14,49 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-const ExpectedMigrationVersion int64 = 10
+const ExpectedMigrationVersion int64 = 11
 
 const stateOperationTimeout = time.Second
 
 var ErrSchemaNotReady = errors.New("database schema is not ready")
 
 type Store struct {
-	db                          *sql.DB
-	operationTimeout            time.Duration
-	idleTimeout                 time.Duration
-	absoluteTimeout             time.Duration
-	globalCapacity              int
-	globalRefill                time.Duration
-	emailCapacity               int
-	emailRefill                 time.Duration
-	resetGlobalCapacity         int
-	resetGlobalRefill           time.Duration
-	resetEmailCapacity          int
-	resetEmailRefill            time.Duration
-	loginIPCapacity             int
-	loginIPRefill               time.Duration
-	resetIPCapacity             int
-	resetIPRefill               time.Duration
-	resetCompleteIPCapacity     int
-	resetCompleteIPRefill       time.Duration
-	setupIPCapacity             int
-	setupIPRefill               time.Duration
-	invitationAcceptIPCapacity  int
-	invitationAcceptIPRefill    time.Duration
-	invitationActorCapacity     int
-	invitationActorRefill       time.Duration
-	invitationRecipientCapacity int
-	invitationRecipientRefill   time.Duration
-	testMailGlobalCapacity      int
-	testMailGlobalRefill        time.Duration
-	testMailActorCapacity       int
-	testMailActorRefill         time.Duration
-	testMailRecipientCapacity   int
-	testMailRecipientRefill     time.Duration
+	db                           *sql.DB
+	operationTimeout             time.Duration
+	idleTimeout                  time.Duration
+	absoluteTimeout              time.Duration
+	globalCapacity               int
+	globalRefill                 time.Duration
+	emailCapacity                int
+	emailRefill                  time.Duration
+	resetGlobalCapacity          int
+	resetGlobalRefill            time.Duration
+	resetEmailCapacity           int
+	resetEmailRefill             time.Duration
+	loginIPCapacity              int
+	loginIPRefill                time.Duration
+	resetIPCapacity              int
+	resetIPRefill                time.Duration
+	resetCompleteIPCapacity      int
+	resetCompleteIPRefill        time.Duration
+	setupIPCapacity              int
+	setupIPRefill                time.Duration
+	invitationAcceptIPCapacity   int
+	invitationAcceptIPRefill     time.Duration
+	invitationActorCapacity      int
+	invitationActorRefill        time.Duration
+	invitationRecipientCapacity  int
+	invitationRecipientRefill    time.Duration
+	testMailGlobalCapacity       int
+	testMailGlobalRefill         time.Duration
+	testMailActorCapacity        int
+	testMailActorRefill          time.Duration
+	testMailRecipientCapacity    int
+	testMailRecipientRefill      time.Duration
+	emailChangeActorCapacity     int
+	emailChangeActorRefill       time.Duration
+	emailChangeRecipientCapacity int
+	emailChangeRecipientRefill   time.Duration
 }
 
 func Open(ctx context.Context, cfg config.Config) (*sql.DB, error) {
@@ -103,6 +107,10 @@ func NewStore(db *sql.DB, configs ...config.Config) *Store {
 		TestEmailActorRefill:            time.Hour,
 		TestEmailRecipientCapacity:      3,
 		TestEmailRecipientRefill:        20 * time.Minute,
+		EmailChangeActorCapacity:        5,
+		EmailChangeActorRefill:          time.Hour,
+		EmailChangeRecipientCapacity:    3,
+		EmailChangeRecipientRefill:      20 * time.Minute,
 	}
 	if len(configs) > 0 {
 		settings = configs[0]
@@ -196,40 +204,56 @@ func NewStore(db *sql.DB, configs ...config.Config) *Store {
 		if settings.TestEmailRecipientRefill <= 0 {
 			settings.TestEmailRecipientRefill = 20 * time.Minute
 		}
+		if settings.EmailChangeActorCapacity <= 0 {
+			settings.EmailChangeActorCapacity = 5
+		}
+		if settings.EmailChangeActorRefill <= 0 {
+			settings.EmailChangeActorRefill = time.Hour
+		}
+		if settings.EmailChangeRecipientCapacity <= 0 {
+			settings.EmailChangeRecipientCapacity = 3
+		}
+		if settings.EmailChangeRecipientRefill <= 0 {
+			settings.EmailChangeRecipientRefill = 20 * time.Minute
+		}
 	}
 	return &Store{
-		db:                          db,
-		operationTimeout:            stateOperationTimeout,
-		idleTimeout:                 settings.SessionIdleTimeout,
-		absoluteTimeout:             settings.SessionAbsoluteTimeout,
-		globalCapacity:              settings.LoginGlobalCapacity,
-		globalRefill:                settings.LoginGlobalRefillInterval,
-		emailCapacity:               settings.LoginEmailCapacity,
-		emailRefill:                 settings.LoginEmailRefillInterval,
-		resetGlobalCapacity:         settings.PasswordResetGlobalCapacity,
-		resetGlobalRefill:           settings.PasswordResetGlobalRefill,
-		resetEmailCapacity:          settings.PasswordResetEmailCapacity,
-		resetEmailRefill:            settings.PasswordResetEmailRefill,
-		loginIPCapacity:             settings.LoginIPCapacity,
-		loginIPRefill:               settings.LoginIPRefillInterval,
-		resetIPCapacity:             settings.PasswordResetIPCapacity,
-		resetIPRefill:               settings.PasswordResetIPRefill,
-		resetCompleteIPCapacity:     settings.PasswordResetCompleteIPCapacity,
-		resetCompleteIPRefill:       settings.PasswordResetCompleteIPRefill,
-		setupIPCapacity:             settings.SetupIPCapacity,
-		setupIPRefill:               settings.SetupIPRefill,
-		invitationAcceptIPCapacity:  settings.InvitationAcceptIPCapacity,
-		invitationAcceptIPRefill:    settings.InvitationAcceptIPRefill,
-		invitationActorCapacity:     settings.InvitationSendActorCapacity,
-		invitationActorRefill:       settings.InvitationSendActorRefill,
-		invitationRecipientCapacity: settings.InvitationSendRecipientCapacity,
-		invitationRecipientRefill:   settings.InvitationSendRecipientRefill,
-		testMailGlobalCapacity:      settings.TestEmailGlobalCapacity,
-		testMailGlobalRefill:        settings.TestEmailGlobalRefill,
-		testMailActorCapacity:       settings.TestEmailActorCapacity,
-		testMailActorRefill:         settings.TestEmailActorRefill,
-		testMailRecipientCapacity:   settings.TestEmailRecipientCapacity,
-		testMailRecipientRefill:     settings.TestEmailRecipientRefill,
+		db:                           db,
+		operationTimeout:             stateOperationTimeout,
+		idleTimeout:                  settings.SessionIdleTimeout,
+		absoluteTimeout:              settings.SessionAbsoluteTimeout,
+		globalCapacity:               settings.LoginGlobalCapacity,
+		globalRefill:                 settings.LoginGlobalRefillInterval,
+		emailCapacity:                settings.LoginEmailCapacity,
+		emailRefill:                  settings.LoginEmailRefillInterval,
+		resetGlobalCapacity:          settings.PasswordResetGlobalCapacity,
+		resetGlobalRefill:            settings.PasswordResetGlobalRefill,
+		resetEmailCapacity:           settings.PasswordResetEmailCapacity,
+		resetEmailRefill:             settings.PasswordResetEmailRefill,
+		loginIPCapacity:              settings.LoginIPCapacity,
+		loginIPRefill:                settings.LoginIPRefillInterval,
+		resetIPCapacity:              settings.PasswordResetIPCapacity,
+		resetIPRefill:                settings.PasswordResetIPRefill,
+		resetCompleteIPCapacity:      settings.PasswordResetCompleteIPCapacity,
+		resetCompleteIPRefill:        settings.PasswordResetCompleteIPRefill,
+		setupIPCapacity:              settings.SetupIPCapacity,
+		setupIPRefill:                settings.SetupIPRefill,
+		invitationAcceptIPCapacity:   settings.InvitationAcceptIPCapacity,
+		invitationAcceptIPRefill:     settings.InvitationAcceptIPRefill,
+		invitationActorCapacity:      settings.InvitationSendActorCapacity,
+		invitationActorRefill:        settings.InvitationSendActorRefill,
+		invitationRecipientCapacity:  settings.InvitationSendRecipientCapacity,
+		invitationRecipientRefill:    settings.InvitationSendRecipientRefill,
+		testMailGlobalCapacity:       settings.TestEmailGlobalCapacity,
+		testMailGlobalRefill:         settings.TestEmailGlobalRefill,
+		testMailActorCapacity:        settings.TestEmailActorCapacity,
+		testMailActorRefill:          settings.TestEmailActorRefill,
+		testMailRecipientCapacity:    settings.TestEmailRecipientCapacity,
+		testMailRecipientRefill:      settings.TestEmailRecipientRefill,
+		emailChangeActorCapacity:     settings.EmailChangeActorCapacity,
+		emailChangeActorRefill:       settings.EmailChangeActorRefill,
+		emailChangeRecipientCapacity: settings.EmailChangeRecipientCapacity,
+		emailChangeRecipientRefill:   settings.EmailChangeRecipientRefill,
 	}
 }
 
@@ -304,6 +328,13 @@ func equalDigest(left, right []byte) bool {
 }
 
 func (s *Store) Complete(ctx context.Context, digest []byte, name domain.Name, email domain.Email, passwordHash string) (domain.User, error) {
+	return s.CompleteWithLocale(ctx, digest, name, email, passwordHash, domain.LocaleEnglish)
+}
+
+func (s *Store) CompleteWithLocale(ctx context.Context, digest []byte, name domain.Name, email domain.Email, passwordHash string, locale domain.Locale) (domain.User, error) {
+	if !locale.Valid() {
+		locale = domain.LocaleEnglish
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.User{}, err
@@ -322,7 +353,7 @@ func (s *Store) Complete(ctx context.Context, digest []byte, name domain.Name, e
 		return domain.User{}, application.ErrInvalidSetupToken
 	}
 	var user domain.User
-	err = tx.QueryRowContext(ctx, `INSERT INTO auth_users (name, email, email_canonical, password_hash) VALUES ($1, $2, $3, $4) RETURNING id::text, name, email, created_at`, string(name), email.Display, email.Canonical, passwordHash).Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt)
+	err = tx.QueryRowContext(ctx, `INSERT INTO auth_users (name, email, email_canonical, password_hash, locale) VALUES ($1, $2, $3, $4, $5) RETURNING id::text, name, email, created_at, locale`, string(name), email.Display, email.Canonical, passwordHash, locale).Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt, &user.Locale)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return domain.User{}, application.ErrEmailAlreadyRegistered

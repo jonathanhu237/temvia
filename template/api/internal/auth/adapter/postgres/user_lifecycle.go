@@ -66,7 +66,7 @@ func (s *Store) mutateUserLifecycle(ctx context.Context, actorID, userID string,
 	}
 	var user domain.AccessUser
 	var super bool
-	err = tx.QueryRowContext(ctx, `SELECT u.id::text,u.name,u.email,u.created_at,u.auth_version,u.disabled_at IS NOT NULL,EXISTS(SELECT 1 FROM auth_user_roles ur JOIN auth_roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND r.system_key='super_admin') FROM auth_users u WHERE u.id=$1::uuid`, userID).Scan(&user.User.ID, &user.User.Name, &user.User.Email, &user.User.CreatedAt, &user.AuthVersion, &user.User.Disabled, &super)
+	err = tx.QueryRowContext(ctx, `SELECT u.id::text,u.name,u.email,u.created_at,u.auth_version,u.disabled_at IS NOT NULL,COALESCE(u.locale,''),EXISTS(SELECT 1 FROM auth_user_avatars a WHERE a.user_id=u.id),COALESCE((SELECT version FROM auth_user_avatars a WHERE a.user_id=u.id),0),EXISTS(SELECT 1 FROM auth_user_roles ur JOIN auth_roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND r.system_key='super_admin') FROM auth_users u WHERE u.id=$1::uuid`, userID).Scan(&user.User.ID, &user.User.Name, &user.User.Email, &user.User.CreatedAt, &user.AuthVersion, &user.User.Disabled, &user.User.Locale, &user.User.HasAvatar, &user.User.AvatarVersion, &super)
 	if err != nil {
 		return domain.AccessUser{}, err
 	}
@@ -116,7 +116,8 @@ func (s *Store) mutateUserLifecycle(ctx context.Context, actorID, userID string,
 		return domain.AccessUser{}, err
 	}
 	if action != "delete" {
-		page, readErr := scanUsers(ctx, tx, `SELECT u.id::text,u.name,u.email,u.created_at,u.auth_version,u.disabled_at IS NOT NULL,
+		page, readErr := scanUsers(ctx, tx, `SELECT u.id::text,u.name,u.email,u.created_at,u.auth_version,u.disabled_at IS NOT NULL,COALESCE(u.locale,''),
+		EXISTS(SELECT 1 FROM auth_user_avatars a WHERE a.user_id=u.id),COALESCE((SELECT version FROM auth_user_avatars a WHERE a.user_id=u.id),0),
 		COALESCE(r.id::text,''),COALESCE(r.system_key,''),COALESCE(r.name,''),COALESCE(r.description,''),COALESCE(r.revision,0),COALESCE(rp.permission_key,'')
 		FROM auth_users u LEFT JOIN auth_user_roles ur ON ur.user_id=u.id LEFT JOIN auth_roles r ON r.id=ur.role_id LEFT JOIN auth_role_permissions rp ON rp.role_id=r.id WHERE u.id=$1::uuid ORDER BY r.id,rp.permission_key`, userID)
 		if readErr != nil {

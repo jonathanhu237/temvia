@@ -33,6 +33,20 @@ type PasswordRecoveryAuditService interface {
 	CompleteWithTarget(context.Context, application.PasswordResetCompleteInput) (domain.User, error)
 }
 
+type PersonalSettingsService interface {
+	Profile(context.Context, string) (domain.User, error)
+	UpdateName(context.Context, string, string) (domain.User, error)
+	UpdateLocale(context.Context, string, domain.Locale) (domain.User, error)
+	SaveAvatar(context.Context, string, []byte, string) (domain.User, error)
+	RemoveAvatar(context.Context, string) (domain.User, error)
+	Avatar(context.Context, string) (domain.Avatar, error)
+	ChangePassword(context.Context, string, string, string) (domain.User, time.Time, error)
+	EmailChangeStatus(context.Context, string) (domain.EmailChangeRequest, error)
+	RequestEmailChange(context.Context, string, string, string) (domain.EmailChangeRequest, error)
+	ResendEmailChange(context.Context, string) (domain.EmailChangeRequest, error)
+	CompleteEmailChange(context.Context, string, string, string) (domain.User, time.Time, error)
+}
+
 type InvitationAcceptanceSourceService interface {
 	CompleteWithTargetAndSource(context.Context, string, string, string) (domain.Invitation, error)
 }
@@ -106,6 +120,7 @@ type Handler struct {
 	settings         SettingsService
 	identity         SystemIdentityService
 	operationLogs    OperationLogService
+	personal         PersonalSettingsService
 	cfg              config.Config
 	mux              *http.ServeMux
 }
@@ -135,6 +150,13 @@ func NewHandlerWithAccessAndOperationLogAndIdentity(setup SetupService, auth Aut
 	return newHandlerWithOperationLogAndIdentity(setup, auth, cfg, recovery, access, accept, settings, operations, identity)
 }
 
+// NewHandlerWithAccessAndOperationLogAndIdentityAndPersonalSettings adds the
+// authenticated self-service account settings surface without changing any
+// older constructor signatures.
+func NewHandlerWithAccessAndOperationLogAndIdentityAndPersonalSettings(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService, personal PersonalSettingsService) http.Handler {
+	return newHandlerWithOperationLogAndIdentityAndPersonal(setup, auth, cfg, recovery, access, accept, settings, operations, identity, personal)
+}
+
 func firstRecovery(recovery []PasswordRecoveryService) PasswordRecoveryService {
 	var passwordRecovery PasswordRecoveryService
 	if len(recovery) > 0 {
@@ -156,7 +178,11 @@ func newHandlerWithOperationLog(setup SetupService, auth AuthenticationService, 
 }
 
 func newHandlerWithOperationLogAndIdentity(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService) http.Handler {
-	h := &Handler{setup: setup, auth: auth, recovery: recovery, access: access, acceptInvitation: accept, settings: settings, identity: identity, operationLogs: operations, cfg: cfg, mux: http.NewServeMux()}
+	return newHandlerWithOperationLogAndIdentityAndPersonal(setup, auth, cfg, recovery, access, accept, settings, operations, identity, nil)
+}
+
+func newHandlerWithOperationLogAndIdentityAndPersonal(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService, personal PersonalSettingsService) http.Handler {
+	h := &Handler{setup: setup, auth: auth, recovery: recovery, access: access, acceptInvitation: accept, settings: settings, identity: identity, operationLogs: operations, personal: personal, cfg: cfg, mux: http.NewServeMux()}
 	if h.identity != nil {
 		h.mux.HandleFunc("GET /api/public/system-identity", h.publicSystemIdentity)
 		h.mux.HandleFunc("GET /api/public/system-identity/icon", h.publicSystemIdentityIcon)
@@ -167,7 +193,25 @@ func newHandlerWithOperationLogAndIdentity(setup SetupService, auth Authenticati
 	h.mux.HandleFunc("POST /api/setup", h.setupComplete)
 	h.mux.HandleFunc("POST /api/auth/login", h.login)
 	h.mux.HandleFunc("GET /api/auth/me", h.me)
+	if h.personal != nil {
+		h.mux.HandleFunc("PATCH /api/auth/me", h.personalProfileUpdate)
+	}
 	h.mux.HandleFunc("GET /api/auth/session-status", h.sessionStatus)
+	if h.personal != nil {
+		h.mux.HandleFunc("GET /api/auth/me/profile", h.personalProfile)
+		h.mux.HandleFunc("PUT /api/auth/me/profile", h.personalProfileUpdate)
+		h.mux.HandleFunc("PATCH /api/auth/me/profile", h.personalProfileUpdate)
+		h.mux.HandleFunc("PUT /api/auth/me/preferences", h.personalPreferencesUpdate)
+		h.mux.HandleFunc("PUT /api/auth/me/password", h.personalPasswordUpdate)
+		h.mux.HandleFunc("POST /api/auth/me/email-change", h.personalEmailChangeRequest)
+		h.mux.HandleFunc("GET /api/auth/me/email-change", h.personalEmailChangeStatus)
+		h.mux.HandleFunc("POST /api/auth/me/email-change/resend", h.personalEmailChangeResend)
+		h.mux.HandleFunc("POST /api/auth/me/email-change/verify", h.personalEmailChangeVerify)
+		h.mux.HandleFunc("PUT /api/auth/me/avatar", h.personalAvatarUpload)
+		h.mux.HandleFunc("DELETE /api/auth/me/avatar", h.personalAvatarDelete)
+		h.mux.HandleFunc("GET /api/users/{id}/avatar", h.personalAvatarRead)
+		h.mux.HandleFunc("GET /api/auth/me/avatar", h.personalAvatarReadSelf)
+	}
 	if _, ok := auth.(onlineService); ok {
 		h.mux.HandleFunc("GET /api/online-users", h.onlineUsers)
 		h.mux.HandleFunc("POST /api/online-users/{id}/kick", h.kickUser)
@@ -243,7 +287,14 @@ var knownMethods = map[string]string{
 	"/api/setup/status":                     "GET",
 	"/api/setup":                            "POST",
 	"/api/auth/login":                       "POST",
-	"/api/auth/me":                          "GET",
+	"/api/auth/me":                          "GET, PATCH",
+	"/api/auth/me/profile":                  "GET, PUT, PATCH",
+	"/api/auth/me/preferences":              "PUT",
+	"/api/auth/me/password":                 "PUT",
+	"/api/auth/me/email-change":             "GET, POST",
+	"/api/auth/me/email-change/resend":      "POST",
+	"/api/auth/me/email-change/verify":      "POST",
+	"/api/auth/me/avatar":                   "GET, PUT, DELETE",
 	"/api/auth/session-status":              "GET",
 	"/api/auth/logout":                      "POST",
 	"/api/auth/password-reset/request":      "POST",
@@ -261,6 +312,7 @@ var knownMethods = map[string]string{
 	"/api/operational-warnings":             "GET",
 	"/api/operation-logs":                   "GET",
 	"/api/operation-logs/status":            "GET",
+	"/api/users/{id}/avatar":                "GET",
 	"/api/settings/operation-log":           "GET, PUT",
 	"/api/settings/operation-log-retention": "GET, PUT",
 	"/api/auth/invitations/accept":          "POST",
@@ -290,6 +342,9 @@ func expectedMethods(path string) (string, bool) {
 	}
 	if len(parts) == 3 && parts[0] == "api" && parts[1] == "users" {
 		return "DELETE", true
+	}
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "users" && parts[3] == "avatar" {
+		return "GET", true
 	}
 	if len(parts) == 4 && parts[0] == "api" && parts[1] == "users" && (parts[3] == "deactivate" || parts[3] == "reactivate") {
 		return "POST", true
@@ -326,7 +381,7 @@ func (h *Handler) setupComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input application.SetupInput
-	if err := decodeJSONObject(r, &input, map[string]struct{}{"token": {}, "name": {}, "email": {}, "password": {}}); err != nil {
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"token": {}, "name": {}, "email": {}, "password": {}, "locale": {}}); err != nil {
 		var fieldErr fieldValueError
 		if errors.As(err, &fieldErr) && fieldErr.field == "token" {
 			h.recordOperation(r, unverifiedFailure("auth.setup.complete", "account", "", "", err))
@@ -338,6 +393,9 @@ func (h *Handler) setupComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.SourceIP = h.requestSourceIP(r)
+	if !input.Locale.Valid() {
+		input.Locale = requestLocale(r)
+	}
 	created, err := h.setup.Complete(r.Context(), input)
 	if err != nil {
 		h.recordOperation(r, application.OperationLogInput{Action: "auth.setup.complete", ObjectType: "account", Result: application.OperationLogFailure, AttemptedAccount: input.Email, Details: map[string]any{"failure": operationErrorCode(err)}})
@@ -357,10 +415,13 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input application.LoginInput
-	if err := decodeJSONObject(r, &input, map[string]struct{}{"email": {}, "password": {}}); err != nil {
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"email": {}, "password": {}, "locale": {}}); err != nil {
 		h.recordOperation(r, unverifiedFailure("auth.login", "session", "", "", err))
 		writeDecodeError(w, err)
 		return
+	}
+	if !input.Locale.Valid() {
+		input.Locale = requestLocale(r)
 	}
 	var user domain.User
 	var principal domain.Principal
@@ -520,6 +581,19 @@ func (h *Handler) passwordResetComplete(w http.ResponseWriter, r *http.Request) 
 
 func (h *Handler) notFound(w http.ResponseWriter, _ *http.Request) {
 	writeProblem(w, http.StatusNotFound, "not-found")
+}
+
+func requestLocale(r *http.Request) domain.Locale {
+	for _, value := range strings.Split(r.Header.Get("Accept-Language"), ",") {
+		language := strings.ToLower(strings.TrimSpace(strings.SplitN(value, ";", 2)[0]))
+		if strings.HasPrefix(language, "zh") {
+			return domain.LocaleChinese
+		}
+		if strings.HasPrefix(language, "en") {
+			return domain.LocaleEnglish
+		}
+	}
+	return domain.LocaleEnglish
 }
 
 func (h *Handler) validOrigin(r *http.Request) bool {

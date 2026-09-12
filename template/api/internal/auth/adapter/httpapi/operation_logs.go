@@ -413,6 +413,18 @@ func operationErrorCode(err error) string {
 		return "invalid_settings"
 	case errors.Is(err, application.ErrInvalidPasswordResetToken):
 		return "invalid_token"
+	case errors.Is(err, application.ErrInvalidEmailChangeCode):
+		return "invalid_email_change_code"
+	case errors.Is(err, application.ErrInvalidEmailChange):
+		return "invalid_email_change"
+	case errors.Is(err, application.ErrEmailChangeExpired):
+		return "email_change_expired"
+	case errors.Is(err, application.ErrEmailChangeAttemptsExceeded):
+		return "email_change_attempts_exceeded"
+	case errors.Is(err, application.ErrEmailChangeResendTooSoon):
+		return "email_change_resend_too_soon"
+	case errors.Is(err, application.ErrAvatarNotFound):
+		return "avatar_not_found"
 	case errors.Is(err, application.ErrInvitationInvalid):
 		return "invalid_invitation"
 	default:

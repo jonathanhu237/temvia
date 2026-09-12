@@ -2,7 +2,11 @@ import i18next, { type i18n as I18nInstance } from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import { resources, type Locale } from './resources'
 
+// This key is intentionally guest-only. Authenticated account locale is
+// server-owned and is applied in memory, so a browser's guest preference can
+// never overwrite an account setting.
 export const LOCALE_STORAGE_KEY = 'temvia.locale'
+export const GUEST_LOCALE_STORAGE_KEY = LOCALE_STORAGE_KEY
 export const supportedLocales: readonly Locale[] = ['zh-CN', 'en']
 
 function asLocale(value: string | null | undefined): Locale | undefined {
@@ -28,12 +32,14 @@ function syncDocumentLanguage(locale: Locale): void {
 
 export const i18n = i18next.createInstance()
 let localeStorageListenerAttached = false
+let accountLocaleActive = false
+let localeOperation = 0
 
 function attachLocaleStorageListener(): void {
   if (typeof window === 'undefined' || localeStorageListenerAttached) return
   window.addEventListener('storage', (event) => {
     if (event.key !== LOCALE_STORAGE_KEY || (event.newValue !== 'en' && event.newValue !== 'zh-CN')) return
-    void changeLocale(event.newValue)
+    if (!accountLocaleActive) void changeGuestLocale(event.newValue)
   })
   localeStorageListenerAttached = true
 }
@@ -59,14 +65,46 @@ export async function initializeI18n(): Promise<I18nInstance> {
   return i18n
 }
 
-export async function changeLocale(locale: Locale): Promise<void> {
+export async function changeGuestLocale(locale: Locale): Promise<void> {
+  const operation = ++localeOperation
+  accountLocaleActive = false
   await i18n.changeLanguage(locale)
+  if (operation !== localeOperation) return
   syncDocumentLanguage(locale)
   try {
-    window.localStorage.setItem(LOCALE_STORAGE_KEY, locale)
+    window.localStorage.setItem(GUEST_LOCALE_STORAGE_KEY, locale)
   } catch {
     // A blocked storage implementation should not prevent a language change.
   }
+}
+
+// changeLocale remains the guest-facing compatibility API used by auth pages.
+export async function changeLocale(locale: Locale): Promise<void> {
+  await changeGuestLocale(locale)
+}
+
+export async function changeAccountLocale(locale: Locale): Promise<void> {
+  const operation = ++localeOperation
+  accountLocaleActive = true
+  await i18n.changeLanguage(locale)
+  if (operation !== localeOperation) return
+  syncDocumentLanguage(locale)
+}
+
+export async function restoreGuestLocale(): Promise<void> {
+  const operation = ++localeOperation
+  const stored = (() => {
+    try {
+      return window.localStorage.getItem(GUEST_LOCALE_STORAGE_KEY)
+    } catch {
+      return null
+    }
+  })()
+  accountLocaleActive = false
+  const locale = selectInitialLocale(stored)
+  await i18n.changeLanguage(locale)
+  if (operation !== localeOperation) return
+  syncDocumentLanguage(locale)
 }
 
 declare module 'i18next' {

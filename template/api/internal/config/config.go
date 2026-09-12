@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -25,6 +27,7 @@ type Config struct {
 
 	PasswordResetTokenKey       []byte
 	InvitationTokenKey          []byte
+	EmailChangeCodeKey          []byte
 	EmailSettingsEncryptionKey  []byte
 	PasswordResetLinkTTL        time.Duration
 	InvitationLinkTTL           time.Duration
@@ -57,6 +60,10 @@ type Config struct {
 	TestEmailActorRefill            time.Duration
 	TestEmailRecipientCapacity      int
 	TestEmailRecipientRefill        time.Duration
+	EmailChangeActorCapacity         int
+	EmailChangeActorRefill           time.Duration
+	EmailChangeRecipientCapacity     int
+	EmailChangeRecipientRefill       time.Duration
 
 	MailOutboxPollInterval    time.Duration
 	MailOutboxLeaseDuration   time.Duration
@@ -108,7 +115,9 @@ func Load(get Lookup) (Config, error) {
 
 		PasswordResetTokenKey:           parseTokenKey(get("PASSWORD_RESET_TOKEN_KEY")),
 		InvitationTokenKey:              parseTokenKey(get("INVITATION_TOKEN_KEY")),
+		EmailChangeCodeKey:              parseOptionalTokenKey(get("EMAIL_CHANGE_CODE_KEY")),
 		EmailSettingsEncryptionKey:      parseOptionalTokenKey(get("EMAIL_SETTINGS_ENCRYPTION_KEY")),
+
 		PasswordResetLinkTTL:            parseDuration(get, "PASSWORD_RESET_LINK_TTL", 30*time.Minute),
 		InvitationLinkTTL:               parseDuration(get, "INVITATION_LINK_TTL", 72*time.Hour),
 		PasswordResetResponseMin:        parseDuration(get, "PASSWORD_RESET_MIN_RESPONSE_TIME", 500*time.Millisecond),
@@ -134,6 +143,10 @@ func Load(get Lookup) (Config, error) {
 		TestEmailActorRefill:            parseDuration(get, "TEST_EMAIL_RATE_LIMIT_ACTOR_REFILL_INTERVAL", time.Hour),
 		TestEmailRecipientCapacity:      parseInt(get, "TEST_EMAIL_RATE_LIMIT_RECIPIENT_CAPACITY", 3),
 		TestEmailRecipientRefill:        parseDuration(get, "TEST_EMAIL_RATE_LIMIT_RECIPIENT_REFILL_INTERVAL", 20*time.Minute),
+		EmailChangeActorCapacity:        parseInt(get, "EMAIL_CHANGE_RATE_LIMIT_ACTOR_CAPACITY", 5),
+		EmailChangeActorRefill:          parseDuration(get, "EMAIL_CHANGE_RATE_LIMIT_ACTOR_REFILL_INTERVAL", time.Hour),
+		EmailChangeRecipientCapacity:    parseInt(get, "EMAIL_CHANGE_RATE_LIMIT_RECIPIENT_CAPACITY", 3),
+		EmailChangeRecipientRefill:      parseDuration(get, "EMAIL_CHANGE_RATE_LIMIT_RECIPIENT_REFILL_INTERVAL", 20*time.Minute),
 
 		MailOutboxPollInterval:    parseDuration(get, "MAIL_DISPATCH_INTERVAL", time.Second),
 		MailOutboxLeaseDuration:   parseDuration(get, "MAIL_OUTBOX_LEASE_TTL", 30*time.Second),
@@ -167,6 +180,13 @@ func Load(get Lookup) (Config, error) {
 		LoginEmailRefillInterval:  parseDuration(get, "LOGIN_RATE_LIMIT_EMAIL_REFILL_INTERVAL", time.Minute),
 		LoginIPCapacity:           parseInt(get, "LOGIN_RATE_LIMIT_IP_CAPACITY", 30),
 		LoginIPRefillInterval:     parseDuration(get, "LOGIN_RATE_LIMIT_IP_REFILL_INTERVAL", 6*time.Second),
+	}
+	if len(c.EmailChangeCodeKey) == 0 && len(c.PasswordResetTokenKey) == 32 {
+		// A dedicated environment value is supported, while installations that
+		// predate this setting still get a purpose-separated key derived from
+		// the existing secret at process startup. Never use the password-reset
+		// key directly for a different credential authority.
+		c.EmailChangeCodeKey = derivePurposeKey(c.PasswordResetTokenKey, "temvia-email-change-code-key-v1")
 	}
 
 	if err := c.validate(); err != nil {
@@ -224,6 +244,12 @@ func parseOptionalTokenKey(value string) []byte {
 	return parseTokenKey(value)
 }
 
+func derivePurposeKey(master []byte, purpose string) []byte {
+	mac := hmac.New(sha256.New, master)
+	_, _ = mac.Write([]byte(purpose))
+	return mac.Sum(nil)
+}
+
 func (c *Config) validate() error {
 	if c.Environment != "development" && c.Environment != "production" {
 		return fmt.Errorf("APP_ENV must be development or production")
@@ -261,6 +287,12 @@ func (c *Config) validate() error {
 	}
 	if len(c.InvitationTokenKey) != 32 {
 		return fmt.Errorf("INVITATION_TOKEN_KEY must be a canonical unpadded Base64URL encoding of 32 bytes")
+	}
+	if len(c.EmailChangeCodeKey) != 32 {
+		return fmt.Errorf("EMAIL_CHANGE_CODE_KEY must be a canonical unpadded Base64URL encoding of 32 bytes")
+	}
+	if hmac.Equal(c.EmailChangeCodeKey, c.PasswordResetTokenKey) {
+		return fmt.Errorf("EMAIL_CHANGE_CODE_KEY must be distinct from PASSWORD_RESET_TOKEN_KEY")
 	}
 	if c.EmailSettingsEncryptionKey != nil && len(c.EmailSettingsEncryptionKey) != 32 {
 		return fmt.Errorf("EMAIL_SETTINGS_ENCRYPTION_KEY must be a canonical unpadded Base64URL encoding of 32 bytes")
@@ -305,6 +337,12 @@ func (c *Config) validate() error {
 		return err
 	}
 	if err := validateRateLimitSettings("test-email recipient", c.TestEmailRecipientCapacity, c.TestEmailRecipientRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("email-change actor", c.EmailChangeActorCapacity, c.EmailChangeActorRefill); err != nil {
+		return err
+	}
+	if err := validateRateLimitSettings("email-change recipient", c.EmailChangeRecipientCapacity, c.EmailChangeRecipientRefill); err != nil {
 		return err
 	}
 	if c.MailOutboxPollInterval < time.Millisecond || c.MailOutboxLeaseDuration < time.Second || c.MailOutboxLeaseDuration <= c.SMTPTimeout || c.MailOutboxRetryInitial < time.Millisecond || c.MailOutboxRetryMax < c.MailOutboxRetryInitial || c.MailOutboxNotificationTTL < time.Minute {

@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"unicode"
@@ -17,6 +18,9 @@ const (
 	PasswordResetSelectorBytes = 16
 	PasswordResetVerifierBytes = 32
 	passwordResetContext       = "temvia-password-reset-v1"
+
+	EmailChangeSelectorBytes = 16
+	emailChangeContext       = "temvia-email-change-code-v1"
 )
 
 // PasswordResetMaterial contains the non-printable pieces needed by the
@@ -83,6 +87,66 @@ func ParsePasswordResetToken(value string) (selector, verifierDigest []byte, ok 
 	}
 	digest := sha256.Sum256(verifier)
 	return selector, append([]byte(nil), digest[:]...), true
+}
+
+// NewEmailChangeMaterial derives a six-digit verification code and the
+// keyed verifier persisted by the email-change workflow. The code is never
+// persisted; a mail worker can deterministically reconstruct it from the
+// selector and the same process secret. The returned digest is deliberately
+// keyed, so a database reader cannot cheaply enumerate six-digit values.
+func NewEmailChangeMaterial(key, selector []byte) (code string, verifierDigest []byte, err error) {
+	verifier, err := deriveEmailChangeVerifier(key, selector)
+	if err != nil {
+		return "", nil, err
+	}
+	codeValue := binary.BigEndian.Uint32(verifier[:4]) % 1_000_000
+	code = fmt.Sprintf("%06d", codeValue)
+	digest, err := EmailChangePresentedDigest(key, selector, code)
+	if err != nil {
+		return "", nil, err
+	}
+	return code, digest, nil
+}
+
+// EmailChangeCode reconstructs the code for the asynchronous mail worker. It
+// is intentionally separate from the stored verifier projection.
+func EmailChangeCode(key, selector []byte) (string, error) {
+	verifier, err := deriveEmailChangeVerifier(key, selector)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%06d", binary.BigEndian.Uint32(verifier[:4])%1_000_000), nil
+}
+
+// EmailChangePresentedDigest derives the digest used for an entered code. It
+// is keyed and binds the presentation to the selector, while the expected
+// digest persisted for a request is derived from the server-generated code.
+func EmailChangePresentedDigest(key, selector []byte, code string) ([]byte, error) {
+	if len(key) != PasswordResetVerifierBytes || len(selector) != EmailChangeSelectorBytes {
+		return nil, fmt.Errorf("invalid email change key or selector length")
+	}
+	message := make([]byte, 0, len(emailChangeContext)+len(selector)+len(code)+1)
+	message = append(message, emailChangeContext...)
+	message = append(message, selector...)
+	message = append(message, 0)
+	message = append(message, code...)
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write(message)
+	value := mac.Sum(nil)
+	digest := sha256.Sum256(value)
+	return append([]byte(nil), digest[:]...), nil
+}
+
+func deriveEmailChangeVerifier(key, selector []byte) ([]byte, error) {
+	if len(key) != PasswordResetVerifierBytes || len(selector) != EmailChangeSelectorBytes {
+		return nil, fmt.Errorf("invalid email change key or selector length")
+	}
+	message := make([]byte, 0, len(emailChangeContext)+len(selector))
+	message = append(message, emailChangeContext...)
+	message = append(message, selector...)
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write(message)
+	return mac.Sum(nil), nil
 }
 
 func decodeCanonicalBase64URL(value string, decodedBytes int) ([]byte, bool) {

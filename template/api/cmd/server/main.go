@@ -56,6 +56,36 @@ func firstRecovery(recovery []httpapi.PasswordRecoveryService) httpapi.PasswordR
 	return recovery[0]
 }
 
+func personalSettingsService(auth application.AccountStore, hasher application.PasswordHasher, random application.RandomSource, cfg config.Config, settings *application.SettingsManagement) *application.PersonalSettings {
+	profile, profileOK := auth.(application.PersonalProfileStore)
+	passwords, passwordsOK := auth.(application.PasswordChangeStore)
+	email, emailOK := auth.(application.EmailChangeStore)
+	if !profileOK || !passwordsOK || !emailOK {
+		return nil
+	}
+	personal := application.NewPersonalSettings(auth, profile, passwords, email, hasher, random, cfg.EmailChangeCodeKey, cfg.MailOutboxNotificationTTL, settings)
+	if limiter, ok := auth.(application.EmailChangeLimiter); ok {
+		personal.SetEmailChangeLimiter(limiter)
+	}
+	return personal
+}
+
+func buildAuthHandler(setup httpapi.SetupService, auth httpapi.AuthenticationService, cfg config.Config, recovery httpapi.PasswordRecoveryService, access httpapi.AccessService, accept httpapi.InvitationAcceptanceService, settings httpapi.SettingsService, operations httpapi.OperationLogService, identity httpapi.SystemIdentityService, personal httpapi.PersonalSettingsService) http.Handler {
+	if personal != nil {
+		return httpapi.NewHandlerWithAccessAndOperationLogAndIdentityAndPersonalSettings(setup, auth, cfg, recovery, access, accept, settings, operations, identity, personal)
+	}
+	if identity != nil && operations != nil {
+		return httpapi.NewHandlerWithAccessAndOperationLogAndIdentity(setup, auth, cfg, recovery, access, accept, settings, operations, identity)
+	}
+	if operations != nil {
+		return httpapi.NewHandlerWithAccessAndOperationLog(setup, auth, cfg, recovery, access, accept, settings, operations)
+	}
+	if settings != nil {
+		return httpapi.NewHandlerWithAccess(setup, auth, cfg, recovery, access, accept, settings)
+	}
+	return httpapi.NewHandler(setup, auth, cfg, recovery)
+}
+
 func newApplicationHandler(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery ...httpapi.PasswordRecoveryService) http.Handler {
 	return newApplicationHandlerWithSettings(cfg, setup, auth, hasher, sessions, limiter, random, firstRecovery(recovery), nil)
 }
@@ -84,30 +114,15 @@ func newApplicationHandlerWithOperationLogAndIdentity(cfg config.Config, setup a
 			}
 			access.SetInvitationSendLimiter(invitationSendLimiter(store))
 			accept := application.NewInvitationAcceptance(store, hasher, cfg.InvitationTokenKey, invitationAcceptLimiter(store))
-			var authHandler http.Handler
-			if settingsService != nil {
-				if operationLogs != nil {
-					if identity != nil {
-						authHandler = httpapi.NewHandlerWithAccessAndOperationLogAndIdentity(setupService, authService, cfg, recovery, access, accept, settingsService, operationLogs, identity)
-					} else {
-						authHandler = httpapi.NewHandlerWithAccessAndOperationLog(setupService, authService, cfg, recovery, access, accept, settingsService, operationLogs)
-					}
-				} else {
-					authHandler = httpapi.NewHandlerWithAccess(setupService, authService, cfg, recovery, access, accept, settingsService)
-				}
-			} else {
-				if operationLogs != nil {
-					authHandler = httpapi.NewHandlerWithAccessAndOperationLog(setupService, authService, cfg, recovery, access, accept, nil, operationLogs)
-				} else {
-					authHandler = httpapi.NewHandlerWithAccess(setupService, authService, cfg, recovery, access, accept)
-				}
-			}
+			personal := personalSettingsService(auth, hasher, random, cfg, settingsService)
+			authHandler := buildAuthHandler(setupService, authService, cfg, recovery, access, accept, settingsService, operationLogs, identity, personal)
 			mux.Handle("/api", authHandler)
 			mux.Handle("/api/", authHandler)
 			return mux
 		}
 	}
-	authHandler := httpapi.NewHandler(setupService, authService, cfg, recovery)
+	personal := personalSettingsService(auth, hasher, random, cfg, settingsService)
+	authHandler := buildAuthHandler(setupService, authService, cfg, recovery, nil, nil, nil, nil, nil, personal)
 	mux.Handle("/api", authHandler)
 	mux.Handle("/api/", authHandler)
 	return mux
@@ -187,6 +202,7 @@ func run() int {
 		cfg.MailOutboxRetryInitial,
 		cfg.MailOutboxRetryMax,
 		cfg.InvitationTokenKey,
+		cfg.EmailChangeCodeKey,
 	)
 	dispatcher.SetSystemIdentityProvider(identityService)
 	handler := newApplicationHandlerWithOperationLogAndIdentity(cfg, postgresStore, postgresStore, hasher, postgresStore, postgresStore, random, recovery, settingsService, operationLogs, identityService)

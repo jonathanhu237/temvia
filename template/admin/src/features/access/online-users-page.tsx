@@ -10,6 +10,7 @@ import type { OnlineUser } from '@/shared/api/contracts'
 import { notifyRequestError, notifySuccess, useRequestErrorToast } from '@/shared/feedback'
 import { DataTable } from './data-table'
 import { formatDate } from './access-components'
+import { UserAvatar } from '@/features/auth/user-avatar'
 
 export function OnlineUsersPage({ api, actorID, canManage }: { api: ApiClient; actorID: string; canManage: boolean }) {
   const { t, i18n } = useTranslation(['onlineUsers', 'access', 'common'])
@@ -30,7 +31,7 @@ export function OnlineUsersPage({ api, actorID, canManage }: { api: ApiClient; a
     onError: (error) => notifyRequestError(error, t, { title: t('forceSignOutFailed') }),
   })
   const columns: ColumnDef<OnlineUser, unknown>[] = [
-    { accessorKey: 'name', header: t('access:inviteName'), cell: ({ row }) => <span>{row.original.name}{row.original.id === actorID ? ` (${t('you')})` : ''}</span> },
+    { accessorKey: 'name', header: t('access:inviteName'), cell: ({ row }) => <div className="flex items-center gap-2"><UserAvatar user={row.original} className="size-7 rounded-md" /><span>{row.original.name}{row.original.id === actorID ? ` (${t('you')})` : ''}</span></div> },
     { accessorKey: 'email', header: t('access:inviteEmail') },
     { accessorKey: 'sessionCount', header: t('sessions') },
     { accessorKey: 'lastSeenAt', header: t('lastSeen'), cell: ({ row }) => <time dateTime={row.original.lastSeenAt}>{formatDate(row.original.lastSeenAt, i18n.language)}</time> },

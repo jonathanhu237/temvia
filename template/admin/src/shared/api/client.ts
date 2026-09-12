@@ -19,6 +19,13 @@ import {
 	operationLogsResponseSchema,
 	operationLogStatusSchema,
 	systemIdentityResponseSchema,
+  personalProfileResponseSchema,
+  emailChangeResponseSchema,
+  personalEmailChangeStatusSchema,
+  personalPasswordInputSchema,
+  personalEmailChangeInputSchema,
+  personalEmailVerifyInputSchema,
+  userEnvelopeSchema,
 	problemDetailsSchema,
 	roleMutationInputSchema,
 	roleResponseSchema,
@@ -39,6 +46,8 @@ import {
   type EmailSettings,
   type OperationLog,
   type SystemIdentity,
+  type EmailChange,
+  type AccessUser,
 } from './contracts'
 
 export class ApiProblemError extends Error {
@@ -72,9 +81,19 @@ export interface ApiClient {
   getOnlineUsers?(signal?: AbortSignal): Promise<{ users: OnlineUser[] }>
   kickUser?(id: string, signal?: AbortSignal): Promise<void>
   getSetupStatus(signal?: AbortSignal): Promise<SetupStatus>
-  setup(input: { token: string; name: string; email: string; password: string }, signal?: AbortSignal): Promise<void>
-  login(input: { email: string; password: string }, signal?: AbortSignal): Promise<User>
+  setup(input: { token: string; name: string; email: string; password: string; locale?: 'en' | 'zh-CN' }, signal?: AbortSignal): Promise<void>
+  login(input: { email: string; password: string; locale?: 'en' | 'zh-CN' }, signal?: AbortSignal): Promise<User>
   me(signal?: AbortSignal): Promise<User>
+  getPersonalProfile?(signal?: AbortSignal): Promise<{ user: User; emailChange?: EmailChange | null }>
+  updatePersonalName?(name: string, signal?: AbortSignal): Promise<User>
+  updatePersonalLocale?(locale: 'en' | 'zh-CN', signal?: AbortSignal): Promise<User>
+  savePersonalAvatar?(file: Blob, signal?: AbortSignal): Promise<User>
+  removePersonalAvatar?(signal?: AbortSignal): Promise<User>
+  changePersonalPassword?(input: { currentPassword: string; newPassword: string; confirmPassword: string }, signal?: AbortSignal): Promise<void>
+  requestPersonalEmailChange?(input: { currentPassword: string; newEmail: string }, signal?: AbortSignal): Promise<EmailChange>
+  getPersonalEmailChange?(signal?: AbortSignal): Promise<EmailChange | null>
+  resendPersonalEmailChange?(signal?: AbortSignal): Promise<EmailChange>
+  verifyPersonalEmailChange?(input: { requestId: string; code: string }, signal?: AbortSignal): Promise<void>
   checkSession?(signal?: AbortSignal): Promise<void>
 	getRoles?(signal?: AbortSignal): Promise<{ roles: Role[]; permissions: Permission[]; combinations?: Array<{ key: string; labelKey: string; description: string; permissions: string[]; trigger?: string[] }> }>
 	getRoleOptions?(signal?: AbortSignal): Promise<{ roles: RoleOption[] }>
@@ -82,8 +101,8 @@ export interface ApiClient {
 	createRole?(input: { name: string; description: string; permissions: string[] }, signal?: AbortSignal): Promise<Role>
 	replaceRole?(id: string, input: { name: string; description: string; permissions: string[]; revision: number }, signal?: AbortSignal): Promise<Role>
 	deleteRole?(id: string, signal?: AbortSignal): Promise<void>
-	getUsers?(options?: { cursor?: string; limit?: number; q?: string; roleId?: string; status?: 'active' | 'disabled'; sort?: string; direction?: 'asc' | 'desc' }, signal?: AbortSignal): Promise<{ users: Array<{ id: string; name: string; email: string; createdAt: string; authVersion: number; disabled: boolean; roles: Role[] }>; nextCursor?: string }>
-	replaceUserRoles?(id: string, input: { roleIds: string[]; authVersion: number }, signal?: AbortSignal): Promise<{ user: { id: string; name: string; email: string; createdAt: string; authVersion: number; disabled: boolean; roles: Role[] } }>
+	getUsers?(options?: { cursor?: string; limit?: number; q?: string; roleId?: string; status?: 'active' | 'disabled'; sort?: string; direction?: 'asc' | 'desc' }, signal?: AbortSignal): Promise<{ users: AccessUser[]; nextCursor?: string }>
+	replaceUserRoles?(id: string, input: { roleIds: string[]; authVersion: number }, signal?: AbortSignal): Promise<{ user: AccessUser }>
 	deactivateUser?(id: string, authVersion: number, signal?: AbortSignal): Promise<void>
 	reactivateUser?(id: string, authVersion: number, signal?: AbortSignal): Promise<void>
 	deleteUser?(id: string, authVersion: number, signal?: AbortSignal): Promise<void>
@@ -110,7 +129,7 @@ export interface ApiClient {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
   signal?: AbortSignal
   expectedStatus: number
@@ -206,6 +225,16 @@ export function createApiClient(): ApiClient {
 			const result = await request('/api/auth/me', authEnvelopeSchema, { signal, expectedStatus: 200 })
 			return 'roles' in result ? { ...result.user, roles: result.roles, permissions: result.permissions, superAdmin: result.superAdmin } : result.user
     },
+    getPersonalProfile: async (signal) => request('/api/auth/me/profile', personalProfileResponseSchema, { signal, expectedStatus: 200 }),
+    updatePersonalName: async (name, signal) => (await request('/api/auth/me/profile', userEnvelopeSchema, { method: 'PUT', body: { name }, signal, expectedStatus: 200 })).user,
+    updatePersonalLocale: async (locale, signal) => (await request('/api/auth/me/preferences', userEnvelopeSchema, { method: 'PUT', body: { locale }, signal, expectedStatus: 200 })).user,
+    savePersonalAvatar: async (file, signal) => { const body = new FormData(); body.append('avatar', file, 'avatar.png'); return (await request('/api/auth/me/avatar', userEnvelopeSchema, { method: 'PUT', body, signal, expectedStatus: 200 })).user },
+    removePersonalAvatar: async (signal) => (await request('/api/auth/me/avatar', userEnvelopeSchema, { method: 'DELETE', signal, expectedStatus: 200 })).user,
+    changePersonalPassword: async (input, signal) => { const body = personalPasswordInputSchema.parse(input); await request('/api/auth/me/password', { parse: (value: unknown) => value as undefined }, { method: 'PUT', body, signal, expectedStatus: 204 }) },
+    requestPersonalEmailChange: async (input, signal) => (await request('/api/auth/me/email-change', emailChangeResponseSchema, { method: 'POST', body: personalEmailChangeInputSchema.parse(input), signal, expectedStatus: 202 })).emailChange,
+    getPersonalEmailChange: async (signal) => (await request('/api/auth/me/email-change', personalEmailChangeStatusSchema, { signal, expectedStatus: 200 })).emailChange,
+    resendPersonalEmailChange: async (signal) => (await request('/api/auth/me/email-change/resend', emailChangeResponseSchema, { method: 'POST', signal, expectedStatus: 202 })).emailChange,
+    verifyPersonalEmailChange: async (input, signal) => { const body = personalEmailVerifyInputSchema.parse(input); await request('/api/auth/me/email-change/verify', { parse: (value: unknown) => value as undefined }, { method: 'POST', body, signal, expectedStatus: 204 }) },
 		getRoles: async (signal) => request('/api/roles', rolesResponseSchema, { signal, expectedStatus: 200 }),
 		getRoleOptions: async (signal) => request('/api/access/role-options', roleOptionsResponseSchema, { signal, expectedStatus: 200 }),
 		getRole: async (id, signal) => (await request(`/api/roles/${encodeURIComponent(id)}`, roleResponseSchema, { signal, expectedStatus: 200 })).role,

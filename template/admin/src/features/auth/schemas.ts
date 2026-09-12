@@ -107,6 +107,14 @@ export const loginFormSchema = z
 
 export type LoginFormValues = z.infer<typeof loginFormSchema>
 
+export const personalNameFormSchema = z
+  .object({ name: z.string() })
+  .superRefine((value, ctx) => validateName(value.name, ctx))
+
+export const personalEmailChangeFormSchema = z
+  .object({ email: z.string() })
+  .superRefine((value, ctx) => validateEmail(value.email, ctx))
+
 export const passwordResetRequestFormSchema = z
   .object({ email: z.string() })
   .superRefine((value, ctx) => validateEmail(value.email, ctx))

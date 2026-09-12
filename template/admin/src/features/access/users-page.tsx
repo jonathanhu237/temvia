@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef, OnChangeFn, SortingState } from '@tanstack/react-table'
-import { Mail, MoreHorizontal, Pencil, Save, UserRound, UserRoundCheck, UserRoundX, Trash2 } from 'lucide-react'
+import { Mail, MoreHorizontal, Pencil, Save, UserRoundCheck, UserRoundX, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import { nextDraftSubmissionID, useAccessDraftStore } from './drafts'
 import { PageNavigation, RoleBadges, canAssignRole, formatDate, type AccessUser } from './access-components'
 import { usersOptions } from './queries'
 import { notifyRequestError, notifySuccess, readFailureFeedback, useRequestErrorToast } from '@/shared/feedback'
+import { UserAvatar } from '@/features/auth/user-avatar'
 
 export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = false, actorID }: { api: ApiClient; canManage: boolean; actorPermissions?: string[]; actorSuperAdmin?: boolean; actorID?: string }) {
   const canAssign = canManage && (actorSuperAdmin || actorPermissions === undefined || actorPermissions.includes('roles.read'))
@@ -90,7 +91,7 @@ export function UsersPage({ api, canManage, actorPermissions, actorSuperAdmin = 
     {
       accessorKey: 'name',
       header: ({ column }) => <SortableHeader column={column}>{t('inviteName')}</SortableHeader>,
-      cell: ({ row }) => <div className="flex min-w-0 items-center gap-2"><UserRound aria-hidden="true" className="shrink-0 text-muted-foreground" /><span className="max-w-56 truncate font-medium">{row.original.name}</span></div>,
+      cell: ({ row }) => <div className="flex min-w-0 items-center gap-2"><UserAvatar user={row.original} className="size-7 rounded-md" /><span className="max-w-56 truncate font-medium">{row.original.name}</span></div>,
     },
     {
       accessorKey: 'email',

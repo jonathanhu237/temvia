@@ -67,6 +67,7 @@ describe('authentication forms', () => {
       name: 'Admin',
       email: 'admin@example.com',
       password: 'Admin1!x',
+      locale: 'en',
     }))
     expect(onSuccess).toHaveBeenCalledOnce()
   })

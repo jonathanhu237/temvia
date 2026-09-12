@@ -108,6 +108,22 @@ describe('Fetch API boundary', () => {
 		expect(new URL(invitationsURL).searchParams.get('direction')).toBe('desc')
 	})
 
+	it('uses personal settings contracts and multipart avatar uploads', async () => {
+		let avatarRequest: Request | undefined
+		server.use(
+			http.get('/api/auth/me/profile', () => HttpResponse.json({ user: { ...user, locale: 'en', hasAvatar: true, avatarUrl: '/api/users/' + user.id + '/avatar?v=2', avatarVersion: 2 }, emailChange: null })),
+			http.put('/api/auth/me/avatar', ({ request }) => {
+				avatarRequest = request
+				return HttpResponse.json({ user: { ...user, hasAvatar: true, avatarUrl: '/api/users/' + user.id + '/avatar?v=3', avatarVersion: 3 } })
+			}),
+			http.post('/api/auth/me/email-change', () => HttpResponse.json({ emailChange: { id: '00000000-0000-4000-8000-000000000003', oldEmail: user.email, newEmail: 'new@example.com', expiresAt: '2026-01-01T00:00:00.000Z', resendAvailableAt: '2025-12-31T23:51:00.000Z', attemptsRemaining: 5, revision: 1 } }, { status: 202 })),
+		)
+		await expect(api.getPersonalProfile?.()).resolves.toMatchObject({ user: { hasAvatar: true }, emailChange: null })
+		await expect(api.savePersonalAvatar?.(new Blob(['avatar'], { type: 'image/png' }))).resolves.toMatchObject({ hasAvatar: true, avatarVersion: 3 })
+		expect(avatarRequest?.headers.get('content-type')).toMatch(/^multipart\/form-data; boundary=/)
+		await expect(api.requestPersonalEmailChange?.({ currentPassword: 'Aa1!old', newEmail: 'new@example.com' })).resolves.toMatchObject({ newEmail: 'new@example.com' })
+	})
+
 	it('loads role filter options through the access endpoint', async () => {
 		server.use(http.get('/api/access/role-options', () => HttpResponse.json({ roles: [{ id: '00000000-0000-4000-8000-000000000002', name: 'Users reader' }] })))
 		await expect(api.getRoleOptions?.()).resolves.toEqual({ roles: [{ id: '00000000-0000-4000-8000-000000000002', name: 'Users reader' }] })

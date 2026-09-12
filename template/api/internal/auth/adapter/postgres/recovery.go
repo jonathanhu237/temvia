@@ -134,9 +134,13 @@ func (s *Store) CompletePasswordReset(ctx context.Context, selector, verifierDig
 		  AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, userID); err != nil {
 		return time.Time{}, err
 	}
+	var recipientEmail string
+	if err := tx.QueryRowContext(ctx, `SELECT email FROM auth_users WHERE id = $1::uuid`, userID).Scan(&recipientEmail); err != nil {
+		return time.Time{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO auth_mail_outbox (kind, user_id, locale, expires_at, created_at)
-		VALUES ('password_changed', $1::uuid, $2, $3::timestamptz + ($4::double precision * INTERVAL '1 second'), $3::timestamptz)`, userID, string(locale), changedAt, notificationTTL.Seconds()); err != nil {
+		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, locale, expires_at, created_at)
+		VALUES ('password_changed', $1::uuid, $2, $3, $4::timestamptz + ($5::double precision * INTERVAL '1 second'), $4::timestamptz)`, userID, recipientEmail, string(locale), changedAt, notificationTTL.Seconds()); err != nil {
 		return time.Time{}, err
 	}
 	if err := tx.Commit(); err != nil {

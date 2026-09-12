@@ -298,7 +298,9 @@ func TestOnlineHTTPConcurrentKickRejectsStaleLogin(t *testing.T) {
 		t.Fatalf("stale concurrent login status = %d, body=%s", loginResponse.Code, loginResponse.Body.String())
 	}
 	// Session creation now rejects stale authority before issuing a credential.
-	if len(loginResponse.Result().Cookies()) != 0 { t.Fatal("stale login issued a cookie") }
+	if len(loginResponse.Result().Cookies()) != 0 {
+		t.Fatal("stale login issued a cookie")
+	}
 
 	if users := onlineHTTPList(t, managerHandler, managerCookie); findOnlineHTTPUserOptional(users, fixture.targetID) != nil {
 		t.Fatalf("stale concurrent login remained online: %+v", users)
