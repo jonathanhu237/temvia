@@ -8,6 +8,7 @@ function clearExpiredSession(getQueryClient: () => QueryClient | undefined, erro
   const queryClient = getQueryClient()
   queryClient?.removeQueries({ queryKey: ['auth', 'current-user'] })
   queryClient?.removeQueries({ queryKey: ['access'] })
+  queryClient?.removeQueries({ queryKey: ['settings'] })
 }
 
 export function createAppQueryClient(): QueryClient {

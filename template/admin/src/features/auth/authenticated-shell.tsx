@@ -70,7 +70,7 @@ export function AuthenticatedShell({ api, user: initialUser, children }: { api: 
       queryClient.removeQueries({ queryKey: ['operation-logs', previousOwnerID] })
       queryClient.removeQueries({ queryKey: ['operation-log', previousOwnerID] })
       queryClient.removeQueries({ queryKey: ['email-tasks', previousOwnerID] })
-      queryClient.removeQueries({ queryKey: ['settings', 'operation-log-retention', previousOwnerID] })
+      queryClient.removeQueries({ queryKey: ['settings'] })
     }
     useAccessDraftStore.getState().setOwner(user.id)
   }, [queryClient, user.id])
@@ -83,6 +83,7 @@ export function AuthenticatedShell({ api, user: initialUser, children }: { api: 
       clearAccessDrafts()
       queryClient.removeQueries({ queryKey: currentUserQueryKey })
       queryClient.removeQueries({ queryKey: ['access'] })
+      queryClient.removeQueries({ queryKey: ['settings'] })
       if (ownerID) {
         queryClient.removeQueries({ queryKey: ['personal-profile', ownerID] })
         queryClient.removeQueries({ queryKey: ['operational-warnings', ownerID] })
@@ -90,7 +91,6 @@ export function AuthenticatedShell({ api, user: initialUser, children }: { api: 
         queryClient.removeQueries({ queryKey: ['operation-logs', ownerID] })
         queryClient.removeQueries({ queryKey: ['operation-log', ownerID] })
         queryClient.removeQueries({ queryKey: ['email-tasks', ownerID] })
-        queryClient.removeQueries({ queryKey: ['settings', 'operation-log-retention', ownerID] })
       }
       void restoreGuestLocale()
       notifySuccess(t('auth:logoutSuccess'))

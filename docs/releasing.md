@@ -31,14 +31,14 @@ The historical manual 0.2.0 release has no source metadata; its successful relea
 1. Plan the version and test release rules.
 2. Check/build/test the generator, test Git integration, test/vet/build the API, and lint/check/test/build the admin.
 3. Install and generate from the actual tarball; verify its inventory and Go module replacement.
-4. In a fresh Compose project with an empty PostgreSQL volume, build the generated API, admin, and migration images, run all migrations, and use Chromium to create an administrator from the API's setup link and explicitly sign in. This gate is mandatory and fails the job on any missing migration, service, setup, or login step.
+4. Run the canonical critical acceptance against that exact tarball. It creates a fresh Compose project with an empty PostgreSQL volume, Mailpit, isolated ports and generated credentials; runs the fixed real PostgreSQL/HTTP integration manifest twice under `-race`; then uses Chromium for setup/login, password recovery, personal settings, and email-task delivery/repair. Missing dependencies, skipped/zero tests, timeouts, child failures, and cleanup failures are fatal.
 5. Publish that exact tested tarball. Create the source tag and GitHub Release with the tarball and SHA-256.
 6. Wait for npm latest and verify the public `pnpm create temvia@latest` entry point.
 
 Runs queue per branch without interrupting an active publication. A stale queued source cannot replace a newer
 published version. Registry failures or divergent source histories fail instead of guessing a version.
 
-The mandatory first-run gate runs on the Ubuntu GitHub Actions runner against the exact tarball that will be published. It is not a complete macOS/browser compatibility claim and does not replace additional acceptance for changes affecting installation, deployment or critical business flows. It also does not execute database integration tests that require `TEST_POSTGRES_DSN`. First-run setup requires four secret configuration values.
+The mandatory critical gate runs on the Ubuntu GitHub Actions runner against the exact tarball that will be published. It is not a complete macOS/browser compatibility claim and does not claim coverage of every historical browser scenario. The runner supplies the DSN and disposable credentials itself; regular DSN-less Go tests remain optional unit-suite evidence only. The non-publishing `Quality` workflow runs the same entry point for pull requests and source pushes.
 
 ## GitHub setup
 

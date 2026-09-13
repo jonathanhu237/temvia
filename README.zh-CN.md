@@ -25,10 +25,11 @@ cd my-project
 填写四项秘密配置、构建容器、执行迁移并启动服务，从 API 日志找到初始化链接，
 创建管理员后登录。Docker Compose 是首次启动主路径；指南另有开发和生产部署说明。
 
-发布流程还会在 Ubuntu runner 上，使用实际 tarball、全新 Compose、PostgreSQL
-和 Chromium 执行首次启动路径。这只是一路 CI 验证，不是对所有 Linux／WSL2 或生产环境
-兼容性的承诺。本地完整首次使用流程已在 macOS 测试；原生 Windows PowerShell 不属于
-支持的首次使用路径。Linux 上的组件测试不代表完整安装验收。
+发布流程和不发布软件的质量流程都会在 Ubuntu runner 上，使用实际 tarball、全新 Compose、
+PostgreSQL、Mailpit 和 Chromium 执行关键验收。固定门禁覆盖初始化/登录、密码找回、个人设置持久化、
+异步邮件投递及可控故障修复，并在 race detector 下将选定的真实 PostgreSQL/HTTP 集成测试执行两次。
+这只是一路 CI 验证，不是对所有 Linux／WSL2 或生产环境兼容性的承诺。本地完整首次使用流程已在
+macOS 测试；原生 Windows PowerShell 不属于支持的首次使用路径。组件测试不代表完整安装验收。
 
 ## 所有权与维护
 
@@ -48,8 +49,17 @@ pnpm check
 pnpm build
 pnpm test
 pnpm test:git
+mkdir -p .release
+export TEMVIA_TEST_TARBALL="$PWD/.release/create-temvia-quality.tgz"
 pnpm test:package
+node scripts/critical-acceptance.mjs "$TEMVIA_TEST_TARBALL"
 ```
+
+最后一条命令是正式的强制验收入口。它自动创建独立临时 consumer、生成项目、Compose 项目名、
+随机回环端口、PostgreSQL volume、Mailpit、账号和浏览器夹具，并且只清理自己的资源。需要 Docker
+Compose v2、Make、Go 1.27、Node.js 24、pnpm 11.24.0 以及可下载 Chromium 的网络。依赖缺失、
+DSN/Mailpit/浏览器/凭据缺失、必测项被跳过或零测试、超时、子命令失败或清理失败都会失败；不带 DSN
+的普通 `go test ./...` 不能替代该门禁。诊断会隐藏凭据、安全链接/令牌、验证码和邮件正文。
 
 每次 push 自动构建验证；main 上的新功能或修复通过验证后自动升版本并发布到 npm，
 具体规则见[发布流程](docs/releasing.zh-CN.md)。

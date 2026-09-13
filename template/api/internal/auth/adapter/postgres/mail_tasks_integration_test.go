@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -18,10 +17,7 @@ import (
 )
 
 func TestStoreIntegrationMailTaskLifecycle(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not set")
-	}
+	dsn := integrationDSN(t)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)

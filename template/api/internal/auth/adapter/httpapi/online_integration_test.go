@@ -29,6 +29,19 @@ import (
 // PostgreSQL account, session, limiter, and version authority through the HTTP
 // handlers and operation log persistence. It is gated so the normal unit suite
 // stays self-contained; run it with a disposable migrated database.
+func integrationDSN(t *testing.T) string {
+	t.Helper()
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn != "" {
+		return dsn
+	}
+	if os.Getenv("TEMVIA_REQUIRED_INTEGRATION") == "1" {
+		t.Fatalf("TEST_POSTGRES_DSN is required for mandatory HTTP/PostgreSQL integration tests")
+	}
+	t.Skip("TEST_POSTGRES_DSN is not set")
+	return ""
+}
+
 func TestOnlineHTTPIntegration(t *testing.T) {
 	db, ctx := openHTTPIntegrationDatabase(t)
 
@@ -990,10 +1003,7 @@ func abuseHTTPLogin(t *testing.T, handler http.Handler, email, password, remoteA
 // schema, and the application pool is restricted to it.
 func openHTTPIntegrationDatabase(t *testing.T) (*sql.DB, context.Context) {
 	t.Helper()
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("isolated PostgreSQL is required")
-	}
+	dsn := integrationDSN(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)
 

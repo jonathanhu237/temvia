@@ -31,14 +31,14 @@ npm 版本和 `v0.x.y` 标签才是已发布版本；无需每次手改 package.
 1. 按提交计算版本，验证版本规则。
 2. 运行生成器类型检查、构建、CLI 和 Git 测试；API 测试、vet 和构建；后台 lint、类型检查、单元测试和构建。
 3. 对实际 npm tarball 做安装、生成项目、文件清单和模块替换验收。
-4. 在全新的 Compose 项目和空 PostgreSQL 数据卷中构建生成的 API、后台及迁移镜像，执行全部迁移，并用 Chromium 从 API 日志中的初始化链接创建管理员后明确登录。该门禁为必需步骤，任何迁移缺失、服务、初始化或登录失败都会使 job 失败。
+4. 对同一个 tarball 运行正式关键验收入口。它创建全新 Compose 项目、空 PostgreSQL 数据卷、Mailpit、隔离端口和随机夹具账号；在 `-race` 下执行两次固定的真实 PostgreSQL/HTTP 集成清单，再用 Chromium 验证初始化/登录、密码找回、个人设置及邮件任务投递/修复。依赖缺失、跳过/零测试、超时、子命令失败或清理失败都会失败。
 5. 发布通过验收的同一个 tarball；创建源码标签、GitHub Release，附安装包和 SHA-256。
 6. 等待 npm latest 更新，通过公开 `pnpm create temvia@latest` 验证生成入口。
 
 同一分支的运行排队执行，不中断正在发布的版本。若较新的源码已先发布，旧运行只构建，
 不会将 npm 回退。registry 查询或源码历史异常时失败，不猜测版本。
 
-必需的首次启动门禁在 Ubuntu GitHub Actions runner 上针对将要发布的同一个 tarball 执行；这不是完整的 macOS／浏览器兼容性承诺。涉及安装、部署或关键业务流程的变更，仍应额外做相应验收。门禁也不执行需要 `TEST_POSTGRES_DSN` 的数据库集成测试。首次使用需填写四项秘密配置。
+必需的关键门禁在 Ubuntu GitHub Actions runner 上针对将要发布的同一个 tarball 执行；这不是完整的 macOS／浏览器兼容性承诺，也不声称覆盖所有历史浏览器场景。runner 自己提供 DSN 和一次性账号；不带 DSN 的普通 Go 测试只能作为可选单元证据。不发布软件的 `Quality` 工作流会对 pull request 和源码 push 执行同一入口。
 
 ## GitHub 配置
 

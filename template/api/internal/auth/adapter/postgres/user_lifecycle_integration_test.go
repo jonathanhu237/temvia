@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -15,10 +14,7 @@ import (
 )
 
 func TestUserLifecycleIntegration(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("isolated PostgreSQL required")
-	}
+	dsn := integrationDSN(t)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)

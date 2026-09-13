@@ -23,7 +23,7 @@ export const Route = createFileRoute('/_authenticated')({
         context.queryClient.removeQueries({ queryKey: ['operation-log-status'] })
         context.queryClient.removeQueries({ queryKey: ['operation-logs'] })
         context.queryClient.removeQueries({ queryKey: ['operation-log'] })
-        context.queryClient.removeQueries({ queryKey: ['settings', 'operation-log-retention'] })
+        context.queryClient.removeQueries({ queryKey: ['settings'] })
         throw redirect({ to: '/login', replace: true })
       }
       if (isRedirect(error)) throw error

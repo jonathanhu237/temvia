@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -861,10 +860,7 @@ func TestStateIntegrationLimiterUsesCurrentRetentionAfterConfigurationChange(t *
 
 func openStateIntegrationDB(t *testing.T) (*sql.DB, context.Context) {
 	t.Helper()
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not set")
-	}
+	dsn := integrationDSN(t)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)

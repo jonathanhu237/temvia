@@ -1,0 +1,89 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Source checks and critical acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+
+      - name: Install generator dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Check and build the generator
+        run: |
+          pnpm check
+          pnpm build
+
+      - name: Test generator, release rules, and Git integration
+        run: |
+          pnpm test
+          pnpm test:release
+          pnpm test:git
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.0
+          cache: false
+
+      - name: Check generated API unit suite
+        working-directory: template/api
+        run: |
+          go test ./...
+          go vet ./...
+          go build -o bin/server ./cmd/server
+
+      - name: Install generated admin dependencies
+        working-directory: template/admin
+        run: pnpm install --no-frozen-lockfile --ignore-scripts
+
+      - name: Check generated admin
+        working-directory: template/admin
+        run: |
+          pnpm lint
+          pnpm check
+          pnpm test
+          pnpm build
+
+      - name: Create the exact tarball used by acceptance
+        env:
+          TEMVIA_TEST_TARBALL: ${{ github.workspace }}/.release/create-temvia-quality.tgz
+        run: |
+          set -euo pipefail
+          mkdir -p .release
+          pnpm test:package
+          test -s "$TEMVIA_TEST_TARBALL"
+
+      - name: Run the mandatory isolated critical acceptance
+        env:
+          TEMVIA_TEST_TARBALL: ${{ github.workspace }}/.release/create-temvia-quality.tgz
+        run: node scripts/critical-acceptance.mjs "$TEMVIA_TEST_TARBALL"

@@ -11,6 +11,9 @@ services:
       - temvia-postgres:/var/lib/postgresql
     healthcheck:
       test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      # A fresh PostgreSQL volume may spend over a minute in initialization.
+      # Keep readiness real while allowing that bounded cold-start window.
+      start_period: 90s
       interval: 2s
       timeout: 5s
       retries: 15

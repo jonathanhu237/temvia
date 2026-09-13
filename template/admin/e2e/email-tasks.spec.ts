@@ -57,7 +57,7 @@ test.describe('email tasks', () => {
     test.setTimeout(120_000)
     await signIn(page)
 
-    await saveSMTP(page, { host: process.env.E2E_SMTP_HOST ?? 'mailpit', port: Number(process.env.E2E_SMTP_PORT ?? 1025), retryCount: 9 })
+    await saveSMTP(page, { host: process.env.E2E_SMTP_HOST ?? 'mailpit', port: Number(process.env.E2E_SMTP_PORT ?? 1025), retryCount: Number(process.env.E2E_SMTP_RETRY_COUNT ?? 9) })
     const recipient = `mail-task-success-${Date.now()}@example.com`
     await submitTestEmail(page, recipient)
 

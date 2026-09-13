@@ -34,6 +34,13 @@ make migrate-up
 make up
 ```
 
+A fresh PostgreSQL volume may take over a minute to initialize on a slow host.
+The generated Compose file gives its real `pg_isready` healthcheck a bounded
+90-second startup grace, then keeps the normal 2-second interval, 5-second
+probe timeout, and 15-failure limit. `make migrate-up` waits for that readiness
+and fails if PostgreSQL never becomes healthy; it does not bypass durability or
+report a dummy success.
+
 Run the Node command separately for each token key and use a different output
 for every secret. The same command also produces a suitable random value for the
 PostgreSQL password; do not reuse a value across variables or commit `.env`.

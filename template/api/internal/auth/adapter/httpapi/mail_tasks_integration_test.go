@@ -21,7 +21,10 @@ import (
 // authorization, PostgreSQL worker projection, physical deletion, partial
 // conflicts, and safe response boundary in the same generated API package.
 func TestMailTasksHTTPIntegration(t *testing.T) {
-	if os.Getenv("E2E_EMAIL_TASKS") != "1" || os.Getenv("TEST_POSTGRES_DSN") == "" {
+	if os.Getenv("E2E_EMAIL_TASKS") != "1" {
+		if os.Getenv("TEMVIA_REQUIRED_INTEGRATION") == "1" {
+			t.Fatalf("E2E_EMAIL_TASKS=1 is required for mandatory HTTP mail-task integration")
+		}
 		t.Skip("set E2E_EMAIL_TASKS=1 and TEST_POSTGRES_DSN for HTTP/PostgreSQL mail-task acceptance")
 	}
 	db, ctx := openHTTPIntegrationDatabase(t)

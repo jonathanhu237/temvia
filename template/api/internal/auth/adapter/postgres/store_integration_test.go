@@ -18,6 +18,19 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+func integrationDSN(t *testing.T) string {
+	t.Helper()
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn != "" {
+		return dsn
+	}
+	if os.Getenv("TEMVIA_REQUIRED_INTEGRATION") == "1" {
+		t.Fatalf("TEST_POSTGRES_DSN is required for mandatory PostgreSQL integration tests")
+	}
+	t.Skip("TEST_POSTGRES_DSN is not set")
+	return ""
+}
+
 func mailJobSummary(job *application.MailJob) string {
 	if job == nil {
 		return "<nil>"
@@ -26,10 +39,7 @@ func mailJobSummary(job *application.MailJob) string {
 }
 
 func TestStoreIntegrationSetupLifecycleAndConcurrency(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not set")
-	}
+	dsn := integrationDSN(t)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -117,10 +127,7 @@ func TestStoreIntegrationSetupLifecycleAndConcurrency(t *testing.T) {
 }
 
 func TestStoreIntegrationRejectsNonExactSchemaVersions(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not set")
-	}
+	dsn := integrationDSN(t)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -220,10 +227,7 @@ func resetAuthState(ctx context.Context, db *sql.DB) error {
 }
 
 func TestStoreIntegrationOperationLogPersistenceAndRetention(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not set")
-	}
+	dsn := integrationDSN(t)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -302,10 +306,7 @@ func TestStoreIntegrationOperationLogPersistenceAndRetention(t *testing.T) {
 }
 
 func TestStoreIntegrationPasswordRecoveryOutboxAndVersionedSessions(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not set")
-	}
+	dsn := integrationDSN(t)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -556,10 +557,7 @@ func TestStoreIntegrationPasswordRecoveryOutboxAndVersionedSessions(t *testing.T
 }
 
 func TestStoreIntegrationRBACAndInvitationLifecycle(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not set")
-	}
+	dsn := integrationDSN(t)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -705,10 +703,7 @@ func TestStoreIntegrationRBACAndInvitationLifecycle(t *testing.T) {
 }
 
 func TestStoreIntegrationAccessListQueryOptions(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not set")
-	}
+	dsn := integrationDSN(t)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)

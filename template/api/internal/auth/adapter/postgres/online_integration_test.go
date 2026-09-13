@@ -7,16 +7,12 @@ import (
 	"errors"
 	"example.com/temvia/api/internal/auth/application"
 	"example.com/temvia/api/internal/auth/domain"
-	"os"
 	"testing"
 	"time"
 )
 
 func TestRevokeSessionsIntegration(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("isolated test PostgreSQL required")
-	}
+	dsn := integrationDSN(t)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
