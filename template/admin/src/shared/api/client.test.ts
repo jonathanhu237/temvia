@@ -77,8 +77,8 @@ describe('Fetch API boundary', () => {
 			return HttpResponse.json({ status: 'accepted' }, { status: 202 })
 		}))
 
-		await expect(api.testEmailSettings?.({ host: 'smtp.example.com', port: 587, security: 'starttls', username: 'mailer', fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 4, recipient: 'real@example.com' })).resolves.toBeUndefined()
-		expect(requestBody).toEqual(expect.objectContaining({ recipient: 'real@example.com', revision: 4 }))
+		await expect(api.testEmailSettings?.({ recipient: 'real@example.com' })).resolves.toEqual({ status: 'accepted' })
+		expect(requestBody).toEqual({ recipient: 'real@example.com' })
 	})
 
 	it('encodes access-list search, role, status, and sort options in the query string', async () => {

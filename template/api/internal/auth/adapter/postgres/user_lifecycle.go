@@ -97,7 +97,7 @@ func (s *Store) mutateUserLifecycle(ctx context.Context, actorID, userID string,
 			_, err = tx.ExecContext(ctx, `DELETE FROM auth_password_resets WHERE user_id=$1::uuid`, userID)
 		}
 		if err == nil {
-			_, err = tx.ExecContext(ctx, `UPDATE auth_mail_outbox SET canceled_at=clock_timestamp(),lease_token=NULL,lease_expires_at=NULL WHERE user_id=$1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, userID)
+			_, err = tx.ExecContext(ctx, `UPDATE auth_mail_outbox SET canceled_at=clock_timestamp(),finished_at=clock_timestamp(),last_error_code='superseded',lease_token=NULL,lease_expires_at=NULL WHERE user_id=$1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, userID)
 		}
 	case "reactivate":
 		_, err = tx.ExecContext(ctx, `UPDATE auth_users SET disabled_at=NULL,auth_version=auth_version+1 WHERE id=$1::uuid`, userID)
@@ -105,6 +105,9 @@ func (s *Store) mutateUserLifecycle(ctx context.Context, actorID, userID string,
 		_, err = tx.ExecContext(ctx, `INSERT INTO auth_deleted_user_identities(user_id,name,email) VALUES($1,$2,$3)`, userID, user.User.Name, user.User.Email)
 		if err == nil {
 			_, err = tx.ExecContext(ctx, `UPDATE auth_user_invitations SET created_by_name=$2,created_by_email=$3,created_by_user_key=$1,created_by=NULL WHERE created_by=$1::uuid`, userID, user.User.Name, user.User.Email)
+		}
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE auth_mail_outbox SET canceled_at=clock_timestamp(), finished_at=clock_timestamp(), lease_token=NULL, lease_expires_at=NULL, last_error_code='superseded' WHERE user_id=$1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, userID)
 		}
 		if err == nil {
 			_, err = tx.ExecContext(ctx, `DELETE FROM auth_users WHERE id=$1::uuid`, userID)

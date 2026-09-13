@@ -32,7 +32,7 @@ import { UserAvatar } from './user-avatar'
 import { changeAccountLocale, restoreGuestLocale } from '@/shared/i18n'
 
 export function AuthenticatedShell({ api, user: initialUser, children }: { api: ApiClient; user: User; children: React.ReactNode }) {
-  const { t } = useTranslation(['common', 'auth', 'problems', 'access', 'operationLog', 'onlineUsers'])
+  const { t } = useTranslation(['common', 'auth', 'problems', 'access', 'operationLog', 'onlineUsers', 'emailTasks'])
   const queryClient = useQueryClient()
   // Subscribe to the cache entry populated by the authenticated route loader.
   // Mutations from personal settings can then update the account area without
@@ -48,10 +48,11 @@ export function AuthenticatedShell({ api, user: initialUser, children }: { api: 
   const hasRolesAccess = Boolean(user.superAdmin || user.permissions?.includes('roles.read'))
   const hasSettingsAccess = Boolean(user.superAdmin || user.permissions?.includes('settings.read'))
   const hasOperationLogsAccess = Boolean(user.superAdmin || user.permissions?.includes('operation-logs.read'))
+  const hasMailTasksAccess = Boolean(user.superAdmin || user.permissions?.includes('mail-tasks.read'))
   const hasAccessMenu = hasUsersAccess || hasInvitationsAccess || hasRolesAccess
-  const hasMonitoringMenu = hasOnlineUsersAccess || hasOperationLogsAccess
+  const hasMonitoringMenu = hasOnlineUsersAccess || hasOperationLogsAccess || hasMailTasksAccess
   const accessMenuActive = location.pathname.startsWith('/users') || location.pathname.startsWith('/invitations') || location.pathname.startsWith('/roles')
-  const monitoringMenuActive = location.pathname.startsWith('/online-users') || location.pathname.startsWith('/operation-logs')
+  const monitoringMenuActive = location.pathname.startsWith('/online-users') || location.pathname.startsWith('/operation-logs') || location.pathname.startsWith('/email-tasks')
   const [accessMenuOpen, setAccessMenuOpen] = useState(true)
   const [monitoringMenuOpen, setMonitoringMenuOpen] = useState(true)
   const accessMenuExpanded = accessMenuOpen || accessMenuActive
@@ -68,6 +69,7 @@ export function AuthenticatedShell({ api, user: initialUser, children }: { api: 
       queryClient.removeQueries({ queryKey: ['operation-log-status', previousOwnerID] })
       queryClient.removeQueries({ queryKey: ['operation-logs', previousOwnerID] })
       queryClient.removeQueries({ queryKey: ['operation-log', previousOwnerID] })
+      queryClient.removeQueries({ queryKey: ['email-tasks', previousOwnerID] })
       queryClient.removeQueries({ queryKey: ['settings', 'operation-log-retention', previousOwnerID] })
     }
     useAccessDraftStore.getState().setOwner(user.id)
@@ -87,6 +89,7 @@ export function AuthenticatedShell({ api, user: initialUser, children }: { api: 
         queryClient.removeQueries({ queryKey: ['operation-log-status', ownerID] })
         queryClient.removeQueries({ queryKey: ['operation-logs', ownerID] })
         queryClient.removeQueries({ queryKey: ['operation-log', ownerID] })
+        queryClient.removeQueries({ queryKey: ['email-tasks', ownerID] })
         queryClient.removeQueries({ queryKey: ['settings', 'operation-log-retention', ownerID] })
       }
       void restoreGuestLocale()
@@ -145,6 +148,7 @@ export function AuthenticatedShell({ api, user: initialUser, children }: { api: 
                     {monitoringMenuExpanded ? <SidebarMenuSub>
                       {hasOnlineUsersAccess ? <SidebarMenuSubItem><SidebarMenuSubButton asChild isActive={location.pathname.startsWith('/online-users')}><Link to="/online-users" aria-current={location.pathname.startsWith('/online-users') ? 'page' : undefined}><Activity aria-hidden="true" /><span>{t('onlineUsers:title')}</span></Link></SidebarMenuSubButton></SidebarMenuSubItem> : null}
                       {hasOperationLogsAccess ? <SidebarMenuSubItem><SidebarMenuSubButton asChild isActive={location.pathname.startsWith('/operation-logs')}><Link to="/operation-logs" aria-current={location.pathname.startsWith('/operation-logs') ? 'page' : undefined}><History aria-hidden="true" /><span>{t('operationLog:title')}</span></Link></SidebarMenuSubButton></SidebarMenuSubItem> : null}
+                      {hasMailTasksAccess ? <SidebarMenuSubItem><SidebarMenuSubButton asChild isActive={location.pathname.startsWith('/email-tasks')}><Link to="/email-tasks" aria-current={location.pathname.startsWith('/email-tasks') ? 'page' : undefined}><Mail aria-hidden="true" /><span>{t('emailTasks:title')}</span></Link></SidebarMenuSubButton></SidebarMenuSubItem> : null}
                     </SidebarMenuSub> : null}
                   </SidebarMenuItem>
                 ) : null}
@@ -184,7 +188,7 @@ export function AuthenticatedShell({ api, user: initialUser, children }: { api: 
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger aria-label={t('menu')} />
             <div className="h-4 w-px bg-border" aria-hidden="true" />
-            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/personal-settings') ? t('personalSettings') : location.pathname.startsWith('/online-users') ? t('onlineUsers:title') : location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : location.pathname.startsWith('/settings') ? t('settings') : location.pathname.startsWith('/operation-logs') ? t('operationLog:title') : t('home')}</p>
+            <p className="truncate text-sm font-medium text-muted-foreground">{location.pathname.startsWith('/personal-settings') ? t('personalSettings') : location.pathname.startsWith('/online-users') ? t('onlineUsers:title') : location.pathname.startsWith('/users') ? t('access:users') : location.pathname.startsWith('/invitations') ? t('access:invitations') : location.pathname.startsWith('/roles') ? t('access:roles') : location.pathname.startsWith('/settings') ? t('settings') : location.pathname.startsWith('/operation-logs') ? t('operationLog:title') : location.pathname.startsWith('/email-tasks') ? t('emailTasks:title') : t('home')}</p>
           </div>
         </header>
         <div className="flex min-h-[calc(100dvh-3.5rem)] flex-1 flex-col gap-5 p-4 sm:p-6 lg:p-8">

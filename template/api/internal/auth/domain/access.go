@@ -134,8 +134,11 @@ func DefaultPermissionCatalog() PermissionCatalog {
 		PermissionDefinition{Key: PermissionSettingsRead, Resource: "settings", Action: "read", LabelKey: "permissions.settings.read", Description: "View system settings."},
 		PermissionDefinition{Key: PermissionSettingsWrite, Resource: "settings", Action: "write", LabelKey: "permissions.settings.write", Description: "Update system settings."},
 		PermissionDefinition{Key: PermissionOperationLogsRead, Resource: "operation-logs", Action: "read", LabelKey: "permissions.operationLogs.read", Description: "View operation history and recording status."},
+		PermissionDefinition{Key: PermissionMailTasksRead, Resource: "mail-tasks", Action: "read", LabelKey: "permissions.mailTasks.read", Description: "View system mail tasks and delivery attempts."},
+		PermissionDefinition{Key: PermissionMailTasksWrite, Resource: "mail-tasks", Action: "write", LabelKey: "permissions.mailTasks.write", Description: "Retry or permanently delete system mail tasks."},
 	)
 	return catalog.WithCombinations(
+		PermissionCombination{Key: "mailTasks.manage", LabelKey: "permissions.combinations.mailTasksManage", Description: "View and manage system mail tasks.", Permissions: []PermissionKey{PermissionMailTasksRead, PermissionMailTasksWrite}, Trigger: []PermissionKey{PermissionMailTasksWrite}},
 		PermissionCombination{Key: "invitations.create", LabelKey: "permissions.combinations.invitationsCreate", Description: "Create invitations and choose an assignable role.", Permissions: []PermissionKey{PermissionInvitationsWrite, PermissionRolesRead}, Trigger: []PermissionKey{PermissionInvitationsWrite}},
 		PermissionCombination{Key: "invitations.manage", LabelKey: "permissions.combinations.invitationsManage", Description: "View and manage invitations with assignable roles.", Permissions: []PermissionKey{PermissionInvitationsRead, PermissionInvitationsWrite, PermissionRolesRead}, Trigger: []PermissionKey{PermissionInvitationsRead, PermissionInvitationsWrite}},
 		PermissionCombination{Key: "users.assignRoles", LabelKey: "permissions.combinations.usersAssignRoles", Description: "View users and assign roles.", Permissions: []PermissionKey{PermissionUsersRead, PermissionUsersWrite, PermissionRolesRead}, Trigger: []PermissionKey{PermissionUsersWrite}},
@@ -156,6 +159,8 @@ const (
 	PermissionSettingsRead      PermissionKey = "settings.read"
 	PermissionSettingsWrite     PermissionKey = "settings.write"
 	PermissionOperationLogsRead PermissionKey = "operation-logs.read"
+	PermissionMailTasksRead     PermissionKey = "mail-tasks.read"
+	PermissionMailTasksWrite    PermissionKey = "mail-tasks.write"
 )
 
 func (c PermissionCatalog) Has(key PermissionKey) bool { _, ok := c.items[key]; return ok }

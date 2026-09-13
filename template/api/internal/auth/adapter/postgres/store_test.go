@@ -1,12 +1,68 @@
 package postgres
 
 import (
+	"bytes"
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"example.com/temvia/api/internal/auth/application"
+	"example.com/temvia/api/internal/auth/domain"
+	"example.com/temvia/api/internal/config"
 )
+
+func newTestStore(db *sql.DB) *Store {
+	store := NewStore(db)
+	box, _ := application.NewMailTaskSecretBox(bytes.Repeat([]byte{0x7d}, 32))
+	store.SetMailTaskSecretBox(box)
+	return store
+}
+
+func TestNewStoreUsesStableMailTaskKey(t *testing.T) {
+	passwordKey := bytes.Repeat([]byte{0x11}, 32)
+	first := NewStore(nil, config.Config{PasswordResetTokenKey: passwordKey, EmailSettingsEncryptionKey: bytes.Repeat([]byte{0x22}, 32)})
+	second := NewStore(nil, config.Config{PasswordResetTokenKey: passwordKey, EmailSettingsEncryptionKey: bytes.Repeat([]byte{0x33}, 32)})
+	material := application.MailTaskMaterial{
+		Version:    1,
+		Kind:       application.MailPasswordChanged,
+		Name:       "Ada",
+		Email:      "ada@example.com",
+		Locale:     domain.LocaleEnglish,
+		SystemName: "Temvia",
+		CreatedAt:  time.Unix(100, 0),
+		ExpiresAt:  time.Unix(200, 0),
+	}
+	ciphertext, err := application.SealMailTaskMaterial(first.mailTaskSecretBox, material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.OpenMailTaskMaterial(second.mailTaskSecretBox, ciphertext); err != nil {
+		t.Fatalf("mail task key changed with SMTP settings key: %v", err)
+	}
+}
+
+func TestStoreFailsClosedWhenConfiguredTaskKeyIsUnavailable(t *testing.T) {
+	store := NewStore(nil, config.Config{PasswordResetTokenKey: bytes.Repeat([]byte{0x11}, 32)})
+	store.SetMailTaskSecretBox(nil)
+	_, err := store.sealMailTaskMaterial(application.MailTaskMaterial{
+		Version:    1,
+		Kind:       application.MailPasswordChanged,
+		Name:       "Ada",
+		Email:      "ada@example.com",
+		Locale:     domain.LocaleEnglish,
+		SystemName: "Temvia",
+		CreatedAt:  time.Unix(100, 0),
+		ExpiresAt:  time.Unix(200, 0),
+	})
+	if !errors.Is(err, application.ErrDependencyUnavailable) {
+		t.Fatalf("nil configured task key error = %v", err)
+	}
+}
 
 func TestExpectedMigrationVersionMatchesBundledFiles(t *testing.T) {
 	_, source, _, ok := runtime.Caller(0)

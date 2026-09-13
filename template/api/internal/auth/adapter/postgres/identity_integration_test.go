@@ -27,7 +27,7 @@ func TestSystemIdentityIntegrationPersistsOneNameAndHasNoLegacyColumn(t *testing
 		_ = db.Close()
 		t.Fatal(err)
 	}
-	store := NewStore(db)
+	store := newTestStore(db)
 	management := application.NewSystemIdentityManagement(store)
 	original, originalErr := store.GetSystemIdentity(ctx)
 	if originalErr != nil && !errors.Is(originalErr, application.ErrSystemIdentityNotConfigured) {

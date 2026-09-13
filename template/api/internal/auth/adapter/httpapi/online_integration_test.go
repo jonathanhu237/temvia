@@ -629,6 +629,7 @@ func TestAbuseProtectionHTTPIntegration(t *testing.T) {
 		return mailer, nil
 	}, nil)
 	settings.SetTestEmailLimiter(store)
+	settings.SetMailTaskEnqueuer(store)
 	random := application.CryptoRandom()
 	setup := application.NewSetup(store, hasher, random, cfg.SetupLinkTTL, store)
 	auth := application.NewAuthentication(store, hasher, store, store, random, domain.DefaultPermissionCatalog())
@@ -638,6 +639,29 @@ func TestAbuseProtectionHTTPIntegration(t *testing.T) {
 	acceptance := application.NewInvitationAcceptance(store, hasher, cfg.InvitationTokenKey, store)
 	operations := application.NewOperationLogService(store)
 	handler := NewHandlerWithAccessAndOperationLog(setup, auth, cfg, recovery, access, acceptance, settings, operations)
+	mailTaskBox, err := application.NewMailTaskSecretBox(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mailDispatcher := application.NewMailDispatcher(store, mailer, random, key, cfg.PublicURL, time.Second, time.Minute, time.Second, time.Minute, invitationKey)
+	mailDispatcher.SetMailTaskSecretBox(mailTaskBox)
+	drainMail := func() {
+		t.Helper()
+		for attempt := 0; attempt < 100; attempt++ {
+			var pending int
+			if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_mail_outbox WHERE sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`).Scan(&pending); err != nil {
+				t.Fatal(err)
+			}
+			if pending == 0 {
+				return
+			}
+			if err := mailDispatcher.ProcessOnce(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Fatal("mail dispatcher did not drain pending integration tasks")
+	}
+	drainMail()
 
 	// A trusted multi-hop chain with an attacker-controlled prefix produces one
 	// source identity in both the limiter and the operation history. Port
@@ -820,34 +844,43 @@ func TestAbuseProtectionHTTPIntegration(t *testing.T) {
 	if acceptedUsers != 1 {
 		t.Fatalf("accepted invitation created %d users, want one", acceptedUsers)
 	}
+	drainMail()
 
 	testPayload := func(recipient string) string {
-		return fmt.Sprintf(`{"host":"smtp.example.test","port":25,"security":"none","username":"","fromAddress":"no-reply@example.test","fromName":"Temvia","defaultLocale":"en","recipient":%q}`, recipient)
+		return fmt.Sprintf(`{"recipient":%q}`, recipient)
 	}
+	initialMailCount := mailer.Count()
 	unauthorizedTest := abuseHTTPRequest(handler, http.MethodPost, "/api/settings/email/test", testPayload("abuse-no-permission-"+suffix+"@example.com"), limitedCookie, "198.51.100.90:2002", nil)
 	if unauthorizedTest.Code != http.StatusForbidden {
 		t.Fatalf("unauthorized test mail status = %d, body=%s", unauthorizedTest.Code, unauthorizedTest.Body.String())
 	}
-	initialMailCount := mailer.Count()
-	if initialMailCount != 0 {
-		t.Fatalf("unauthorized test mail sent %d messages", initialMailCount)
+	if mailer.Count() != initialMailCount {
+		t.Fatalf("unauthorized test mail sent %d messages", mailer.Count()-initialMailCount)
 	}
 	testA := "abuse-test-a-" + suffix + "@example.com"
 	allowedTest := abuseHTTPRequest(handler, http.MethodPost, "/api/settings/email/test", testPayload(testA), managerCookie, "198.51.100.110:7000", nil)
-	if allowedTest.Code != http.StatusAccepted || mailer.Count() != 1 {
-		t.Fatalf("first test mail = %d, count=%d, body=%s", allowedTest.Code, mailer.Count(), allowedTest.Body.String())
+	if allowedTest.Code != http.StatusAccepted {
+		t.Fatalf("first test mail status = %d, body=%s", allowedTest.Code, allowedTest.Body.String())
+	}
+	drainMail()
+	if mailer.Count() != initialMailCount+1 {
+		t.Fatalf("first test mail count=%d, want %d", mailer.Count(), initialMailCount+1)
 	}
 	limitedTest := abuseHTTPRequest(handler, http.MethodPost, "/api/settings/email/test", testPayload(testA), managerCookie, "198.51.100.110:7001", nil)
-	if limitedTest.Code != http.StatusTooManyRequests || mailer.Count() != 1 {
+	if limitedTest.Code != http.StatusTooManyRequests || mailer.Count() != initialMailCount+1 {
 		t.Fatalf("recipient-limited test mail = %d, count=%d, body=%s", limitedTest.Code, mailer.Count(), limitedTest.Body.String())
 	}
 	testB := "abuse-test-b-" + suffix + "@example.com"
 	allowedOtherTest := abuseHTTPRequest(handler, http.MethodPost, "/api/settings/email/test", testPayload(testB), managerCookie, "198.51.100.110:7002", nil)
-	if allowedOtherTest.Code != http.StatusAccepted || mailer.Count() != 2 {
-		t.Fatalf("second actor test mail = %d, count=%d, body=%s", allowedOtherTest.Code, mailer.Count(), allowedOtherTest.Body.String())
+	if allowedOtherTest.Code != http.StatusAccepted {
+		t.Fatalf("second actor test mail status = %d, body=%s", allowedOtherTest.Code, allowedOtherTest.Body.String())
+	}
+	drainMail()
+	if mailer.Count() != initialMailCount+2 {
+		t.Fatalf("second test mail count=%d, want %d", mailer.Count(), initialMailCount+2)
 	}
 	blockedActorTest := abuseHTTPRequest(handler, http.MethodPost, "/api/settings/email/test", testPayload("abuse-test-c-"+suffix+"@example.com"), managerCookie, "198.51.100.110:7003", nil)
-	if blockedActorTest.Code != http.StatusTooManyRequests || mailer.Count() != 2 {
+	if blockedActorTest.Code != http.StatusTooManyRequests || mailer.Count() != initialMailCount+2 {
 		t.Fatalf("actor-limited test mail = %d, count=%d, body=%s", blockedActorTest.Code, mailer.Count(), blockedActorTest.Body.String())
 	}
 

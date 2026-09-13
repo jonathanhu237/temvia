@@ -14,7 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-const ExpectedMigrationVersion int64 = 11
+const ExpectedMigrationVersion int64 = 12
 
 const stateOperationTimeout = time.Second
 
@@ -53,6 +53,7 @@ type Store struct {
 	testMailActorRefill          time.Duration
 	testMailRecipientCapacity    int
 	testMailRecipientRefill      time.Duration
+	mailTaskSecretBox            application.SecretBox
 	emailChangeActorCapacity     int
 	emailChangeActorRefill       time.Duration
 	emailChangeRecipientCapacity int
@@ -75,6 +76,16 @@ func Open(ctx context.Context, cfg config.Config) (*sql.DB, error) {
 	return db, nil
 }
 
+func (s *Store) SetMailTaskSecretBox(box application.SecretBox) {
+	if s != nil {
+		s.mailTaskSecretBox = box
+	}
+}
+
+// NewStore receives the generated Config in production, deriving the
+// mail-task box from its stable password-reset key. No-config embedders must
+// install a box explicitly before creating mail tasks; an unconfigured process
+// never falls back to mutable legacy material.
 func NewStore(db *sql.DB, configs ...config.Config) *Store {
 	settings := config.Config{
 		SessionIdleTimeout:              30 * time.Minute,
@@ -112,8 +123,16 @@ func NewStore(db *sql.DB, configs ...config.Config) *Store {
 		EmailChangeRecipientCapacity:    3,
 		EmailChangeRecipientRefill:      20 * time.Minute,
 	}
+	var mailTaskSecretBox application.SecretBox
 	if len(configs) > 0 {
 		settings = configs[0]
+		// Mail-task material has its own purpose-derived key, but its master is
+		// the required password-reset authority rather than the optional SMTP
+		// settings key. Changing SMTP credential encryption must not make
+		// retained tasks undecryptable after a restart.
+		if box, boxErr := application.NewMailTaskSecretBox(settings.PasswordResetTokenKey); boxErr == nil {
+			mailTaskSecretBox = box
+		}
 		if settings.SessionIdleTimeout <= 0 {
 			settings.SessionIdleTimeout = 30 * time.Minute
 		}
@@ -250,6 +269,7 @@ func NewStore(db *sql.DB, configs ...config.Config) *Store {
 		testMailActorRefill:          settings.TestEmailActorRefill,
 		testMailRecipientCapacity:    settings.TestEmailRecipientCapacity,
 		testMailRecipientRefill:      settings.TestEmailRecipientRefill,
+		mailTaskSecretBox:            mailTaskSecretBox,
 		emailChangeActorCapacity:     settings.EmailChangeActorCapacity,
 		emailChangeActorRefill:       settings.EmailChangeActorRefill,
 		emailChangeRecipientCapacity: settings.EmailChangeRecipientCapacity,

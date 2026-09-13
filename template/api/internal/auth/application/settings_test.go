@@ -47,6 +47,31 @@ func (s *settingsStoreFake) SaveEmailSettings(_ context.Context, expected int64,
 	return copy, nil
 }
 
+type settingsTaskEnqueuer struct {
+	tasks []MailTaskInput
+}
+
+func (s *settingsTaskEnqueuer) ListMailTasks(context.Context, MailTaskListOptions) (MailTaskPage, error) {
+	return MailTaskPage{}, nil
+}
+func (s *settingsTaskEnqueuer) FindMailTask(context.Context, string) (MailTask, error) {
+	return MailTask{}, nil
+}
+func (s *settingsTaskEnqueuer) RetryMailTask(context.Context, string) (MailTask, error) {
+	return MailTask{}, nil
+}
+func (s *settingsTaskEnqueuer) DeleteMailTask(context.Context, string) error { return nil }
+func (s *settingsTaskEnqueuer) EnqueueMailTask(_ context.Context, input MailTaskInput) (MailTask, error) {
+	s.tasks = append(s.tasks, input)
+	return MailTask{ID: "00000000-0000-4000-8000-000000000099", Kind: input.Kind, RecipientEmail: input.RecipientEmail, RecipientName: input.RecipientName, Locale: input.Locale, Status: MailTaskStatusQueued, Round: 1}, nil
+}
+
+func attachSettingsTaskEnqueuer(service *SettingsManagement) *settingsTaskEnqueuer {
+	enqueuer := &settingsTaskEnqueuer{}
+	service.SetMailTaskEnqueuer(enqueuer)
+	return enqueuer
+}
+
 type settingsMailerFake struct {
 	messages []OutgoingMail
 }
@@ -64,6 +89,37 @@ func validEmailSettingsInput(revision int64) EmailSettingsInput {
 	return EmailSettingsInput{
 		Host: "smtp.example.com", Port: 587, Security: "starttls", Username: "mailer",
 		FromAddress: "no-reply@example.com", FromName: "Temvia", DefaultLocale: "en", Revision: revision,
+	}
+}
+
+func TestSettingsTaskRequiresDurableOutbox(t *testing.T) {
+	service := NewSettingsManagement(&settingsStoreFake{}, nil, func(SMTPSettings) (Mailer, error) {
+		return &settingsMailerFake{}, nil
+	}, nil)
+	if _, err := service.TestEmailSettingsTask(context.Background(), "", EmailSettingsInput{}, "admin@example.com"); !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("missing outbox task error = %v", err)
+	}
+	if err := service.TestEmailSettings(context.Background(), EmailSettingsInput{}, "admin@example.com"); !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("missing outbox compatibility call error = %v", err)
+	}
+}
+
+func TestCurrentMailerReadsTheLatestPersistedSettings(t *testing.T) {
+	store := &settingsStoreFake{current: &EmailSettingsRecord{Host: "smtp-a.example.com", Port: 2525, Security: "none", FromAddress: "no-reply@example.com", FromName: "Temvia", DefaultLocale: domain.LocaleEnglish, AutoRetryCount: DefaultAutoRetryCount, RetentionDays: DefaultMailRetentionDays, Revision: 1}}
+	var captured []SMTPSettings
+	service := NewSettingsManagement(store, nil, func(settings SMTPSettings) (Mailer, error) {
+		captured = append(captured, settings)
+		return &settingsMailerFake{}, nil
+	}, nil)
+	if _, err := service.CurrentMailer(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	store.current.Host = "smtp-b.example.com"
+	if _, err := service.CurrentMailer(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 2 || captured[0].Host != "smtp-a.example.com" || captured[1].Host != "smtp-b.example.com" {
+		t.Fatalf("current mailer settings = %#v", captured)
 	}
 }
 
@@ -197,6 +253,7 @@ func TestSettingsRejectsPasswordReuseAfterSMTPIdentityChanges(t *testing.T) {
 				captured = append(captured, settings)
 				return &settingsMailerFake{}, nil
 			}, nil)
+			queue := attachSettingsTaskEnqueuer(service)
 			password := "old-secret"
 			first := validEmailSettingsInput(0)
 			first.Password = &password
@@ -212,11 +269,11 @@ func TestSettingsRejectsPasswordReuseAfterSMTPIdentityChanges(t *testing.T) {
 			if store.saveCalls != 1 || !bytes.Equal(store.current.PasswordCiphertext, before) {
 				t.Fatalf("rejected save changed state: calls=%d record=%#v", store.saveCalls, store.current)
 			}
-			if err := service.TestEmailSettings(context.Background(), changed, "admin@example.com"); !errors.Is(err, ErrInvalidMailSettings) {
+			if err := service.TestEmailSettings(context.Background(), changed, "admin@example.com"); !errors.Is(err, ErrMailSettingsNotSaved) {
 				t.Fatalf("changed-identity test error = %v", err)
 			}
-			if len(captured) != 1 || captured[0].Password != password {
-				t.Fatalf("rejected test handed a credential to the new connection: %#v", captured)
+			if len(captured) != 1 || captured[0].Password != password || len(queue.tasks) != 0 {
+				t.Fatalf("rejected test changed side effects: captured=%#v tasks=%#v", captured, queue.tasks)
 			}
 
 			newPassword := "new-secret"
@@ -239,6 +296,7 @@ func TestSettingsIdentityChangeCanExplicitlyClearPasswordForUnauthenticatedSMTP(
 		captured = append(captured, settings)
 		return &settingsMailerFake{}, nil
 	}, nil)
+	queue := attachSettingsTaskEnqueuer(service)
 	password := "old-secret"
 	first := validEmailSettingsInput(0)
 	first.Password = &password
@@ -256,11 +314,11 @@ func TestSettingsIdentityChangeCanExplicitlyClearPasswordForUnauthenticatedSMTP(
 	if len(captured) != 2 || captured[1].Password != "" || captured[1].Username != "" || store.current.PasswordCiphertext != nil {
 		t.Fatalf("clear save retained credentials: captured=%#v record=%#v", captured, store.current)
 	}
-	if err := service.TestEmailSettings(context.Background(), cleared, "admin@example.com"); err != nil {
+	if err := service.TestEmailSettings(context.Background(), EmailSettingsInput{Revision: store.current.Revision}, "admin@example.com"); err != nil {
 		t.Fatalf("clear test error = %v", err)
 	}
-	if len(captured) != 3 || captured[2].Password != "" || captured[2].Username != "" {
-		t.Fatalf("clear test used credentials: %#v", captured)
+	if len(captured) != 2 || len(queue.tasks) != 1 || queue.tasks[0].RecipientEmail != "admin@example.com" || queue.tasks[0].Message == nil || queue.tasks[0].Message.To != "admin@example.com" {
+		t.Fatalf("clear test task = captured:%#v tasks:%#v", captured, queue.tasks)
 	}
 }
 
@@ -272,6 +330,7 @@ func TestSettingsTestRejectsStaleRevisionBeforeDecryptingSavedPassword(t *testin
 		captured = append(captured, settings)
 		return &settingsMailerFake{}, nil
 	}, nil)
+	queue := attachSettingsTaskEnqueuer(service)
 	password := "old-secret"
 	first := validEmailSettingsInput(0)
 	first.Password = &password
@@ -282,8 +341,8 @@ func TestSettingsTestRejectsStaleRevisionBeforeDecryptingSavedPassword(t *testin
 	if err := service.TestEmailSettings(context.Background(), stale, "admin@example.com"); !errors.Is(err, ErrStaleRevision) {
 		t.Fatalf("stale test error = %v", err)
 	}
-	if len(captured) != 1 {
-		t.Fatalf("stale test created a new mailer: %#v", captured)
+	if len(captured) != 1 || len(queue.tasks) != 0 {
+		t.Fatalf("stale test side effects: captured=%#v tasks=%#v", captured, queue.tasks)
 	}
 }
 
@@ -291,6 +350,7 @@ func TestSettingsRejectsIncompleteEffectiveCredentials(t *testing.T) {
 	store := &settingsStoreFake{}
 	box, _ := NewAESGCMSecretBox(bytes.Repeat([]byte{0x41}, 32))
 	service := NewSettingsManagement(store, box, func(SMTPSettings) (Mailer, error) { return &settingsMailerFake{}, nil }, nil)
+	queue := attachSettingsTaskEnqueuer(service)
 	password := "secret-password"
 	first := validEmailSettingsInput(0)
 	first.Password = &password
@@ -309,8 +369,11 @@ func TestSettingsRejectsIncompleteEffectiveCredentials(t *testing.T) {
 	if _, err := service.SaveEmailSettings(context.Background(), clearWithUsername); !errors.Is(err, ErrInvalidMailSettings) {
 		t.Fatalf("save with username and cleared password = %v", err)
 	}
-	if err := service.TestEmailSettings(context.Background(), clearWithUsername, "admin@example.com"); !errors.Is(err, ErrInvalidMailSettings) {
+	if err := service.TestEmailSettings(context.Background(), clearWithUsername, "admin@example.com"); !errors.Is(err, ErrMailSettingsNotSaved) {
 		t.Fatalf("test with username and cleared password = %v", err)
+	}
+	if len(queue.tasks) != 0 {
+		t.Fatalf("invalid test enqueued %d tasks", len(queue.tasks))
 	}
 }
 
@@ -368,17 +431,15 @@ func TestSettingsSerializesRuntimeReloadAfterConcurrentSaves(t *testing.T) {
 	}
 }
 
-func TestSettingsTestSendsWithReplacementAndSameIdentityPassword(t *testing.T) {
+func TestSettingsTestQueuesSavedIdentityAndRejectsDraftReplacement(t *testing.T) {
 	store := &settingsStoreFake{}
 	box, _ := NewAESGCMSecretBox(bytes.Repeat([]byte{0x46}, 32))
 	var captured []SMTPSettings
-	var mailers []*settingsMailerFake
 	service := NewSettingsManagement(store, box, func(settings SMTPSettings) (Mailer, error) {
 		captured = append(captured, settings)
-		mailer := &settingsMailerFake{}
-		mailers = append(mailers, mailer)
-		return mailer, nil
+		return &settingsMailerFake{}, nil
 	}, nil)
+	queue := attachSettingsTaskEnqueuer(service)
 	oldPassword := "old-secret"
 	first := validEmailSettingsInput(0)
 	first.Password = &oldPassword
@@ -386,93 +447,76 @@ func TestSettingsTestSendsWithReplacementAndSameIdentityPassword(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// An unchanged connection may test the current draft without sending the
-	// encrypted password back through the form.
+	// An unchanged saved connection queues a stable test message without
+	// sending the encrypted password back through the form.
 	sameIdentity := validEmailSettingsInput(1)
 	if err := service.TestEmailSettings(context.Background(), sameIdentity, "same@example.com"); err != nil {
 		t.Fatalf("same-identity test error = %v", err)
 	}
-	if len(captured) != 2 || captured[1].Password != oldPassword || len(mailers[1].messages) != 1 || mailers[1].messages[0].To != "same@example.com" {
-		t.Fatalf("same-identity test settings/messages = %#v / %#v", captured, mailers)
+	if store.saveCalls != 1 || len(captured) != 1 || len(queue.tasks) != 1 || queue.tasks[0].RecipientEmail != "same@example.com" || queue.tasks[0].Message == nil || queue.tasks[0].Message.To != "same@example.com" {
+		t.Fatalf("same-identity test side effects = saves:%d settings:%#v tasks:%#v", store.saveCalls, captured, queue.tasks)
 	}
 
-	// A changed connection must use the explicitly supplied replacement and
-	// the test must remain a send-only operation.
+	// A changed connection is a draft and must be saved before another test;
+	// the endpoint cannot send with replacement credentials from the browser.
 	replacement := "replacement-secret"
 	changed := validEmailSettingsInput(1)
 	changed.Host = "smtp-new.example.com"
 	changed.Password = &replacement
-	if err := service.TestEmailSettings(context.Background(), changed, "replacement@example.com"); err != nil {
+	if err := service.TestEmailSettings(context.Background(), changed, "replacement@example.com"); !errors.Is(err, ErrMailSettingsNotSaved) {
 		t.Fatalf("replacement test error = %v", err)
 	}
-	if store.saveCalls != 1 || len(captured) != 3 || captured[2].Password != replacement || captured[2].Host != changed.Host || len(mailers[2].messages) != 1 || mailers[2].messages[0].To != "replacement@example.com" {
-		t.Fatalf("replacement test side effects = saves:%d settings:%#v mailers:%#v", store.saveCalls, captured, mailers)
+	if store.saveCalls != 1 || len(captured) != 1 || len(queue.tasks) != 1 {
+		t.Fatalf("replacement test side effects = saves:%d settings:%#v tasks:%#v", store.saveCalls, captured, queue.tasks)
 	}
 }
 
-func TestSettingsTestUsesUnsavedSnapshotWithoutPersistence(t *testing.T) {
+func TestSettingsTestRequiresSavedSettings(t *testing.T) {
 	store := &settingsStoreFake{}
-	mailer := &settingsMailerFake{}
-	service := NewSettingsManagement(store, nil, func(settings SMTPSettings) (Mailer, error) {
-		if settings.Host != "mailpit" || settings.Port != 1025 || settings.Security != "none" {
-			return nil, errors.New("unexpected SMTP snapshot")
-		}
-		return mailer, nil
-	}, nil)
+	service := NewSettingsManagement(store, nil, func(SMTPSettings) (Mailer, error) { return &settingsMailerFake{}, nil }, nil)
+	queue := attachSettingsTaskEnqueuer(service)
 	input := EmailSettingsInput{Host: "mailpit", Port: 1025, Security: "none", FromAddress: "no-reply@example.com", FromName: "Temvia", DefaultLocale: "zh-CN"}
-	if err := service.TestEmailSettings(context.Background(), input, "real@example.com"); err != nil {
-		t.Fatal(err)
+	if err := service.TestEmailSettings(context.Background(), input, "real@example.com"); !errors.Is(err, ErrMailNotConfigured) {
+		t.Fatalf("unsaved test error = %v", err)
 	}
-	if store.saveCalls != 0 || len(mailer.messages) != 1 || mailer.messages[0].To != "real@example.com" || mailer.messages[0].Locale != domain.LocaleChinese || !strings.Contains(mailer.messages[0].Text, "测试") {
-		t.Fatalf("test mail side effects = saves:%d messages:%#v", store.saveCalls, mailer.messages)
+	if store.saveCalls != 0 || len(queue.tasks) != 0 {
+		t.Fatalf("unsaved test side effects = saves:%d tasks:%#v", store.saveCalls, queue.tasks)
 	}
 }
 
-func TestSettingsTestUsesOneIdentityWithoutChangingSMTPFromName(t *testing.T) {
-	mailer := &settingsMailerFake{}
-	var captured SMTPSettings
-	identity := &dispatcherIdentityFake{identity: SystemIdentityView{
-		SystemName: `品牌 <主站> & Co`,
-	}}
-	service := NewSettingsManagement(nil, nil, func(settings SMTPSettings) (Mailer, error) {
-		captured = settings
-		return mailer, nil
-	}, nil)
+func TestSettingsTestSnapshotsSavedIdentityWithoutChangingSMTPFromName(t *testing.T) {
+	store := &settingsStoreFake{current: &EmailSettingsRecord{Host: "mailpit", Port: 1025, Security: "none", FromAddress: "no-reply@example.com", FromName: "Operations Mailer", DefaultLocale: domain.LocaleEnglish, AutoRetryCount: DefaultAutoRetryCount, RetentionDays: DefaultMailRetentionDays, Revision: 1}}
+	identity := &dispatcherIdentityFake{identity: SystemIdentityView{SystemName: `品牌 <主站> & Co`}}
+	service := NewSettingsManagement(store, nil, nil, nil)
+	queue := attachSettingsTaskEnqueuer(service)
 	service.SetSystemIdentityProvider(identity)
 
-	input := EmailSettingsInput{Host: "mailpit", Port: 1025, Security: "none", FromAddress: "no-reply@example.com", FromName: "Operations Mailer", DefaultLocale: "en"}
+	input := EmailSettingsInput{Revision: 1}
 	if err := service.TestEmailSettings(context.Background(), input, "recipient@example.com"); err != nil {
 		t.Fatal(err)
 	}
-	if captured.FromAddress != input.FromAddress || captured.FromName != input.FromName {
-		t.Fatalf("SMTP sender settings changed by identity: %#v", captured)
+	if len(queue.tasks) != 1 || queue.tasks[0].Message == nil {
+		t.Fatalf("queued identity task = %#v", queue.tasks)
 	}
-	if len(mailer.messages) != 1 || mailer.messages[0].SystemName != identity.identity.SystemName || mailer.messages[0].To != "recipient@example.com" || !strings.Contains(mailer.messages[0].Subject, identity.identity.SystemName) || !strings.Contains(mailer.messages[0].HTML, `品牌 &lt;主站&gt; &amp; Co`) {
-		t.Fatalf("English test mail identity = %#v", mailer.messages)
+	message := queue.tasks[0].Message
+	if message.SystemName != identity.identity.SystemName || message.To != "recipient@example.com" || message.Kind != MailTest || !strings.Contains(message.Subject, identity.identity.SystemName) || !strings.Contains(message.HTML, `品牌 &lt;主站&gt; &amp; Co`) {
+		t.Fatalf("queued test mail identity = %#v", message)
 	}
-
-	input.DefaultLocale = "zh-CN"
-	if err := service.TestEmailSettings(context.Background(), input, "recipient@example.com"); err != nil {
-		t.Fatal(err)
-	}
-	if len(mailer.messages) != 2 || mailer.messages[1].SystemName != identity.identity.SystemName || !strings.Contains(mailer.messages[1].Subject, identity.identity.SystemName) || !strings.Contains(mailer.messages[1].HTML, `品牌 &lt;主站&gt; &amp; Co`) {
-		t.Fatalf("Chinese test mail identity = %#v", mailer.messages)
-	}
-
 }
 
 func TestSettingsTestValidatesAndNormalizesRecipient(t *testing.T) {
-	mailer := &settingsMailerFake{}
-	service := NewSettingsManagement(nil, nil, func(SMTPSettings) (Mailer, error) { return mailer, nil }, nil)
-	input := EmailSettingsInput{Host: "mailpit", Port: 1025, Security: "none", FromAddress: "no-reply@example.com", FromName: "Temvia", DefaultLocale: "en"}
+	store := &settingsStoreFake{current: &EmailSettingsRecord{Host: "mailpit", Port: 1025, Security: "none", FromAddress: "no-reply@example.com", FromName: "Temvia", DefaultLocale: domain.LocaleEnglish, AutoRetryCount: DefaultAutoRetryCount, RetentionDays: DefaultMailRetentionDays, Revision: 1}}
+	service := NewSettingsManagement(store, nil, nil, nil)
+	queue := attachSettingsTaskEnqueuer(service)
+	input := EmailSettingsInput{Revision: 1}
 	if err := service.TestEmailSettings(context.Background(), input, "not-an-email"); err == nil {
 		t.Fatal("invalid recipient accepted")
 	}
 	if err := service.TestEmailSettings(context.Background(), input, "real@example.com\r\n"); err != nil {
 		t.Fatal(err)
 	}
-	if len(mailer.messages) != 1 || mailer.messages[0].To != "real@example.com" {
-		t.Fatalf("normalized recipient = %#v", mailer.messages)
+	if len(queue.tasks) != 1 || queue.tasks[0].RecipientEmail != "real@example.com" {
+		t.Fatalf("normalized recipient = %#v", queue.tasks)
 	}
 }
 

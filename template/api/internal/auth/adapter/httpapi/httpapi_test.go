@@ -84,6 +84,17 @@ func request(handler http.Handler, method, path, body string, origin bool) *http
 	return recorder
 }
 
+func TestMailTaskDeleteRouteAllowsMethodPreflight(t *testing.T) {
+	expected, ok := expectedMethods("/api/mail-tasks/019535d9-3df7-79fb-b466-fa907fa17f9e")
+	if !ok || !methodAllowed(expected, http.MethodDelete) {
+		t.Fatalf("mail-task item methods = %q, ok=%v; DELETE must be allowed", expected, ok)
+	}
+	expected, ok = expectedMethods("/api/settings/email/test/019535d9-3df7-79fb-b466-fa907fa17f9e")
+	if !ok || !methodAllowed(expected, http.MethodGet) || methodAllowed(expected, http.MethodPost) {
+		t.Fatalf("test-task status methods = %q, ok=%v; only GET must be allowed", expected, ok)
+	}
+}
+
 func TestStrictJSONAndOrigin(t *testing.T) {
 	setup := &setupFake{status: application.SetupRequired}
 	handler := NewHandler(setup, &authFake{}, testConfig())

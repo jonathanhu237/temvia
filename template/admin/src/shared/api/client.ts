@@ -13,6 +13,10 @@ import {
 	passwordResetCompleteInputSchema,
 	passwordResetRequestInputSchema,
 	emailSettingsResponseSchema,
+  emailTasksResponseSchema,
+  emailTaskResponseSchema,
+  emailTaskBulkResponseSchema,
+  submittedEmailTaskResponseSchema,
 	operationalWarningsSchema,
 	operationLogRetentionSchema,
 	operationLogResponseSchema,
@@ -44,6 +48,7 @@ import {
   type Invitation,
 	  type RoleOption,
   type EmailSettings,
+  type EmailTask,
   type OperationLog,
   type SystemIdentity,
   type EmailChange,
@@ -115,8 +120,15 @@ export interface ApiClient {
 	requestPasswordReset(input: { email: string }, signal?: AbortSignal): Promise<void>
 	completePasswordReset(input: { token: string; password: string }, signal?: AbortSignal): Promise<void>
 	getEmailSettings?(signal?: AbortSignal): Promise<EmailSettings>
-	saveEmailSettings?(input: { host: string; port: number; security: 'none' | 'starttls' | 'tls'; username: string; password?: string; clearPassword?: boolean; fromAddress: string; fromName: string; defaultLocale: 'en' | 'zh-CN'; revision: number }, signal?: AbortSignal): Promise<EmailSettings>
-	testEmailSettings?(input: { host: string; port: number; security: 'none' | 'starttls' | 'tls'; username: string; password?: string; clearPassword?: boolean; fromAddress: string; fromName: string; defaultLocale: 'en' | 'zh-CN'; revision?: number; recipient: string }, signal?: AbortSignal): Promise<void>
+	saveEmailSettings?(input: { host: string; port: number; security: 'none' | 'starttls' | 'tls'; username: string; password?: string; clearPassword?: boolean; fromAddress: string; fromName: string; defaultLocale: 'en' | 'zh-CN'; autoRetryCount?: number; retentionDays?: number; revision: number }, signal?: AbortSignal): Promise<EmailSettings>
+	testEmailSettings?(input: { recipient: string }, signal?: AbortSignal): Promise<{ status: 'accepted'; task?: EmailTask } | void>
+  getEmailTasks?(options?: { cursor?: string; limit?: number; recipient?: string; kind?: string; purpose?: string; status?: 'queued' | 'sending' | 'waiting_retry' | 'sent' | 'failed'; from?: string; to?: string; failedOnly?: boolean }, signal?: AbortSignal): Promise<{ tasks: EmailTask[]; nextCursor?: string }>
+  getEmailTask?(id: string, signal?: AbortSignal): Promise<EmailTask>
+  retryEmailTask?(id: string, signal?: AbortSignal): Promise<EmailTask>
+  deleteEmailTask?(id: string, signal?: AbortSignal): Promise<void>
+  retryEmailTasks?(ids: string[], signal?: AbortSignal): Promise<{ succeeded: number; skipped: number; failed: number; items: Array<{ id: string; result: 'succeeded' | 'skipped' | 'failed'; code?: string }> }>
+  deleteEmailTasks?(ids: string[], signal?: AbortSignal): Promise<{ succeeded: number; skipped: number; failed: number; items: Array<{ id: string; result: 'succeeded' | 'skipped' | 'failed'; code?: string }> }>
+  getSubmittedTestEmailStatus?(id: string, signal?: AbortSignal): Promise<EmailTask>
 	getOperationalWarnings?(signal?: AbortSignal): Promise<{ warnings: Array<{ key: string; severity: string }> }>
 	getOperationLogStatus?(signal?: AbortSignal): Promise<{ state: 'unknown' | 'healthy' | 'failed' | 'recovered'; failureCount: number; lastFailureAt?: string; lastSuccessAt?: string }>
 	getOperationLogs?(options?: { cursor?: string; limit?: number; from?: string; to?: string; actorId?: string; action?: string; objectType?: string; objectId?: string; result?: 'success' | 'failure' }, signal?: AbortSignal): Promise<{ logs: OperationLog[]; nextCursor?: string }>
@@ -270,7 +282,17 @@ export function createApiClient(): ApiClient {
 	    },
 		getEmailSettings: async (signal) => (await request('/api/settings/email', emailSettingsResponseSchema, { signal, expectedStatus: 200 })).email,
 		saveEmailSettings: async (input, signal) => (await request('/api/settings/email', emailSettingsResponseSchema, { method: 'PUT', body: input, signal, expectedStatus: 200 })).email,
-		testEmailSettings: async (input, signal) => { await request('/api/settings/email/test', passwordResetAcceptedSchema, { method: 'POST', body: input, signal, expectedStatus: 202 }) },
+		testEmailSettings: async (input, signal) => request('/api/settings/email/test', submittedEmailTaskResponseSchema, { method: 'POST', body: input, signal, expectedStatus: 202 }),
+    getEmailTasks: async (options, signal) => {
+      const query = new URLSearchParams(); if (options?.cursor) query.set('cursor', options.cursor); if (options?.limit !== undefined) query.set('limit', String(options.limit)); if (options?.recipient) query.set('recipient', options.recipient); if (options?.kind) query.set('kind', options.kind); else if (options?.purpose) query.set('purpose', options.purpose); if (options?.status) query.set('status', options.status); if (options?.from) query.set('from', options.from); if (options?.to) query.set('to', options.to); if (options?.failedOnly) query.set('failedOnly', 'true')
+      return request(`/api/mail-tasks${query.size ? `?${query.toString()}` : ''}`, emailTasksResponseSchema, { signal, expectedStatus: 200 })
+    },
+    getEmailTask: async (id, signal) => (await request(`/api/mail-tasks/${encodeURIComponent(id)}`, emailTaskResponseSchema, { signal, expectedStatus: 200 })).task,
+    retryEmailTask: async (id, signal) => (await request(`/api/mail-tasks/${encodeURIComponent(id)}/retry`, emailTaskResponseSchema, { method: 'POST', signal, expectedStatus: 200 })).task,
+    deleteEmailTask: async (id, signal) => { await request(`/api/mail-tasks/${encodeURIComponent(id)}`, { parse: (value: unknown) => value as undefined }, { method: 'DELETE', signal, expectedStatus: 204 }) },
+    retryEmailTasks: async (ids, signal) => request('/api/mail-tasks/bulk-retry', emailTaskBulkResponseSchema, { method: 'POST', body: { ids }, signal, expectedStatus: 200 }),
+    deleteEmailTasks: async (ids, signal) => request('/api/mail-tasks/bulk-delete', emailTaskBulkResponseSchema, { method: 'POST', body: { ids }, signal, expectedStatus: 200 }),
+    getSubmittedTestEmailStatus: async (id, signal) => (await request(`/api/settings/email/test/${encodeURIComponent(id)}`, emailTaskResponseSchema, { signal, expectedStatus: 200 })).task,
 		getOperationalWarnings: async (signal) => request('/api/operational-warnings', operationalWarningsSchema, { signal, expectedStatus: 200 }),
 		getOperationLogStatus: async (signal) => request('/api/operation-logs/status', operationLogStatusSchema, { signal, expectedStatus: 200 }),
 		getOperationLogs: async (options, signal) => {

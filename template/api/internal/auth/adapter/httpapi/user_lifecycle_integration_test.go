@@ -22,6 +22,11 @@ func TestUserLifecycleHTTPIntegration(t *testing.T) {
 	cfg.LoginGlobalRefillInterval = time.Millisecond
 	cfg.LoginEmailRefillInterval = time.Millisecond
 	store := postgresadapter.NewStore(db, cfg)
+	mailTaskBox, err := application.NewMailTaskSecretBox(bytes.Repeat([]byte{0x6d}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.SetMailTaskSecretBox(mailTaskBox)
 	hasher, err := password.NewHasher(2)
 	if err != nil {
 		t.Fatal(err)

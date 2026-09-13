@@ -64,6 +64,15 @@ func TestPersonalSettingsHTTPPostgresIntegration(t *testing.T) {
 		personal,
 	)
 	dispatcher := application.NewMailDispatcher(sessions, mailer, application.CryptoRandom(), cfg.PasswordResetTokenKey, cfg.PublicURL, 0, time.Minute, time.Millisecond, time.Second, cfg.InvitationTokenKey, cfg.EmailChangeCodeKey)
+	mailTaskBox, err := application.NewMailTaskSecretBox(cfg.PasswordResetTokenKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The store and worker must share the generated material key. Without this
+	// explicit fixture wiring the worker correctly treats persisted messages as
+	// an unavailable dependency and the HTTP verification journey never reaches
+	// the test mailer.
+	dispatcher.SetMailTaskSecretBox(mailTaskBox)
 
 	var cookies []*http.Cookie
 	t.Cleanup(func() {

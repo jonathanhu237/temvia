@@ -427,6 +427,16 @@ func operationErrorCode(err error) string {
 		return "avatar_not_found"
 	case errors.Is(err, application.ErrInvitationInvalid):
 		return "invalid_invitation"
+	case errors.Is(err, application.ErrMailTaskNotFound):
+		return "not_found"
+	case errors.Is(err, application.ErrMailTaskSending):
+		return "mail_task_sending"
+	case errors.Is(err, application.ErrMailTaskNotRetryable):
+		return "mail_task_not_retryable"
+	case errors.Is(err, application.ErrMailSettingsNotSaved):
+		return "mail_settings_not_saved"
+	case errors.Is(err, application.ErrMailTaskDependency), errors.Is(err, application.ErrMailTaskNotConfigured):
+		return "mail_task_dependency"
 	default:
 		return "operation_failed"
 	}
@@ -505,16 +515,18 @@ func roleIDs(roles []domain.Role) []string {
 
 func emailSettingsSnapshot(view application.EmailSettingsView) map[string]any {
 	return map[string]any{
-		"configured":    view.Configured,
-		"host":          view.Host,
-		"port":          view.Port,
-		"security":      view.Security,
-		"username":      view.Username,
-		"passwordSet":   view.PasswordSet,
-		"fromAddress":   view.FromAddress,
-		"fromName":      view.FromName,
-		"defaultLocale": view.DefaultLocale,
-		"revision":      view.Revision,
+		"configured":     view.Configured,
+		"host":           view.Host,
+		"port":           view.Port,
+		"security":       view.Security,
+		"username":       view.Username,
+		"passwordSet":    view.PasswordSet,
+		"fromAddress":    view.FromAddress,
+		"fromName":       view.FromName,
+		"defaultLocale":  view.DefaultLocale,
+		"autoRetryCount": view.AutoRetryCount,
+		"retentionDays":  view.RetentionDays,
+		"revision":       view.Revision,
 	}
 }
 

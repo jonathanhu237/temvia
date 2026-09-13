@@ -40,9 +40,10 @@ func (s *Store) RequestPasswordReset(ctx context.Context, canonical string, sele
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE auth_mail_outbox
-		SET canceled_at = clock_timestamp(), last_error_code = 'superseded', lease_token = NULL, lease_expires_at = NULL
+		SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), last_error_code = 'superseded', lease_token = NULL, lease_expires_at = NULL
 		WHERE user_id = $1::uuid AND kind = 'password_reset'
-		  AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, userID); err != nil {
+		  AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL
+		  AND material_ciphertext IS NULL`, userID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -55,11 +56,25 @@ func (s *Store) RequestPasswordReset(ctx context.Context, canonical string, sele
 		    created_at = EXCLUDED.created_at`, userID, selector, verifierDigest, ttl.Seconds()); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO auth_mail_outbox (kind, user_id, reset_selector, locale, expires_at, created_at)
-		SELECT 'password_reset', pr.user_id, pr.selector, $2, pr.expires_at, pr.created_at
+	var name, email, systemName string
+	var createdAt, expiresAt time.Time
+	if err := tx.QueryRowContext(ctx, `
+		SELECT u.name, u.email, pr.created_at, pr.expires_at
 		FROM auth_password_resets AS pr JOIN auth_users AS u ON u.id = pr.user_id
-		WHERE pr.user_id = $1::uuid AND u.disabled_at IS NULL`, userID, string(locale)); err != nil {
+		WHERE pr.user_id = $1::uuid AND u.disabled_at IS NULL`, userID).Scan(&name, &email, &createdAt, &expiresAt); err != nil {
+		return err
+	}
+	systemName, err = mailTaskSystemName(ctx, tx)
+	if err != nil {
+		return err
+	}
+	material, err := s.sealMailTaskMaterial(application.MailTaskMaterial{Version: 1, Kind: application.MailPasswordReset, Name: name, Email: email, Locale: locale, SystemName: systemName, CreatedAt: createdAt, ExpiresAt: expiresAt, ResetSelector: selector, VerifierDigest: verifierDigest})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auth_mail_outbox (kind, user_id, reset_selector, recipient_email, recipient_name, locale, system_name, material_ciphertext, expires_at, created_at)
+		VALUES ('password_reset', $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)`, userID, selector, email, name, string(locale), systemName, nullableBytes(material), expiresAt, createdAt); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -112,6 +127,16 @@ func (s *Store) CompletePasswordReset(ctx context.Context, selector, verifierDig
 	if !valid || !equalDigest(stored, verifierDigest) {
 		return time.Time{}, application.ErrInvalidPasswordResetToken
 	}
+	// Consume the reset generation without allowing a worker to claim another
+	// active copy between authority consumption and the update below.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE auth_mail_outbox
+		SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), last_error_code = 'superseded', lease_token = NULL, lease_expires_at = NULL
+		WHERE user_id = $1::uuid AND kind = 'password_reset'
+		  AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL
+		  AND material_ciphertext IS NULL`, userID); err != nil {
+		return time.Time{}, err
+	}
 
 	var changedAt time.Time
 	if err := tx.QueryRowContext(ctx, `
@@ -127,20 +152,22 @@ func (s *Store) CompletePasswordReset(ctx context.Context, selector, verifierDig
 	if _, err := tx.ExecContext(ctx, `DELETE FROM auth_password_resets WHERE user_id = $1::uuid`, userID); err != nil {
 		return time.Time{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE auth_mail_outbox
-		SET canceled_at = clock_timestamp(), last_error_code = 'superseded', lease_token = NULL, lease_expires_at = NULL
-		WHERE user_id = $1::uuid AND kind = 'password_reset'
-		  AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, userID); err != nil {
+	var recipientEmail, recipientName, systemName string
+	if err := tx.QueryRowContext(ctx, `SELECT email, name FROM auth_users WHERE id = $1::uuid`, userID).Scan(&recipientEmail, &recipientName); err != nil {
 		return time.Time{}, err
 	}
-	var recipientEmail string
-	if err := tx.QueryRowContext(ctx, `SELECT email FROM auth_users WHERE id = $1::uuid`, userID).Scan(&recipientEmail); err != nil {
+	systemName, err = mailTaskSystemName(ctx, tx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	expiresAt := changedAt.Add(notificationTTL)
+	material, err := s.sealMailTaskMaterial(application.MailTaskMaterial{Version: 1, Kind: application.MailPasswordChanged, Name: recipientName, Email: recipientEmail, Locale: locale, SystemName: systemName, CreatedAt: changedAt, ExpiresAt: expiresAt})
+	if err != nil {
 		return time.Time{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, locale, expires_at, created_at)
-		VALUES ('password_changed', $1::uuid, $2, $3, $4::timestamptz + ($5::double precision * INTERVAL '1 second'), $4::timestamptz)`, userID, recipientEmail, string(locale), changedAt, notificationTTL.Seconds()); err != nil {
+		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, recipient_name, locale, system_name, material_ciphertext, expires_at, created_at)
+		VALUES ('password_changed', $1::uuid, $2, $3, $4, $5, $6, $7, $8)`, userID, recipientEmail, recipientName, string(locale), systemName, nullableBytes(material), expiresAt, changedAt); err != nil {
 		return time.Time{}, err
 	}
 	if err := tx.Commit(); err != nil {

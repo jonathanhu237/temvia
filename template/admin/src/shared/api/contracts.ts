@@ -153,11 +153,47 @@ export const emailSettingsSchema = z.object({
   fromAddress: z.string().optional(),
   fromName: z.string().optional(),
   defaultLocale: z.enum(['en', 'zh-CN']).optional(),
+  autoRetryCount: z.number().int().nonnegative().optional(),
+  retentionDays: z.number().int().positive().optional(),
   revision: z.number().int().nonnegative(),
   updatedAt: z.string().optional(),
 }).strict()
 export type EmailSettings = z.infer<typeof emailSettingsSchema>
 export const emailSettingsResponseSchema = z.object({ email: emailSettingsSchema }).strict()
+
+export const emailTaskStatusSchema = z.enum(['queued', 'sending', 'waiting_retry', 'sent', 'failed'])
+export const emailTaskKindSchema = z.enum(['password_reset', 'password_changed', 'user_invitation', 'email_change_code', 'email_changed', 'test_email'])
+export const emailTaskAttemptSchema = z.object({
+  id: z.string().uuid().optional(),
+  round: z.number().int().positive().optional(),
+  attempt: z.number().int().positive().optional(),
+  outcome: z.enum(['sent', 'failed']),
+  errorCode: z.string().optional(),
+  occurredAt: z.string().datetime(),
+}).strict()
+export const emailTaskSchema = z.object({
+  id: z.string().uuid(),
+  kind: emailTaskKindSchema,
+  purpose: z.string().optional(),
+  recipientEmail: z.string(),
+  recipientName: z.string().optional(),
+  locale: z.enum(['en', 'zh-CN']),
+  status: emailTaskStatusSchema,
+  createdAt: z.string().datetime(),
+  availableAt: z.string().datetime().optional(),
+  finishedAt: z.string().datetime().optional(),
+  attemptCount: z.number().int().nonnegative(),
+  round: z.number().int().positive().optional(),
+  roundAttemptCount: z.number().int().nonnegative().optional(),
+  lastErrorCode: z.string().optional(),
+  attempts: z.array(emailTaskAttemptSchema).optional(),
+}).strict()
+export type EmailTask = z.infer<typeof emailTaskSchema>
+export const emailTasksResponseSchema = z.object({ tasks: z.array(emailTaskSchema), nextCursor: z.string().optional() }).strict()
+export const emailTaskResponseSchema = z.object({ task: emailTaskSchema }).strict()
+export const emailTaskBulkItemSchema = z.object({ id: z.string().uuid(), result: z.enum(['succeeded', 'skipped', 'failed']), code: z.string().optional() }).strict()
+export const emailTaskBulkResponseSchema = z.object({ succeeded: z.number().int().nonnegative(), skipped: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), items: z.array(emailTaskBulkItemSchema) }).strict()
+export const submittedEmailTaskResponseSchema = z.object({ status: z.literal('accepted'), task: emailTaskSchema.optional() }).strict()
 export const operationalWarningsSchema = z.object({ warnings: z.array(z.object({ key: z.string(), severity: z.string() }).strict()) }).strict()
 
 export const systemIdentitySchema = z.object({

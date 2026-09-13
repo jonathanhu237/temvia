@@ -368,6 +368,8 @@ const permissionLabelKeys: Record<string, string> = {
   'settings.read': 'permissionSettingsRead',
   'settings.write': 'permissionSettingsWrite',
   'operation-logs.read': 'permissionOperationLogsRead',
+  'mail-tasks.read': 'permissionMailTasksRead',
+  'mail-tasks.write': 'permissionMailTasksWrite',
 }
 
 const permissionDescriptionKeys: Record<string, string> = {
@@ -382,6 +384,8 @@ const permissionDescriptionKeys: Record<string, string> = {
   'settings.read': 'permissionSettingsReadDescription',
   'settings.write': 'permissionSettingsWriteDescription',
   'operation-logs.read': 'permissionOperationLogsReadDescription',
+  'mail-tasks.read': 'permissionMailTasksReadDescription',
+  'mail-tasks.write': 'permissionMailTasksWriteDescription',
 }
 
 function localizedPermission(key: string, t: (key: string) => string): string {
@@ -399,6 +403,7 @@ const resourceLabelKeys: Record<string, string> = {
   invitations: 'invitations',
   settings: 'settings',
   'operation-logs': 'operationLog',
+  'mail-tasks': 'emailTasks',
 }
 
 function localizedResource(resource: string, t: (key: string) => string): string {

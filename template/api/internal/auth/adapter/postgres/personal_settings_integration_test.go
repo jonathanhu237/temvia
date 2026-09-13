@@ -32,7 +32,7 @@ func TestPersonalSettingsStoreIntegrationEmailAuthorities(t *testing.T) {
 		}
 	})
 
-	store := NewStore(db)
+	store := newTestStore(db)
 	key := bytes.Repeat([]byte{0x42}, domain.PasswordResetVerifierBytes)
 	insertPersonalStoreUser(t, ctx, db, "00000000-0000-4000-8000-000000000101", "Cooldown owner", "cooldown-owner@example.com")
 
@@ -67,12 +67,25 @@ func TestPersonalSettingsStoreIntegrationEmailAuthorities(t *testing.T) {
 	if _, err := store.RequestEmailChange(ctx, first.UserID, thirdEmail, thirdSelector, thirdDigest, application.EmailChangeValidity, domain.LocaleEnglish); !errors.Is(err, application.ErrEmailChangeResendTooSoon) {
 		t.Fatalf("exhausted early replacement error = %v, want cooldown", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE auth_email_change_requests SET created_at = clock_timestamp() - interval '2 seconds', resend_after = clock_timestamp() - interval '1 second' WHERE user_id = $1::uuid`, first.UserID); err != nil {
+	// Mark the cooldown elapsed without moving created_at. Keeping the
+	// authority timestamp intact satisfies resend_after >= created_at and lets
+	// the replacement assertion exercise timestamp preservation.
+	if _, err := db.ExecContext(ctx, `UPDATE auth_email_change_requests SET resend_after = created_at WHERE user_id = $1::uuid`, first.UserID); err != nil {
 		t.Fatal(err)
 	}
 	replaced, err := store.RequestEmailChange(ctx, first.UserID, thirdEmail, thirdSelector, thirdDigest, application.EmailChangeValidity, domain.LocaleEnglish)
 	if err != nil || replaced.NewEmail != thirdEmail.Display || replaced.AttemptsRemaining != application.EmailChangeMaxAttempts || replaced.Revision != first.Revision+1 {
 		t.Fatalf("replacement after cooldown did not start a fresh request: attempts %d revision %d error %v", replaced.AttemptsRemaining, replaced.Revision, err)
+	}
+	if !replaced.CreatedAt.Equal(first.CreatedAt) {
+		t.Fatalf("replacement changed the authority creation timestamp: got %s, want %s", replaced.CreatedAt, first.CreatedAt)
+	}
+	var resentTaskCreatedAt time.Time
+	if err := db.QueryRowContext(ctx, `SELECT created_at FROM auth_mail_outbox WHERE email_change_request_id = $1::uuid ORDER BY created_at DESC LIMIT 1`, replaced.ID).Scan(&resentTaskCreatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !resentTaskCreatedAt.After(first.CreatedAt) {
+		t.Fatalf("resent task creation timestamp = %s, want after original request %s", resentTaskCreatedAt, first.CreatedAt)
 	}
 	if _, _, err := store.CompleteEmailChange(ctx, first.UserID, first.ID, first.VerifierDigest, domain.LocaleEnglish, time.Hour); !errors.Is(err, application.ErrInvalidEmailChange) {
 		t.Fatalf("superseded code completion error = %v, want invalid request", err)
@@ -125,7 +138,9 @@ func TestPersonalSettingsStoreIntegrationEmailAuthorities(t *testing.T) {
 	if requestRows != 1 || activeCodeJobs != 1 {
 		t.Fatalf("concurrent request durable rows = %d request, %d active code jobs; want one each", requestRows, activeCodeJobs)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE auth_email_change_requests SET created_at = clock_timestamp() - interval '2 seconds', resend_after = clock_timestamp() - interval '1 second' WHERE user_id = $1::uuid`, concurrentRequestUser); err != nil {
+	// Expire the cooldown using the already-valid authority timestamp instead
+	// of backdating created_at and changing the value the fixture later checks.
+	if _, err := db.ExecContext(ctx, `UPDATE auth_email_change_requests SET resend_after = created_at WHERE user_id = $1::uuid`, concurrentRequestUser); err != nil {
 		t.Fatal(err)
 	}
 	resendResults := make(chan error, 8)
@@ -162,8 +177,8 @@ func TestPersonalSettingsStoreIntegrationEmailAuthorities(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_mail_outbox WHERE user_id = $1::uuid AND kind = 'email_change_code' AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, concurrentRequestUser).Scan(&activeCodeJobs); err != nil {
 		t.Fatal(err)
 	}
-	if activeCodeJobs != 1 {
-		t.Fatalf("concurrent resend active code jobs = %d, want one", activeCodeJobs)
+	if activeCodeJobs != 2 {
+		t.Fatalf("concurrent resend active code jobs = %d, want two durable code snapshots", activeCodeJobs)
 	}
 
 	// Failed code submissions are decremented by the locked request row. Ten

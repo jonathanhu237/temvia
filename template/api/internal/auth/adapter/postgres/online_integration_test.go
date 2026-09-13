@@ -21,13 +21,22 @@ func TestRevokeSessionsIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	ctx := context.Background()
-	s := NewStore(db)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if err := resetAuthState(cleanupCtx, db); err != nil {
+			t.Errorf("reset online integration state: %v", err)
+		}
+		if err := db.Close(); err != nil {
+			t.Errorf("close online integration database: %v", err)
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	s := newTestStore(db)
 	if err := resetAuthState(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	defer resetAuthState(ctx, db)
 	digest := sha256.Sum256([]byte("online setup"))
 	if _, err := s.ReplaceCurrentToken(ctx, digest[:], time.Hour); err != nil {
 		t.Fatal(err)

@@ -6,14 +6,21 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
-	"html"
 	"net/mail"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"example.com/temvia/api/internal/auth/domain"
+)
+
+const (
+	DefaultAutoRetryCount    = MailTaskDefaultRetryCount
+	MinAutoRetryCount        = MailTaskMinRetryCount
+	MaxAutoRetryCount        = MailTaskMaxRetryCount
+	DefaultMailRetentionDays = MailTaskDefaultRetentionDays
+	MinMailRetentionDays     = MailTaskMinRetentionDays
+	MaxMailRetentionDays     = MailTaskMaxRetentionDays
 )
 
 // EmailSettingsRecord is the encrypted persistence projection. PasswordCiphertext
@@ -27,6 +34,8 @@ type EmailSettingsRecord struct {
 	FromAddress        string
 	FromName           string
 	DefaultLocale      domain.Locale
+	AutoRetryCount     int
+	RetentionDays      int
 	Revision           int64
 	UpdatedAt          time.Time
 }
@@ -37,30 +46,34 @@ type EmailSettingsStore interface {
 }
 
 type EmailSettingsView struct {
-	Configured    bool
-	Host          string
-	Port          int
-	Security      string
-	Username      string
-	PasswordSet   bool
-	FromAddress   string
-	FromName      string
-	DefaultLocale domain.Locale
-	Revision      int64
-	UpdatedAt     time.Time
+	Configured     bool
+	Host           string
+	Port           int
+	Security       string
+	Username       string
+	PasswordSet    bool
+	FromAddress    string
+	FromName       string
+	DefaultLocale  domain.Locale
+	AutoRetryCount int
+	RetentionDays  int
+	Revision       int64
+	UpdatedAt      time.Time
 }
 
 type EmailSettingsInput struct {
-	Host          string
-	Port          int
-	Security      string
-	Username      string
-	Password      *string
-	ClearPassword bool
-	FromAddress   string
-	FromName      string
-	DefaultLocale string
-	Revision      int64
+	Host           string
+	Port           int
+	Security       string
+	Username       string
+	Password       *string
+	ClearPassword  bool
+	FromAddress    string
+	FromName       string
+	DefaultLocale  string
+	AutoRetryCount *int
+	RetentionDays  *int
+	Revision       int64
 }
 
 type SMTPSettings struct {
@@ -86,6 +99,7 @@ type SettingsManagement struct {
 	identity    SystemIdentityProvider
 	production  bool
 	mailLimiter TestEmailLimiter
+	mailTasks   MailTaskStore
 	// saveMu serializes the commit and runtime reload pair. Without one
 	// critical section, two successful saves could reload their mailers in the
 	// opposite order and leave the runtime using an older committed revision.
@@ -114,13 +128,19 @@ func (s *SettingsManagement) SetSystemIdentityProvider(identity SystemIdentityPr
 	}
 }
 
+func (s *SettingsManagement) SetMailTaskEnqueuer(enqueuer MailTaskStore) {
+	if s != nil {
+		s.mailTasks = enqueuer
+	}
+}
+
 func (s *SettingsManagement) GetEmailSettings(ctx context.Context) (EmailSettingsView, error) {
 	if s == nil || s.store == nil {
 		return EmailSettingsView{}, ErrDependencyUnavailable
 	}
 	record, err := s.store.GetEmailSettings(ctx)
 	if errors.Is(err, ErrMailNotConfigured) {
-		return EmailSettingsView{}, nil
+		return EmailSettingsView{AutoRetryCount: DefaultAutoRetryCount, RetentionDays: DefaultMailRetentionDays}, nil
 	}
 	if err != nil {
 		return EmailSettingsView{}, dependencyError(err)
@@ -135,9 +155,6 @@ func (s *SettingsManagement) SaveEmailSettings(ctx context.Context, input EmailS
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 	input = normalizeEmailSettingsInput(input)
-	if err := validateEmailSettingsInput(input, s.production); err != nil {
-		return EmailSettingsView{}, err
-	}
 	current, currentErr := s.store.GetEmailSettings(ctx)
 	hasCurrent := currentErr == nil
 	if currentErr != nil && !errors.Is(currentErr, ErrMailNotConfigured) {
@@ -146,15 +163,21 @@ func (s *SettingsManagement) SaveEmailSettings(ctx context.Context, input EmailS
 	if input.Revision < 0 || (hasCurrent && input.Revision != current.Revision) || (!hasCurrent && input.Revision != 0) {
 		return EmailSettingsView{}, ErrStaleRevision
 	}
+	input = applyMailPolicyDefaults(input, current, hasCurrent)
+	if err := validateEmailSettingsInput(input, s.production); err != nil {
+		return EmailSettingsView{}, err
+	}
 	record := EmailSettingsRecord{
-		Host:          strings.TrimSpace(input.Host),
-		Port:          input.Port,
-		Security:      strings.ToLower(strings.TrimSpace(input.Security)),
-		Username:      strings.TrimSpace(input.Username),
-		FromAddress:   strings.TrimSpace(input.FromAddress),
-		FromName:      strings.TrimSpace(input.FromName),
-		DefaultLocale: domain.Locale(input.DefaultLocale),
-		Revision:      input.Revision,
+		Host:           strings.TrimSpace(input.Host),
+		Port:           input.Port,
+		Security:       strings.ToLower(strings.TrimSpace(input.Security)),
+		Username:       strings.TrimSpace(input.Username),
+		FromAddress:    strings.TrimSpace(input.FromAddress),
+		FromName:       strings.TrimSpace(input.FromName),
+		DefaultLocale:  domain.Locale(input.DefaultLocale),
+		AutoRetryCount: valueOrDefault(input.AutoRetryCount, DefaultAutoRetryCount),
+		RetentionDays:  valueOrDefault(input.RetentionDays, DefaultMailRetentionDays),
+		Revision:       input.Revision,
 	}
 	password, ciphertext, err := s.resolveSMTPPassword(input, current, hasCurrent, true)
 	if err != nil {
@@ -182,6 +205,55 @@ func (s *SettingsManagement) SaveEmailSettings(ctx context.Context, input EmailS
 		s.runtime.Reload(mailer)
 	}
 	return emailSettingsView(record), nil
+}
+
+func applyMailPolicyDefaults(input EmailSettingsInput, current EmailSettingsRecord, hasCurrent bool) EmailSettingsInput {
+	if input.AutoRetryCount == nil {
+		value := DefaultAutoRetryCount
+		if hasCurrent && current.AutoRetryCount >= MinAutoRetryCount && current.AutoRetryCount <= MaxAutoRetryCount {
+			value = current.AutoRetryCount
+		}
+		input.AutoRetryCount = &value
+	}
+	if input.RetentionDays == nil {
+		value := DefaultMailRetentionDays
+		if hasCurrent && current.RetentionDays >= MinMailRetentionDays && current.RetentionDays <= MaxMailRetentionDays {
+			value = current.RetentionDays
+		}
+		input.RetentionDays = &value
+	}
+	return input
+}
+
+func valueOrDefault(value *int, fallback int) int {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+// CurrentMailer resolves SMTP settings from the shared persistence layer on
+// every delivery. It deliberately does not return the process-local runtime
+// sender: another API instance may have committed a newer revision.
+func (s *SettingsManagement) CurrentMailer(ctx context.Context) (Mailer, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrDependencyUnavailable
+	}
+	record, err := s.store.GetEmailSettings(ctx)
+	if errors.Is(err, ErrMailNotConfigured) {
+		return nil, ErrMailNotConfigured
+	}
+	if err != nil {
+		return nil, dependencyError(err)
+	}
+	mailer, err := s.mailerForRecord(record)
+	if err != nil {
+		return nil, dependencyError(err)
+	}
+	if mailer == nil {
+		return nil, ErrDependencyUnavailable
+	}
+	return mailer, nil
 }
 
 func (s *SettingsManagement) DefaultMailLocale(ctx context.Context) (domain.Locale, error) {
@@ -234,106 +306,129 @@ func (s *SettingsManagement) LoadRuntime(ctx context.Context) error {
 	return s.applyRuntime(record)
 }
 
-// TestEmailSettings sends one message using the form snapshot. It deliberately
-// bypasses persistence and therefore cannot alter the saved configuration.
+// TestEmailSettings submits a normal durable test task using the saved
+// configuration. It intentionally does not send synchronously.
 func (s *SettingsManagement) TestEmailSettings(ctx context.Context, input EmailSettingsInput, recipient string) error {
-	return s.testEmailSettings(ctx, "", input, recipient)
+	_, err := s.TestEmailSettingsTask(ctx, "", input, recipient)
+	return err
 }
 
-// TestEmailSettingsForActor applies the authenticated actor and recipient
-// buckets before resolving SMTP credentials or sending. The legacy method is
-// retained for embedders that do not have an actor identity at this seam.
+// TestEmailSettingsForActor applies the authenticated actor to the durable
+// test task so rate limits and operation ownership remain tied to the caller.
 func (s *SettingsManagement) TestEmailSettingsForActor(ctx context.Context, actorID string, input EmailSettingsInput, recipient string) error {
-	return s.testEmailSettings(ctx, actorID, input, recipient)
+	_, err := s.TestEmailSettingsTask(ctx, actorID, input, recipient)
+	return err
 }
 
-func (s *SettingsManagement) testEmailSettings(ctx context.Context, actorID string, input EmailSettingsInput, recipient string) error {
-	if s == nil || s.factory == nil {
-		return ErrDependencyUnavailable
+func (s *SettingsManagement) TestEmailSettingsTask(ctx context.Context, actorID string, input EmailSettingsInput, recipient string) (MailTask, error) {
+	if s == nil {
+		return MailTask{}, ErrDependencyUnavailable
+	}
+	if s.mailTasks == nil {
+		return MailTask{}, ErrDependencyUnavailable
+	}
+	if s.store == nil {
+		return MailTask{}, ErrDependencyUnavailable
 	}
 	input = normalizeEmailSettingsInput(input)
-	if err := validateEmailSettingsInput(input, s.production); err != nil {
-		return err
-	}
 	recipient = strings.TrimSpace(recipient)
 	parsedRecipient, err := mail.ParseAddress(recipient)
 	if err != nil || parsedRecipient.Address != recipient || strings.ContainsAny(recipient, "\r\n") {
-		return &domain.ValidationErrors{Items: []domain.FieldError{{Field: "recipient", Code: "invalid_email"}}}
+		return MailTask{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "recipient", Code: "invalid_email"}}}
 	}
 	canonicalRecipient, canonicalErr := domain.NewEmail(recipient)
 	if canonicalErr != nil {
-		return &domain.ValidationErrors{Items: []domain.FieldError{{Field: "recipient", Code: "invalid_email"}}}
+		return MailTask{}, &domain.ValidationErrors{Items: []domain.FieldError{{Field: "recipient", Code: "invalid_email"}}}
+	}
+	current, err := s.store.GetEmailSettings(ctx)
+	if errors.Is(err, ErrMailNotConfigured) {
+		return MailTask{}, ErrMailNotConfigured
+	}
+	if err != nil {
+		return MailTask{}, dependencyError(err)
+	}
+	// The public test endpoint submits only a recipient. Resolve the current
+	// revision from the saved row instead of requiring clients to mirror SMTP
+	// form fields or accidentally test an unsaved draft.
+	if input.Revision == 0 && strings.TrimSpace(input.Host) == "" && input.Port == 0 && strings.TrimSpace(input.Security) == "" && strings.TrimSpace(input.Username) == "" && strings.TrimSpace(input.FromAddress) == "" && strings.TrimSpace(input.FromName) == "" && strings.TrimSpace(input.DefaultLocale) == "" {
+		input.Revision = current.Revision
+	}
+	if input.Revision < 0 || input.Revision != current.Revision {
+		return MailTask{}, ErrStaleRevision
+	}
+	input = savedEmailSettingsInput(input, current)
+	if input.Password != nil || input.ClearPassword || !sameSavedEmailSettings(input, current) {
+		return MailTask{}, ErrMailSettingsNotSaved
+	}
+	if err := validateSavedMailSettings(current, s.production); err != nil {
+		return MailTask{}, err
 	}
 	if actorID != "" && s.mailLimiter != nil {
 		allowed, limitErr := s.mailLimiter.AllowTestEmail(ctx, actorID, canonicalRecipient.Canonical)
 		if limitErr != nil {
-			return dependencyError(limitErr)
+			return MailTask{}, dependencyError(limitErr)
 		}
 		if !allowed {
-			return ErrRateLimited
+			return MailTask{}, ErrRateLimited
 		}
-	}
-	var current EmailSettingsRecord
-	hasCurrent := false
-	if s.store == nil && input.Password == nil && !input.ClearPassword && strings.TrimSpace(input.Username) != "" {
-		return ErrDependencyUnavailable
-	}
-	if s.store != nil && input.Password == nil && !input.ClearPassword {
-		current, err = s.store.GetEmailSettings(ctx)
-		if errors.Is(err, ErrMailNotConfigured) {
-			// Preserve the existing unsaved no-auth snapshot behavior. An
-			// omitted password with a username still needs a persisted
-			// credential to reuse; an explicitly supplied password takes the
-			// branch above and does not depend on the saved configuration.
-			if strings.TrimSpace(input.Username) != "" {
-				return ErrMailNotConfigured
-			}
-			err = nil
-		} else if err != nil {
-			return dependencyError(err)
-		} else {
-			hasCurrent = true
-		}
-		// A no-auth test snapshot has no secret or runtime credential to
-		// protect, so retain the pre-existing ability to test it without a
-		// revision. Any path that could reuse or discard a saved credential
-		// remains covered by optimistic revision checking.
-		needsRevision := hasCurrent && (strings.TrimSpace(input.Username) != "" || len(current.PasswordCiphertext) > 0)
-		if input.Revision < 0 || (needsRevision && input.Revision != current.Revision) {
-			return ErrStaleRevision
-		}
-	}
-	password, _, err := s.resolveSMTPPassword(input, current, hasCurrent, false)
-	if err != nil {
-		return err
-	}
-	if !validSMTPCredentials(strings.TrimSpace(input.Username), password != "") {
-		return ErrInvalidMailSettings
 	}
 	systemName := DefaultSystemName
 	if s.identity != nil {
 		identity, identityErr := s.identity.CurrentSystemIdentity(ctx)
 		if identityErr != nil {
-			return identityErr
+			return MailTask{}, identityErr
 		}
 		systemName = identity.DisplayName()
 	}
-	mailer, err := s.factory(SMTPSettings{Host: strings.TrimSpace(input.Host), Port: input.Port, Security: strings.ToLower(strings.TrimSpace(input.Security)), Username: strings.TrimSpace(input.Username), Password: password, FromAddress: strings.TrimSpace(input.FromAddress), FromName: strings.TrimSpace(input.FromName)})
-	if err != nil {
-		return dependencyError(err)
+	locale := current.DefaultLocale
+	message := testMail(OutgoingMail{Kind: MailTest, SystemName: systemName, Name: "administrator", To: recipient, Locale: locale})
+	expires := time.Now().Add(time.Duration(current.RetentionDays) * 24 * time.Hour)
+	if current.RetentionDays < MinMailRetentionDays {
+		expires = time.Now().Add(time.Duration(DefaultMailRetentionDays) * 24 * time.Hour)
 	}
-	locale := domain.Locale(input.DefaultLocale)
-	message := OutgoingMail{MessageID: "temvia-settings-test-" + strconv.FormatInt(time.Now().UnixNano(), 10) + "@temvia", Kind: MailPasswordReset, SystemName: systemName, Name: "administrator", To: recipient, Locale: locale}
-	if locale == domain.LocaleChinese {
-		message.Subject = systemName + " 邮件服务测试"
-		message.Text = "这是一封 " + systemName + " 邮件服务测试邮件。"
-		message.HTML = "<p>这是一封 " + html.EscapeString(systemName) + " 邮件服务测试邮件。</p>"
-	} else {
-		message.Subject = systemName + " email service test"
-		message.Text = "This is a test email from " + systemName + "."
-		message.HTML = "<p>This is a test email from " + html.EscapeString(systemName) + ".</p>"
+	task, enqueueErr := s.mailTasks.EnqueueMailTask(ctx, MailTaskInput{Kind: MailTest, RecipientEmail: recipient, RecipientName: "administrator", Locale: locale, SystemName: systemName, ExpiresAt: expires, SubmittedBy: actorID, Message: &message})
+	if enqueueErr != nil {
+		return MailTask{}, dependencyError(enqueueErr)
 	}
-	return mailer.Send(ctx, message)
+	return task, nil
+}
+
+func isEmptyEmailSettingsProjection(input EmailSettingsInput) bool {
+	return strings.TrimSpace(input.Host) == "" && input.Port == 0 && strings.TrimSpace(input.Security) == "" && strings.TrimSpace(input.Username) == "" && strings.TrimSpace(input.FromAddress) == "" && strings.TrimSpace(input.FromName) == "" && strings.TrimSpace(input.DefaultLocale) == ""
+}
+
+func savedEmailSettingsInput(input EmailSettingsInput, current EmailSettingsRecord) EmailSettingsInput {
+	if isEmptyEmailSettingsProjection(input) {
+		input.Host = current.Host
+		input.Port = current.Port
+		input.Security = current.Security
+		input.Username = current.Username
+		input.FromAddress = current.FromAddress
+		input.FromName = current.FromName
+		input.DefaultLocale = string(current.DefaultLocale)
+	}
+	return input
+}
+
+func sameSavedEmailSettings(input EmailSettingsInput, current EmailSettingsRecord) bool {
+	return strings.TrimSpace(input.Host) == strings.TrimSpace(current.Host) &&
+		input.Port == current.Port &&
+		strings.ToLower(strings.TrimSpace(input.Security)) == strings.ToLower(strings.TrimSpace(current.Security)) &&
+		strings.TrimSpace(input.Username) == strings.TrimSpace(current.Username) &&
+		strings.TrimSpace(input.FromAddress) == strings.TrimSpace(current.FromAddress) &&
+		strings.TrimSpace(input.FromName) == strings.TrimSpace(current.FromName) &&
+		domain.Locale(input.DefaultLocale) == current.DefaultLocale
+}
+
+func validateSavedMailSettings(record EmailSettingsRecord, production bool) error {
+	input := EmailSettingsInput{Host: record.Host, Port: record.Port, Security: record.Security, Username: record.Username, FromAddress: record.FromAddress, FromName: record.FromName, DefaultLocale: string(record.DefaultLocale), AutoRetryCount: &record.AutoRetryCount, RetentionDays: &record.RetentionDays}
+	if err := validateEmailSettingsInput(input, production); err != nil {
+		return err
+	}
+	if !validSMTPCredentials(record.Username, len(record.PasswordCiphertext) > 0) {
+		return ErrInvalidMailSettings
+	}
+	return nil
 }
 
 type OperationalWarning struct {
@@ -382,7 +477,15 @@ func (s *SettingsManagement) mailerForSMTPSettings(record EmailSettingsRecord, p
 }
 
 func emailSettingsView(record EmailSettingsRecord) EmailSettingsView {
-	return EmailSettingsView{Configured: true, Host: record.Host, Port: record.Port, Security: record.Security, Username: record.Username, PasswordSet: len(record.PasswordCiphertext) > 0, FromAddress: record.FromAddress, FromName: record.FromName, DefaultLocale: record.DefaultLocale, Revision: record.Revision, UpdatedAt: record.UpdatedAt}
+	autoRetry := record.AutoRetryCount
+	if autoRetry < MinAutoRetryCount || autoRetry > MaxAutoRetryCount {
+		autoRetry = DefaultAutoRetryCount
+	}
+	retention := record.RetentionDays
+	if retention < MinMailRetentionDays || retention > MaxMailRetentionDays {
+		retention = DefaultMailRetentionDays
+	}
+	return EmailSettingsView{Configured: true, Host: record.Host, Port: record.Port, Security: record.Security, Username: record.Username, PasswordSet: len(record.PasswordCiphertext) > 0, FromAddress: record.FromAddress, FromName: record.FromName, DefaultLocale: record.DefaultLocale, AutoRetryCount: autoRetry, RetentionDays: retention, Revision: record.Revision, UpdatedAt: record.UpdatedAt}
 }
 
 func normalizeEmailSettingsInput(input EmailSettingsInput) EmailSettingsInput {
@@ -451,6 +554,12 @@ func (s *SettingsManagement) resolveSMTPPassword(input EmailSettingsInput, curre
 }
 
 func validateEmailSettingsInput(input EmailSettingsInput, production bool) error {
+	if input.AutoRetryCount == nil || *input.AutoRetryCount < MinAutoRetryCount || *input.AutoRetryCount > MaxAutoRetryCount {
+		return &domain.ValidationErrors{Items: []domain.FieldError{{Field: "autoRetryCount", Code: "invalid_retry_count"}}}
+	}
+	if input.RetentionDays == nil || *input.RetentionDays < MinMailRetentionDays || *input.RetentionDays > MaxMailRetentionDays {
+		return &domain.ValidationErrors{Items: []domain.FieldError{{Field: "retentionDays", Code: "invalid_retention_days"}}}
+	}
 	if strings.TrimSpace(input.Host) == "" || input.Port < 1 || input.Port > 65535 {
 		return ErrInvalidMailSettings
 	}

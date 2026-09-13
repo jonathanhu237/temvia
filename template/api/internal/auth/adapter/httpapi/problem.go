@@ -51,6 +51,10 @@ var problemCatalog = map[string]struct {
 	"internal-error":               {"Internal Server Error"},
 	"service-unavailable":          {"Service Unavailable"},
 	"mail-not-configured":          {"Mail Service Not Configured"},
+	"mail-task-not-found":          {"Mail Task Not Found"},
+	"mail-task-sending":            {"Mail Task Is Sending"},
+	"mail-task-not-retryable":      {"Mail Task Is Not Retryable"},
+	"mail-settings-not-saved":      {"Mail Settings Not Saved"},
 	"avatar-not-found":             {"Avatar Not Found"},
 	"permission-scope":             {"Permission Outside Actor Scope"},
 }
@@ -116,10 +120,18 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusNotFound, "avatar-not-found")
 	case applicationError(err, application.ErrRateLimited):
 		writeProblemWithCode(w, http.StatusTooManyRequests, "rate-limited", "rate_limited", "", nil)
-	case applicationError(err, application.ErrDependencyUnavailable), applicationError(err, application.ErrPasswordHashBusy):
+	case applicationError(err, application.ErrDependencyUnavailable), applicationError(err, application.ErrPasswordHashBusy), applicationError(err, application.ErrMailTaskDependency), applicationError(err, application.ErrMailTaskNotConfigured):
 		writeProblem(w, http.StatusServiceUnavailable, "service-unavailable")
 	case applicationError(err, application.ErrMailNotConfigured):
 		writeProblemWithCode(w, http.StatusServiceUnavailable, "mail-not-configured", "mail_not_configured", "", nil)
+	case applicationError(err, application.ErrMailSettingsNotSaved):
+		writeProblemWithCode(w, http.StatusConflict, "mail-settings-not-saved", "mail_settings_not_saved", "", nil)
+	case applicationError(err, application.ErrMailTaskNotFound):
+		writeProblem(w, http.StatusNotFound, "mail-task-not-found")
+	case applicationError(err, application.ErrMailTaskSending):
+		writeProblemWithCode(w, http.StatusConflict, "mail-task-sending", "mail_task_sending", "", nil)
+	case applicationError(err, application.ErrMailTaskNotRetryable):
+		writeProblemWithCode(w, http.StatusConflict, "mail-task-not-retryable", "mail_task_not_retryable", "", nil)
 	case applicationError(err, application.ErrPermissionScope):
 		writeProblemWithCode(w, http.StatusForbidden, "permission-scope", "permission_scope_forbidden", "", nil)
 	case applicationError(err, application.ErrInvalidMailSettings):

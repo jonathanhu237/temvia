@@ -23,20 +23,24 @@ type activeMailDelivery struct {
 }
 
 type MailDispatcher struct {
-	outbox         MailOutboxStore
-	mailer         Mailer
-	random         RandomSource
-	tokenKey       []byte
-	invitationKey  []byte
-	emailChangeKey []byte
-	publicURL      string
-	pollInterval   time.Duration
-	lease          time.Duration
-	retryInitial   time.Duration
-	retryMax       time.Duration
-	maxAttempts    int
-	now            func() time.Time
-	identity       SystemIdentityProvider
+	outbox          MailOutboxStore
+	mailer          Mailer
+	random          RandomSource
+	tokenKey        []byte
+	invitationKey   []byte
+	emailChangeKey  []byte
+	publicURL       string
+	pollInterval    time.Duration
+	lease           time.Duration
+	retryInitial    time.Duration
+	retryMax        time.Duration
+	maxAttempts     int
+	now             func() time.Time
+	identity        SystemIdentityProvider
+	materialBox     SecretBox
+	requireMaterial bool
+	retryPolicy     MailTaskRetryPolicyProvider
+	mailerProvider  MailerProvider
 
 	mu              sync.Mutex
 	stopping        bool
@@ -54,6 +58,34 @@ func derivePurposeKey(master []byte, purpose string) []byte {
 func (d *MailDispatcher) SetSystemIdentityProvider(identity SystemIdentityProvider) {
 	if d != nil {
 		d.identity = identity
+	}
+}
+
+// SetMailTaskSecretBox enables the generated durable path. It must be called
+// during server startup; without it only the deprecated legacy dispatcher
+// constructor path can compose material-less test fixtures.
+func (d *MailDispatcher) SetMailTaskSecretBox(box SecretBox) {
+	if d != nil {
+		d.materialBox = box
+		// Generated servers call this setter during startup. Once configured,
+		// an unencrypted task is a dependency failure rather than permission to
+		// reconstruct a message from mutable account state.
+		d.requireMaterial = true
+	}
+}
+
+func (d *MailDispatcher) SetMailRetryPolicyProvider(provider MailTaskRetryPolicyProvider) {
+	if d != nil {
+		d.retryPolicy = provider
+	}
+}
+
+// SetMailerProvider makes each delivery resolve the latest persisted SMTP
+// configuration instead of relying on a process-local sender. This is needed
+// when more than one API/dispatcher instance shares the database.
+func (d *MailDispatcher) SetMailerProvider(provider MailerProvider) {
+	if d != nil {
+		d.mailerProvider = provider
 	}
 }
 
@@ -165,7 +197,7 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 	if d.isStopping() {
 		return context.Canceled
 	}
-	if d.outbox == nil || d.mailer == nil || d.random == nil {
+	if d.outbox == nil || d.random == nil || (d.mailer == nil && d.mailerProvider == nil) {
 		return ErrDependencyUnavailable
 	}
 	if err := d.outbox.SweepMail(ctx); err != nil {
@@ -193,21 +225,22 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 	}
 	jobCtx, releaseJob := d.activeJobContext(ctx)
 	defer releaseJob()
-	if !d.now().Before(job.ExpiresAt) {
-		ackCtx, cancel := d.deliveryContext(jobCtx)
+	if len(job.EncryptedMaterial) == 0 && !d.requireMaterial && !d.now().Before(job.ExpiresAt) {
+		ackCtx, cancel := d.acknowledgementContext(jobCtx)
 		defer cancel()
 		discarded, discardErr := d.outbox.DiscardMail(ackCtx, job.ID, job.LeaseToken, "expired")
 		if discardErr != nil {
 			return dependencyError(discardErr)
 		}
 		if !discarded {
+			d.recordMailAttempt(ackCtx, *job, MailTaskOutcomeFailed, "expired")
 			return nil
 		}
 		return nil
 	}
 	message, err := d.compose(jobCtx, *job)
 	if err != nil {
-		ackCtx, cancel := d.deliveryContext(jobCtx)
+		ackCtx, cancel := d.acknowledgementContext(jobCtx)
 		defer cancel()
 		switch {
 		case errors.Is(err, ErrInvalidPasswordResetToken):
@@ -216,6 +249,7 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 				return dependencyError(discardErr)
 			}
 			if !discarded {
+				d.recordMailAttempt(ackCtx, *job, MailTaskOutcomeFailed, "invalid_reset")
 				return nil
 			}
 			return nil
@@ -225,6 +259,7 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 				return dependencyError(discardErr)
 			}
 			if !discarded {
+				d.recordMailAttempt(ackCtx, *job, MailTaskOutcomeFailed, "invalid_invitation")
 				return nil
 			}
 			return nil
@@ -234,6 +269,7 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 				return dependencyError(discardErr)
 			}
 			if !discarded {
+				d.recordMailAttempt(ackCtx, *job, MailTaskOutcomeFailed, "invalid_email_change")
 				return nil
 			}
 			return nil
@@ -245,8 +281,22 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 	}
 	deliveryCtx, cancelDelivery := d.deliveryContext(jobCtx)
 	defer cancelDelivery()
-	sendErr := d.mailer.Send(deliveryCtx, message)
-	ackCtx, cancelAck := d.deliveryContext(jobCtx)
+	mailer, mailerErr := d.resolveMailer(deliveryCtx)
+	if mailerErr != nil {
+		ackCtx, cancelAck := d.acknowledgementContext(jobCtx)
+		defer cancelAck()
+		if errors.Is(mailerErr, ErrMailNotConfigured) {
+			// The task schema intentionally exposes only the stable diagnostic
+			// vocabulary. Missing settings are a non-retryable configuration
+			// failure for this round and therefore map to "permanent".
+			mailerErr = &MailDeliveryError{Code: "permanent", Temporary: false}
+		} else {
+			mailerErr = &MailDeliveryError{Code: "dependency", Temporary: true}
+		}
+		return d.handleDeliveryFailure(ackCtx, *job, mailerErr)
+	}
+	sendErr := mailer.Send(deliveryCtx, message)
+	ackCtx, cancelAck := d.acknowledgementContext(jobCtx)
 	defer cancelAck()
 	if sendErr == nil {
 		marked, err := d.outbox.MarkMailSent(ackCtx, job.ID, job.LeaseToken)
@@ -257,6 +307,7 @@ func (d *MailDispatcher) ProcessOnce(ctx context.Context) error {
 		// lease expired. The SMTP send is still valid; there is no safe local
 		// state transition left to make.
 		if !marked {
+			d.recordMailAttempt(ackCtx, *job, MailTaskOutcomeSent, "")
 			return nil
 		}
 		return nil
@@ -336,6 +387,35 @@ func (d *MailDispatcher) deliveryContext(ctx context.Context) (context.Context, 
 	return context.WithTimeout(ctx, lease)
 }
 
+// acknowledgementContext is deliberately independent of the SMTP/worker
+// context. A timeout or shutdown cancellation must not prevent the worker from
+// recording the result it already obtained. The acknowledgement remains
+// bounded by the lease and deliberately ignores the parent deadline: an HTTP
+// request or shutdown signal may have expired by the time the worker obtains
+// an SMTP result, but the result still needs one final database attempt.
+func (d *MailDispatcher) acknowledgementContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	lease := d.lease
+	if lease <= 0 {
+		lease = 30 * time.Second
+	}
+	deadline := time.Now().Add(lease)
+	return context.WithDeadline(context.WithoutCancel(ctx), deadline)
+}
+
+func (d *MailDispatcher) recordMailAttempt(ctx context.Context, job MailJob, outcome, errorCode string) {
+	recorder, ok := d.outbox.(MailAttemptRecorder)
+	if !ok || job.ID == "" || job.Round <= 0 || job.RoundAttempts <= 0 {
+		return
+	}
+	// The result is best effort when the task was deleted or the database is
+	// unavailable. It must never make a stale worker resurrect a task or mask
+	// the primary delivery result.
+	_ = recorder.RecordMailAttempt(ctx, job.ID, job.Round, job.RoundAttempts, outcome, errorCode)
+}
+
 func boundedDetachedTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -350,7 +430,61 @@ func boundedDetachedTimeout(ctx context.Context, timeout time.Duration) (context
 	return context.WithDeadline(context.WithoutCancel(ctx), deadline)
 }
 
+func (d *MailDispatcher) resolveMailer(ctx context.Context) (Mailer, error) {
+	if d.mailerProvider != nil {
+		mailer, err := d.mailerProvider.CurrentMailer(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if mailer == nil {
+			return nil, ErrDependencyUnavailable
+		}
+		return mailer, nil
+	}
+	if d.mailer == nil {
+		return nil, ErrDependencyUnavailable
+	}
+	return d.mailer, nil
+}
+
 func (d *MailDispatcher) compose(ctx context.Context, job MailJob) (OutgoingMail, error) {
+	if len(job.EncryptedMaterial) > 0 {
+		return d.composePersistedMaterial(job)
+	}
+	if d.requireMaterial {
+		return OutgoingMail{}, &MailDeliveryError{Code: "dependency", Temporary: true}
+	}
+	return d.composeLegacy(ctx, job)
+}
+
+func (d *MailDispatcher) composePersistedMaterial(job MailJob) (OutgoingMail, error) {
+	if d.materialBox == nil {
+		return OutgoingMail{}, &MailDeliveryError{Code: "dependency", Temporary: true}
+	}
+	material, err := OpenMailTaskMaterial(d.materialBox, job.EncryptedMaterial)
+	if err != nil {
+		return OutgoingMail{}, &MailDeliveryError{Code: "dependency", Temporary: true}
+	}
+	if material.Message != nil {
+		message := *material.Message
+		message.MessageID = "temvia-outbox-" + job.ID + "@temvia"
+		return message, nil
+	}
+	stableJob := job
+	stableJob.Kind = material.Kind
+	stableJob.Name = material.Name
+	stableJob.Email = material.Email
+	stableJob.Locale = material.Locale
+	stableJob.SystemName = material.SystemName
+	stableJob.CreatedAt = material.CreatedAt
+	stableJob.ExpiresAt = material.ExpiresAt
+	stableJob.ResetSelector = append([]byte(nil), material.ResetSelector...)
+	stableJob.EmailChangeSelector = append([]byte(nil), material.EmailSelector...)
+	stableJob.VerifierDigest = append([]byte(nil), material.VerifierDigest...)
+	return d.composeSnapshot(stableJob)
+}
+
+func (d *MailDispatcher) composeLegacy(ctx context.Context, job MailJob) (OutgoingMail, error) {
 	identity := defaultSystemIdentityView()
 	if d.identity != nil {
 		loaded, err := d.identity.CurrentSystemIdentity(ctx)
@@ -359,10 +493,15 @@ func (d *MailDispatcher) compose(ctx context.Context, job MailJob) (OutgoingMail
 		}
 		identity = loaded
 	}
+	job.SystemName = identity.DisplayName()
+	return d.composeSnapshot(job)
+}
+
+func (d *MailDispatcher) composeSnapshot(job MailJob) (OutgoingMail, error) {
 	message := OutgoingMail{
 		MessageID:  "temvia-outbox-" + job.ID + "@temvia",
 		Kind:       job.Kind,
-		SystemName: identity.DisplayName(),
+		SystemName: job.SystemName,
 		Name:       job.Name,
 		To:         job.Email,
 		Locale:     job.Locale,
@@ -422,18 +561,56 @@ func (d *MailDispatcher) compose(ctx context.Context, job MailJob) (OutgoingMail
 
 func (d *MailDispatcher) handleDeliveryFailure(ctx context.Context, job MailJob, err error) error {
 	var deliveryErr *MailDeliveryError
-	if (job.Kind == MailPasswordReset || job.Kind == MailUserInvitation || job.Kind == MailEmailChangeCode) && !d.now().Before(job.ExpiresAt) {
+	if len(job.EncryptedMaterial) == 0 && !d.requireMaterial && (job.Kind == MailPasswordReset || job.Kind == MailUserInvitation || job.Kind == MailEmailChangeCode) && !d.now().Before(job.ExpiresAt) {
 		discarded, updateErr := d.outbox.DiscardMail(ctx, job.ID, job.LeaseToken, "expired")
 		if updateErr != nil {
 			return dependencyError(updateErr)
 		}
 		if !discarded {
+			d.recordMailAttempt(ctx, job, MailTaskOutcomeFailed, "expired")
 			return nil
 		}
 		return nil
 	}
-	if errors.As(err, &deliveryErr) && deliveryErr.Temporary && job.Attempts < d.maxAttempts && d.now().Before(job.ExpiresAt) {
-		delay, jitterErr := d.retryDelay(job.Attempts)
+	maxAttempts := d.maxAttempts
+	if d.retryPolicy != nil {
+		retries, policyErr := d.retryPolicy.CurrentMailRetryCount(ctx)
+		if policyErr != nil {
+			// Never substitute the default budget when the shared policy cannot
+			// be read: doing so could turn an explicitly configured zero-retry
+			// policy into automatic sends. Preserve the safe diagnostic and end
+			// this round instead.
+			deadLettered, updateErr := d.outbox.DeadLetterMail(ctx, job.ID, job.LeaseToken, "dependency")
+			if updateErr != nil {
+				return dependencyError(updateErr)
+			}
+			if !deadLettered {
+				d.recordMailAttempt(ctx, job, MailTaskOutcomeFailed, "dependency")
+				return nil
+			}
+			return nil
+		}
+		if retries < MailTaskMinRetryCount {
+			retries = MailTaskMinRetryCount
+		}
+		if retries > MailTaskMaxRetryCount {
+			retries = MailTaskMaxRetryCount
+		}
+		maxAttempts = retries + 1 // retry count excludes the initial attempt
+	}
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	roundAttempts := job.RoundAttempts
+	if roundAttempts <= 0 {
+		roundAttempts = job.Attempts
+	}
+	if errors.As(err, &deliveryErr) && deliveryErr.Temporary && roundAttempts < maxAttempts && (len(job.EncryptedMaterial) > 0 || d.now().Before(job.ExpiresAt)) {
+		delayAttempt := roundAttempts
+		if delayAttempt <= 0 {
+			delayAttempt = job.Attempts
+		}
+		delay, jitterErr := d.retryDelay(delayAttempt)
 		if jitterErr != nil {
 			delay = d.retryInitial
 		}
@@ -446,11 +623,16 @@ func (d *MailDispatcher) handleDeliveryFailure(ctx context.Context, job MailJob,
 		if d.retryMax > 0 && delay > d.retryMax {
 			delay = d.retryMax
 		}
-		retried, updateErr := d.outbox.RetryMail(ctx, job.ID, job.LeaseToken, delay, "temporary")
+		retryCode := "temporary"
+		if deliveryErr != nil && deliveryErr.Code == "dependency" {
+			retryCode = "dependency"
+		}
+		retried, updateErr := d.outbox.RetryMail(ctx, job.ID, job.LeaseToken, delay, retryCode)
 		if updateErr != nil {
 			return dependencyError(updateErr)
 		}
 		if !retried {
+			d.recordMailAttempt(ctx, job, MailTaskOutcomeFailed, retryCode)
 			return nil
 		}
 		return nil
@@ -460,6 +642,10 @@ func (d *MailDispatcher) handleDeliveryFailure(ctx context.Context, job MailJob,
 		switch deliveryErr.Code {
 		case "temporary", "permanent", "expired", "superseded", "invalid_reset", "invalid_invitation", "invalid_email_change", "dependency":
 			code = deliveryErr.Code
+		case "not_configured":
+			// Keep the persisted error vocabulary bounded; settings must be
+			// explicitly repaired before this failed task is retried.
+			code = "permanent"
 		}
 	}
 	deadLettered, updateErr := d.outbox.DeadLetterMail(ctx, job.ID, job.LeaseToken, code)
@@ -467,6 +653,7 @@ func (d *MailDispatcher) handleDeliveryFailure(ctx context.Context, job MailJob,
 		return dependencyError(updateErr)
 	}
 	if !deadLettered {
+		d.recordMailAttempt(ctx, job, MailTaskOutcomeFailed, code)
 		return nil
 	}
 	return nil
@@ -673,6 +860,20 @@ func changedMail(message OutgoingMail, changedAt time.Time, locale domain.Locale
 	message.Subject = "Your " + systemName + " password was changed"
 	message.Text = systemName + " · ACCOUNT SECURITY\n\nPASSWORD UPDATED\n\nHello " + message.Name + ",\n\nYour " + systemName + " password was changed at " + when + ".\n\nIf you did not make this change, contact your administrator immediately. Never share your password by email."
 	message.HTML = mailFrame(locale, systemName, "SECURITY STATUS · CONFIRMED", changedMailBody(locale, message.Name, when, systemName))
+	return message
+}
+
+func testMail(message OutgoingMail) OutgoingMail {
+	systemName := mailSystemName(message)
+	if message.Locale == domain.LocaleChinese {
+		message.Subject = systemName + " 邮件服务测试"
+		message.Text = "这是一封 " + systemName + " 邮件服务测试邮件。"
+		message.HTML = "<p>这是一封 " + html.EscapeString(systemName) + " 邮件服务测试邮件。</p>"
+		return message
+	}
+	message.Subject = systemName + " email service test"
+	message.Text = "This is a test email from " + systemName + "."
+	message.HTML = "<p>This is a test email from " + html.EscapeString(systemName) + ".</p>"
 	return message
 }
 

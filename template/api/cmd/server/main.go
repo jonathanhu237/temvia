@@ -70,18 +70,24 @@ func personalSettingsService(auth application.AccountStore, hasher application.P
 	return personal
 }
 
-func buildAuthHandler(setup httpapi.SetupService, auth httpapi.AuthenticationService, cfg config.Config, recovery httpapi.PasswordRecoveryService, access httpapi.AccessService, accept httpapi.InvitationAcceptanceService, settings httpapi.SettingsService, operations httpapi.OperationLogService, identity httpapi.SystemIdentityService, personal httpapi.PersonalSettingsService) http.Handler {
+func buildAuthHandler(setup httpapi.SetupService, auth httpapi.AuthenticationService, cfg config.Config, recovery httpapi.PasswordRecoveryService, access httpapi.AccessService, accept httpapi.InvitationAcceptanceService, settings httpapi.SettingsService, operations httpapi.OperationLogService, identity httpapi.SystemIdentityService, personal httpapi.PersonalSettingsService, mailTasks ...httpapi.MailTaskService) http.Handler {
 	if personal != nil {
-		return httpapi.NewHandlerWithAccessAndOperationLogAndIdentityAndPersonalSettings(setup, auth, cfg, recovery, access, accept, settings, operations, identity, personal)
+		return httpapi.NewHandlerWithAccessAndOperationLogAndIdentityAndPersonalSettings(setup, auth, cfg, recovery, access, accept, settings, operations, identity, personal, mailTasks...)
 	}
 	if identity != nil && operations != nil {
-		return httpapi.NewHandlerWithAccessAndOperationLogAndIdentity(setup, auth, cfg, recovery, access, accept, settings, operations, identity)
+		return httpapi.NewHandlerWithAccessAndOperationLogAndIdentity(setup, auth, cfg, recovery, access, accept, settings, operations, identity, mailTasks...)
 	}
 	if operations != nil {
-		return httpapi.NewHandlerWithAccessAndOperationLog(setup, auth, cfg, recovery, access, accept, settings, operations)
+		return httpapi.NewHandlerWithAccessAndOperationLog(setup, auth, cfg, recovery, access, accept, settings, operations, mailTasks...)
+	}
+	if settings != nil && len(mailTasks) > 0 {
+		return httpapi.NewHandlerWithAccessAndMailTasks(setup, auth, cfg, recovery, access, accept, settings, mailTasks[0])
 	}
 	if settings != nil {
 		return httpapi.NewHandlerWithAccess(setup, auth, cfg, recovery, access, accept, settings)
+	}
+	if len(mailTasks) > 0 {
+		return httpapi.NewHandlerWithMailTasks(setup, auth, cfg, recovery, mailTasks[0])
 	}
 	return httpapi.NewHandler(setup, auth, cfg, recovery)
 }
@@ -98,7 +104,7 @@ func newApplicationHandlerWithOperationLog(cfg config.Config, setup application.
 	return newApplicationHandlerWithOperationLogAndIdentity(cfg, setup, auth, hasher, sessions, limiter, random, recovery, settingsService, operationLogs, nil)
 }
 
-func newApplicationHandlerWithOperationLogAndIdentity(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery httpapi.PasswordRecoveryService, settingsService *application.SettingsManagement, operationLogs *application.OperationLogService, identity *application.SystemIdentityManagement) http.Handler {
+func newApplicationHandlerWithOperationLogAndIdentity(cfg config.Config, setup application.SetupStore, auth application.AccountStore, hasher application.PasswordHasher, sessions application.SessionStore, limiter application.LoginLimiter, random application.RandomSource, recovery httpapi.PasswordRecoveryService, settingsService *application.SettingsManagement, operationLogs *application.OperationLogService, identity *application.SystemIdentityManagement, mailTasks ...httpapi.MailTaskService) http.Handler {
 	setupService := application.NewSetup(setup, hasher, random, cfg.SetupLinkTTL, setupLimiter(limiter))
 	catalog := domain.DefaultPermissionCatalog()
 	authService := application.NewAuthentication(auth, hasher, sessions, limiter, random, catalog)
@@ -115,14 +121,14 @@ func newApplicationHandlerWithOperationLogAndIdentity(cfg config.Config, setup a
 			access.SetInvitationSendLimiter(invitationSendLimiter(store))
 			accept := application.NewInvitationAcceptance(store, hasher, cfg.InvitationTokenKey, invitationAcceptLimiter(store))
 			personal := personalSettingsService(auth, hasher, random, cfg, settingsService)
-			authHandler := buildAuthHandler(setupService, authService, cfg, recovery, access, accept, settingsService, operationLogs, identity, personal)
+			authHandler := buildAuthHandler(setupService, authService, cfg, recovery, access, accept, settingsService, operationLogs, identity, personal, mailTasks...)
 			mux.Handle("/api", authHandler)
 			mux.Handle("/api/", authHandler)
 			return mux
 		}
 	}
 	personal := personalSettingsService(auth, hasher, random, cfg, settingsService)
-	authHandler := buildAuthHandler(setupService, authService, cfg, recovery, nil, nil, nil, nil, nil, personal)
+	authHandler := buildAuthHandler(setupService, authService, cfg, recovery, nil, nil, nil, nil, nil, personal, mailTasks...)
 	mux.Handle("/api", authHandler)
 	mux.Handle("/api/", authHandler)
 	return mux
@@ -168,6 +174,15 @@ func run() int {
 			log.Fatalf("email settings encryption configuration failed: %v", err)
 		}
 	}
+	// Task material must remain decryptable when the optional SMTP-settings
+	// encryption key is added, removed, or rotated. Derive its purpose-specific
+	// key only from the required password-reset authority, whose rotation already
+	// has the intentional effect of invalidating password-reset credentials.
+	mailTaskSecretBox, err := application.NewMailTaskSecretBox(cfg.PasswordResetTokenKey)
+	if err != nil {
+		log.Fatalf("mail task encryption configuration failed: %v", err)
+	}
+	postgresStore.SetMailTaskSecretBox(mailTaskSecretBox)
 	runtimeMailer := application.NewReloadableMailer()
 	operationLogs := application.NewOperationLogService(postgresStore)
 	identityService := application.NewSystemIdentityManagement(postgresStore)
@@ -177,6 +192,7 @@ func run() int {
 	settingsService.SetProductionMode(cfg.Environment == "production")
 	settingsService.SetTestEmailLimiter(postgresStore)
 	settingsService.SetSystemIdentityProvider(identityService)
+	settingsService.SetMailTaskEnqueuer(postgresStore)
 	if err := settingsService.LoadRuntime(startupContext); err != nil {
 		log.Fatalf("email settings initialization failed: %v", err)
 	}
@@ -205,7 +221,11 @@ func run() int {
 		cfg.EmailChangeCodeKey,
 	)
 	dispatcher.SetSystemIdentityProvider(identityService)
-	handler := newApplicationHandlerWithOperationLogAndIdentity(cfg, postgresStore, postgresStore, hasher, postgresStore, postgresStore, random, recovery, settingsService, operationLogs, identityService)
+	dispatcher.SetMailTaskSecretBox(mailTaskSecretBox)
+	dispatcher.SetMailerProvider(settingsService)
+	dispatcher.SetMailRetryPolicyProvider(postgresStore)
+	mailTaskManagement := application.NewMailTaskManagement(postgresStore, postgresStore, domain.DefaultPermissionCatalog())
+	handler := newApplicationHandlerWithOperationLogAndIdentity(cfg, postgresStore, postgresStore, hasher, postgresStore, postgresStore, random, recovery, settingsService, operationLogs, identityService, mailTaskManagement)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,

@@ -21,6 +21,30 @@ Shared administrative configuration that applies throughout a Temvia administrat
 **Email configuration**:
 The shared delivery settings and default language for email sent by a Temvia administration app.
 
+**Email task（邮件任务）**:
+A request to send a system email to a recipient, whose delivery progress and outcome can be inspected. Email task management includes all delivery states, not only failures; it is distinct from a recipient's inbox.
+
+**Email task management（邮件任务管理）**:
+The administrative capability to inspect system email tasks with read access and retry or permanently delete them with write access. Its complete permission combination includes both read and write access and is independent of Email configuration management.
+
+**Email task retry（重试邮件任务）**:
+Another delivery attempt for a failed email using its original content. Retrying does not issue new security credentials or extend the validity of existing links or codes.
+
+**Email task status（邮件任务状态）**:
+A task's current delivery state: queued, sending, waiting to retry, sent, or failed. Sent means the SMTP service accepted the email, not confirmed inbox delivery; failed means the current sending round has ended.
+
+**Email sending attempt（邮件发送尝试）**:
+An individual attempt to deliver an email task, identified by its time, outcome, and safe failure explanation when applicable. Attempt records are retained with their task and removed when the task is deleted.
+
+**Automatic email retry count（自动重试次数）**:
+The maximum number of automatic delivery retries after an email's initial sending attempt. It excludes the initial attempt; zero disables automatic retries without removing the ability to retry manually.
+
+**Email task retention（邮件记录保留期限）**:
+The period for which completed email tasks and their resend content are retained before automatic deletion. Tasks still waiting to send or retry are not removed by this retention policy.
+
+**Email task deletion（删除邮件任务）**:
+Permanent removal of an email task and the content retained for sending it, without retaining a deleted-task placeholder. It does not recall copies already sent to an email service or recipient.
+
 **Email configuration management**:
 The administrative capability to configure and test email delivery. It permits using existing SMTP credentials for their configured connection, but does not grant access to retrieve those credentials.
 

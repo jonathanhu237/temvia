@@ -124,17 +124,19 @@ type invitationsResponse struct {
 }
 
 type emailSettingsResponse struct {
-	Configured    bool   `json:"configured"`
-	Host          string `json:"host,omitempty"`
-	Port          int    `json:"port,omitempty"`
-	Security      string `json:"security,omitempty"`
-	Username      string `json:"username,omitempty"`
-	PasswordSet   bool   `json:"passwordSet"`
-	FromAddress   string `json:"fromAddress,omitempty"`
-	FromName      string `json:"fromName,omitempty"`
-	DefaultLocale string `json:"defaultLocale,omitempty"`
-	Revision      int64  `json:"revision"`
-	UpdatedAt     string `json:"updatedAt,omitempty"`
+	Configured     bool   `json:"configured"`
+	Host           string `json:"host,omitempty"`
+	Port           int    `json:"port,omitempty"`
+	Security       string `json:"security,omitempty"`
+	Username       string `json:"username,omitempty"`
+	PasswordSet    bool   `json:"passwordSet"`
+	FromAddress    string `json:"fromAddress,omitempty"`
+	FromName       string `json:"fromName,omitempty"`
+	DefaultLocale  string `json:"defaultLocale,omitempty"`
+	AutoRetryCount int    `json:"autoRetryCount"`
+	RetentionDays  int    `json:"retentionDays"`
+	Revision       int64  `json:"revision"`
+	UpdatedAt      string `json:"updatedAt,omitempty"`
 }
 
 type emailSettingsEnvelope struct {
@@ -142,7 +144,7 @@ type emailSettingsEnvelope struct {
 }
 
 func emailSettingsResponseBody(view application.EmailSettingsView) emailSettingsResponse {
-	body := emailSettingsResponse{Configured: view.Configured, Host: view.Host, Port: view.Port, Security: view.Security, Username: view.Username, PasswordSet: view.PasswordSet, FromAddress: view.FromAddress, FromName: view.FromName, DefaultLocale: string(view.DefaultLocale), Revision: view.Revision}
+	body := emailSettingsResponse{Configured: view.Configured, Host: view.Host, Port: view.Port, Security: view.Security, Username: view.Username, PasswordSet: view.PasswordSet, FromAddress: view.FromAddress, FromName: view.FromName, DefaultLocale: string(view.DefaultLocale), AutoRetryCount: view.AutoRetryCount, RetentionDays: view.RetentionDays, Revision: view.Revision}
 	if !view.UpdatedAt.IsZero() {
 		body.UpdatedAt = view.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	}

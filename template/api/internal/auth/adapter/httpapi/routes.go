@@ -75,12 +75,24 @@ type versionedLifecycleService interface {
 type SettingsService interface {
 	GetEmailSettings(context.Context) (application.EmailSettingsView, error)
 	SaveEmailSettings(context.Context, application.EmailSettingsInput) (application.EmailSettingsView, error)
-	TestEmailSettings(context.Context, application.EmailSettingsInput, string) error
 	OperationalWarnings(context.Context) ([]application.OperationalWarning, error)
 }
 
-type ActorTestEmailSettingsService interface {
-	TestEmailSettingsForActor(context.Context, string, application.EmailSettingsInput, string) error
+type TestEmailSettingsTaskService interface {
+	TestEmailSettingsTask(context.Context, string, application.EmailSettingsInput, string) (application.MailTask, error)
+}
+
+type MailTaskService interface {
+	List(context.Context, string, application.MailTaskListOptions) (application.MailTaskPage, error)
+	Detail(context.Context, string, string) (application.MailTask, error)
+	Retry(context.Context, string, string) (application.MailTask, error)
+	Delete(context.Context, string, string) error
+	BulkRetry(context.Context, string, []string) (application.MailTaskBatchResult, error)
+	BulkDelete(context.Context, string, []string) (application.MailTaskBatchResult, error)
+}
+
+type MailTaskOwnerStatusService interface {
+	OwnStatus(context.Context, string, string) (application.MailTask, error)
 }
 
 type SystemIdentityService interface {
@@ -121,6 +133,7 @@ type Handler struct {
 	identity         SystemIdentityService
 	operationLogs    OperationLogService
 	personal         PersonalSettingsService
+	mailTasks        MailTaskService
 	cfg              config.Config
 	mux              *http.ServeMux
 }
@@ -137,24 +150,37 @@ func NewHandlerWithAccess(setup SetupService, auth AuthenticationService, cfg co
 	return newHandler(setup, auth, cfg, recovery, access, accept, service)
 }
 
+// NewHandlerWithAccessAndMailTasks is the compact constructor for embedders
+// that have settings and access services but no operation-log or identity
+// service. The mail-task capability remains independently authorization gated.
+func NewHandlerWithAccessAndMailTasks(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, mailTasks MailTaskService) http.Handler {
+	return newHandlerWithOperationLogAndIdentityAndPersonal(setup, auth, cfg, recovery, access, accept, settings, nil, nil, nil, mailTasks)
+}
+
+// NewHandlerWithMailTasks is the health/auth constructor with only the mail
+// task capability added.
+func NewHandlerWithMailTasks(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, mailTasks MailTaskService) http.Handler {
+	return newHandlerWithOperationLogAndIdentityAndPersonal(setup, auth, cfg, recovery, nil, nil, nil, nil, nil, nil, mailTasks)
+}
+
 // NewHandlerWithAccessAndOperationLog extends the access handler without
 // changing the constructor used by embedders that do not persist history.
-func NewHandlerWithAccessAndOperationLog(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService) http.Handler {
-	return newHandlerWithOperationLog(setup, auth, cfg, recovery, access, accept, settings, operations)
+func NewHandlerWithAccessAndOperationLog(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, mailTasks ...MailTaskService) http.Handler {
+	return newHandlerWithOperationLog(setup, auth, cfg, recovery, access, accept, settings, operations, mailTasks...)
 }
 
 // NewHandlerWithAccessAndOperationLogAndIdentity adds the shared public and
 // protected system identity endpoints while preserving the older constructor
 // seams used by embedders and tests.
-func NewHandlerWithAccessAndOperationLogAndIdentity(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService) http.Handler {
-	return newHandlerWithOperationLogAndIdentity(setup, auth, cfg, recovery, access, accept, settings, operations, identity)
+func NewHandlerWithAccessAndOperationLogAndIdentity(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService, mailTasks ...MailTaskService) http.Handler {
+	return newHandlerWithOperationLogAndIdentity(setup, auth, cfg, recovery, access, accept, settings, operations, identity, mailTasks...)
 }
 
 // NewHandlerWithAccessAndOperationLogAndIdentityAndPersonalSettings adds the
 // authenticated self-service account settings surface without changing any
 // older constructor signatures.
-func NewHandlerWithAccessAndOperationLogAndIdentityAndPersonalSettings(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService, personal PersonalSettingsService) http.Handler {
-	return newHandlerWithOperationLogAndIdentityAndPersonal(setup, auth, cfg, recovery, access, accept, settings, operations, identity, personal)
+func NewHandlerWithAccessAndOperationLogAndIdentityAndPersonalSettings(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService, personal PersonalSettingsService, mailTasks ...MailTaskService) http.Handler {
+	return newHandlerWithOperationLogAndIdentityAndPersonal(setup, auth, cfg, recovery, access, accept, settings, operations, identity, personal, mailTasks...)
 }
 
 func firstRecovery(recovery []PasswordRecoveryService) PasswordRecoveryService {
@@ -173,16 +199,20 @@ func newHandler(setup SetupService, auth AuthenticationService, cfg config.Confi
 	return newHandlerWithOperationLog(setup, auth, cfg, recovery, access, accept, settingsService, nil)
 }
 
-func newHandlerWithOperationLog(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService) http.Handler {
-	return newHandlerWithOperationLogAndIdentity(setup, auth, cfg, recovery, access, accept, settings, operations, nil)
+func newHandlerWithOperationLog(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, mailTasks ...MailTaskService) http.Handler {
+	return newHandlerWithOperationLogAndIdentity(setup, auth, cfg, recovery, access, accept, settings, operations, nil, mailTasks...)
 }
 
-func newHandlerWithOperationLogAndIdentity(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService) http.Handler {
-	return newHandlerWithOperationLogAndIdentityAndPersonal(setup, auth, cfg, recovery, access, accept, settings, operations, identity, nil)
+func newHandlerWithOperationLogAndIdentity(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService, mailTasks ...MailTaskService) http.Handler {
+	return newHandlerWithOperationLogAndIdentityAndPersonal(setup, auth, cfg, recovery, access, accept, settings, operations, identity, nil, mailTasks...)
 }
 
-func newHandlerWithOperationLogAndIdentityAndPersonal(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService, personal PersonalSettingsService) http.Handler {
-	h := &Handler{setup: setup, auth: auth, recovery: recovery, access: access, acceptInvitation: accept, settings: settings, identity: identity, operationLogs: operations, personal: personal, cfg: cfg, mux: http.NewServeMux()}
+func newHandlerWithOperationLogAndIdentityAndPersonal(setup SetupService, auth AuthenticationService, cfg config.Config, recovery PasswordRecoveryService, access AccessService, accept InvitationAcceptanceService, settings SettingsService, operations OperationLogService, identity SystemIdentityService, personal PersonalSettingsService, mailTasks ...MailTaskService) http.Handler {
+	var mailTaskService MailTaskService
+	if len(mailTasks) > 0 {
+		mailTaskService = mailTasks[0]
+	}
+	h := &Handler{setup: setup, auth: auth, recovery: recovery, access: access, acceptInvitation: accept, settings: settings, identity: identity, operationLogs: operations, personal: personal, mailTasks: mailTaskService, cfg: cfg, mux: http.NewServeMux()}
 	if h.identity != nil {
 		h.mux.HandleFunc("GET /api/public/system-identity", h.publicSystemIdentity)
 		h.mux.HandleFunc("GET /api/public/system-identity/icon", h.publicSystemIdentityIcon)
@@ -249,6 +279,20 @@ func newHandlerWithOperationLogAndIdentityAndPersonal(setup SetupService, auth A
 		h.mux.HandleFunc("GET /api/operation-logs/{id}", h.operationLogsDetail)
 		h.mux.HandleFunc("GET /api/operation-logs/status", h.operationLogsStatus)
 	}
+	if h.mailTasks != nil {
+		h.mux.HandleFunc("GET /api/mail-tasks", h.mailTasksList)
+		h.mux.HandleFunc("GET /api/mail-tasks/{id}", h.mailTaskDetail)
+		h.mux.HandleFunc("GET /api/mail-tasks/{id}/status", h.mailTaskOwnerStatus)
+		h.mux.HandleFunc("POST /api/mail-tasks/{id}/retry", h.mailTaskRetry)
+		h.mux.HandleFunc("DELETE /api/mail-tasks/{id}", h.mailTaskDelete)
+		h.mux.HandleFunc("POST /api/mail-tasks/bulk-retry", h.mailTasksBulkRetry)
+		h.mux.HandleFunc("POST /api/mail-tasks/bulk-delete", h.mailTasksBulkDelete)
+		// Aliases keep the collection action shape available to clients that
+		// submit one JSON body for a bulk operation.
+		h.mux.HandleFunc("POST /api/mail-tasks/retry", h.mailTasksBulkRetry)
+		h.mux.HandleFunc("POST /api/mail-tasks/delete", h.mailTasksBulkDelete)
+		h.mux.HandleFunc("GET /api/settings/email/test/{id}", h.mailTaskOwnerStatus)
+	}
 	if h.operationLogs != nil && h.settings != nil {
 		h.mux.HandleFunc("GET /api/settings/operation-log", h.operationLogRetention)
 		h.mux.HandleFunc("PUT /api/settings/operation-log", h.saveOperationLogRetention)
@@ -306,6 +350,13 @@ var knownMethods = map[string]string{
 	"/api/user-invitations":                 "GET, POST",
 	"/api/settings/email":                   "GET, PUT",
 	"/api/settings/email/test":              "POST",
+	"/api/settings/email/test/{id}":         "GET",
+	"/api/mail-tasks/{id}/status":           "GET",
+	"/api/mail-tasks":                       "GET",
+	"/api/mail-tasks/bulk-retry":            "POST",
+	"/api/mail-tasks/bulk-delete":           "POST",
+	"/api/mail-tasks/retry":                 "POST",
+	"/api/mail-tasks/delete":                "POST",
 	"/api/public/system-identity":           "GET",
 	"/api/public/system-identity/icon":      "GET",
 	"/api/settings/system-identity":         "GET, PUT",
@@ -329,10 +380,18 @@ func expectedMethods(path string) (string, bool) {
 			return "GET, PUT, DELETE", true
 		case "user-invitations":
 			return "DELETE", true
+		case "mail-tasks":
+			return "GET, DELETE", true
 		}
 	}
 	if len(parts) == 3 && parts[0] == "api" && parts[1] == "operation-logs" {
 		return "GET", true
+	}
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "mail-tasks" && parts[3] == "status" {
+		return "GET", true
+	}
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "mail-tasks" && parts[3] == "retry" {
+		return "POST", true
 	}
 	if len(parts) == 3 && parts[0] == "api" && parts[1] == "settings" && (parts[2] == "operation-log" || parts[2] == "operation-log-retention") {
 		return "GET, PUT", true
@@ -354,6 +413,12 @@ func expectedMethods(path string) (string, bool) {
 	}
 	if len(parts) == 4 && parts[0] == "api" && parts[1] == "online-users" && parts[3] == "kick" {
 		return "POST", true
+	}
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "settings" && parts[2] == "email" && parts[3] == "test" {
+		return "POST", true
+	}
+	if len(parts) == 5 && parts[0] == "api" && parts[1] == "settings" && parts[2] == "email" && parts[3] == "test" {
+		return "GET", true
 	}
 	return "", false
 }
@@ -1167,16 +1232,18 @@ func (h *Handler) emailSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 type emailSettingsRequest struct {
-	Host          string  `json:"host"`
-	Port          int     `json:"port"`
-	Security      string  `json:"security"`
-	Username      string  `json:"username"`
-	Password      *string `json:"password"`
-	ClearPassword bool    `json:"clearPassword"`
-	FromAddress   string  `json:"fromAddress"`
-	FromName      string  `json:"fromName"`
-	DefaultLocale string  `json:"defaultLocale"`
-	Revision      *int64  `json:"revision"`
+	Host           string                  `json:"host"`
+	Port           int                     `json:"port"`
+	Security       string                  `json:"security"`
+	Username       string                  `json:"username"`
+	Password       *string                 `json:"password"`
+	ClearPassword  bool                    `json:"clearPassword"`
+	FromAddress    string                  `json:"fromAddress"`
+	FromName       string                  `json:"fromName"`
+	DefaultLocale  string                  `json:"defaultLocale"`
+	AutoRetryCount emailRetryCountField    `json:"autoRetryCount"`
+	RetentionDays  emailRetentionDaysField `json:"retentionDays"`
+	Revision       *int64                  `json:"revision"`
 }
 
 func (h *Handler) saveEmailSettings(w http.ResponseWriter, r *http.Request) {
@@ -1199,7 +1266,7 @@ func (h *Handler) saveEmailSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	before, beforeErr := h.settings.GetEmailSettings(r.Context())
 	var input emailSettingsRequest
-	if err := decodeJSONObject(r, &input, map[string]struct{}{"host": {}, "port": {}, "security": {}, "username": {}, "password": {}, "clearPassword": {}, "fromAddress": {}, "fromName": {}, "defaultLocale": {}, "revision": {}}); err != nil {
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"host": {}, "port": {}, "security": {}, "username": {}, "password": {}, "clearPassword": {}, "fromAddress": {}, "fromName": {}, "defaultLocale": {}, "autoRetryCount": {}, "retentionDays": {}, "revision": {}}); err != nil {
 		h.recordOperation(r, operationFailure(principal.User, "settings.email.update", "email_settings", "", err, nil))
 		writeDecodeError(w, err)
 		return
@@ -1208,7 +1275,7 @@ func (h *Handler) saveEmailSettings(w http.ResponseWriter, r *http.Request) {
 	if input.Revision != nil {
 		revision = *input.Revision
 	}
-	view, err := h.settings.SaveEmailSettings(r.Context(), application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, Revision: revision})
+	view, err := h.settings.SaveEmailSettings(r.Context(), application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, AutoRetryCount: input.AutoRetryCount.pointer(), RetentionDays: input.RetentionDays.pointer(), Revision: revision})
 	if err != nil {
 		details := map[string]any{}
 		if beforeErr == nil {
@@ -1218,7 +1285,7 @@ func (h *Handler) saveEmailSettings(w http.ResponseWriter, r *http.Request) {
 		writeApplicationError(w, err)
 		return
 	}
-	details := map[string]any{"before": nil, "after": emailSettingsSnapshot(view), "passwordAction": emailPasswordAction(input), "fieldsModified": []string{"smtp", "sender", "locale"}}
+	details := map[string]any{"before": nil, "after": emailSettingsSnapshot(view), "passwordAction": emailPasswordAction(input), "fieldsModified": []string{"smtp", "sender", "locale", "retryPolicy", "retention"}}
 	if beforeErr == nil {
 		details["before"] = emailSettingsSnapshot(before)
 	}
@@ -1245,26 +1312,36 @@ func (h *Handler) testEmailSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		emailSettingsRequest
 		Recipient string `json:"recipient"`
 	}
-	if err := decodeJSONObject(r, &input, map[string]struct{}{"host": {}, "port": {}, "security": {}, "username": {}, "password": {}, "clearPassword": {}, "fromAddress": {}, "fromName": {}, "defaultLocale": {}, "revision": {}, "recipient": {}}); err != nil {
+	// Testing is intentionally a saved-settings operation. Do not accept SMTP
+	// fields here: allowing a draft snapshot would silently send with config
+	// that the dispatcher never uses.
+	if err := decodeJSONObject(r, &input, map[string]struct{}{"recipient": {}}); err != nil {
 		h.recordOperation(r, operationFailure(principal.User, "settings.email.test", "email_settings", "", err, nil))
 		writeDecodeError(w, err)
 		return
 	}
-	settingsInput := application.EmailSettingsInput{Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, Password: input.Password, ClearPassword: input.ClearPassword, FromAddress: input.FromAddress, FromName: input.FromName, DefaultLocale: input.DefaultLocale, Revision: input.RevisionValue()}
-	if actorAware, actorOK := h.settings.(ActorTestEmailSettingsService); actorOK {
-		err = actorAware.TestEmailSettingsForActor(r.Context(), principal.User.ID, settingsInput, input.Recipient)
+	settingsInput := application.EmailSettingsInput{}
+	var task application.MailTask
+	if taskService, taskOK := h.settings.(TestEmailSettingsTaskService); taskOK {
+		task, err = taskService.TestEmailSettingsTask(r.Context(), principal.User.ID, settingsInput, input.Recipient)
 	} else {
-		err = h.settings.TestEmailSettings(r.Context(), settingsInput, input.Recipient)
+		// The generated endpoint has one ownership model: a test email is a
+		// durable task. A settings-only embedder that has not wired the outbox
+		// must fail closed rather than silently sending synchronously.
+		err = application.ErrDependencyUnavailable
 	}
 	if err != nil {
 		h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "settings.email.test", ObjectType: "email_settings", Result: application.OperationLogFailure, Details: map[string]any{"failure": operationErrorCode(err)}})
 		writeApplicationError(w, err)
 		return
 	}
-	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "settings.email.test", ObjectType: "email_settings", Result: application.OperationLogSuccess, Details: map[string]any{"recipientProvided": input.Recipient != ""}})
+	h.recordOperation(r, application.OperationLogInput{ActorID: principal.User.ID, ActorName: principal.User.Name, ActorEmail: principal.User.Email, Action: "settings.email.test", ObjectType: "email_settings", Result: application.OperationLogSuccess, Details: map[string]any{"recipientProvided": input.Recipient != "", "taskID": task.ID}})
+	if task.ID != "" {
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "accepted", "task": mailTaskResponseBody(task)})
+		return
+	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 

@@ -877,7 +877,7 @@ func openStateIntegrationDB(t *testing.T) (*sql.DB, context.Context) {
 		_ = db.Close()
 		t.Fatal(err)
 	}
-	if err := NewStore(db).CheckSchema(ctx); err != nil {
+	if err := newTestStore(db).CheckSchema(ctx); err != nil {
 		_ = db.Close()
 		t.Fatalf("CheckSchema() error = %v", err)
 	}

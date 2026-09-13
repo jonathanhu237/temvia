@@ -118,6 +118,7 @@ const (
 	MailUserInvitation  MailKind = "user_invitation"
 	MailEmailChangeCode MailKind = "email_change_code"
 	MailEmailChanged    MailKind = "email_changed"
+	MailTest            MailKind = "test_email"
 )
 
 type MailJob struct {
@@ -127,6 +128,7 @@ type MailJob struct {
 	InvitationID             string
 	Name                     string
 	Email                    string
+	SystemName               string
 	Locale                   domain.Locale
 	ResetSelector            []byte
 	EmailChangeSelector      []byte
@@ -134,7 +136,10 @@ type MailJob struct {
 	InvitationSelector       []byte
 	InvitationVerifierDigest []byte
 	EmailChangeRequestID     string
+	EncryptedMaterial        []byte
 	Attempts                 int
+	Round                    int
+	RoundAttempts            int
 	LeaseToken               string
 	CreatedAt                time.Time
 	ExpiresAt                time.Time
@@ -150,21 +155,39 @@ type MailOutboxStore interface {
 	CleanupMail(context.Context) error
 }
 
+// MailAttemptRecorder is an optional recovery seam for a worker which loses
+// its lease before it can commit the send result. Recording by the immutable
+// task/round/attempt identity never changes task state, so a late result cannot
+// overwrite a newer round; a deleted task simply rejects the insert through
+// the task foreign key.
+type MailAttemptRecorder interface {
+	RecordMailAttempt(context.Context, string, int, int, string, string) error
+}
+
 type OutgoingMail struct {
-	MessageID  string
-	Kind       MailKind
-	SystemName string
-	Name       string
-	To         string
-	Locale     domain.Locale
-	ChangedAt  time.Time
-	Subject    string
-	Text       string
-	HTML       string
+	MessageID  string        `json:"messageId"`
+	Kind       MailKind      `json:"kind"`
+	SystemName string        `json:"systemName"`
+	Name       string        `json:"name"`
+	To         string        `json:"to"`
+	Locale     domain.Locale `json:"locale"`
+	ChangedAt  time.Time     `json:"changedAt,omitempty"`
+	Subject    string        `json:"subject"`
+	Text       string        `json:"text"`
+	HTML       string        `json:"html"`
 }
 
 type Mailer interface {
 	Send(context.Context, OutgoingMail) error
+}
+
+// MailerProvider resolves the currently persisted SMTP configuration for each
+// delivery. Implementations must not return credentials or configuration to
+// callers other than the returned sender. Resolving per task keeps workers in
+// separate processes from using a stale in-memory SMTP client after settings
+// change.
+type MailerProvider interface {
+	CurrentMailer(context.Context) (Mailer, error)
 }
 
 type MailDeliveryError struct {

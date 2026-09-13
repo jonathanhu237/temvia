@@ -42,10 +42,10 @@ describe('email settings page', () => {
   })
 
   it('requires an explicit language on the first save and lets the administrator choose the test recipient', async () => {
-    const saveEmailSettings = vi.fn()
-    const testEmailSettings = vi.fn().mockResolvedValue(undefined)
+    const saveEmailSettings = vi.fn().mockResolvedValue({ configured: true, host: 'mailpit', port: 587, security: 'starttls', passwordSet: false, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 1, autoRetryCount: 9, retentionDays: 30 })
+    const testEmailSettings = vi.fn().mockResolvedValue({ status: 'accepted' })
     const api = mockApi({
-      getEmailSettings: vi.fn().mockResolvedValue({ configured: false, passwordSet: false, revision: 0 }),
+      getEmailSettings: vi.fn().mockResolvedValueOnce({ configured: false, passwordSet: false, revision: 0 }).mockResolvedValue({ configured: true, host: 'mailpit', port: 587, security: 'starttls', passwordSet: false, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 1, autoRetryCount: 9, retentionDays: 30 }),
       saveEmailSettings,
       testEmailSettings,
     })
@@ -65,50 +65,48 @@ describe('email settings page', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
 
     await user.click(screen.getByRole('button', { name: 'Send test email' }))
+    expect(toast.error).toHaveBeenCalledWith('Save email settings first', { description: 'Save your SMTP changes before submitting a test email.' })
+    expect(testEmailSettings).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveEmailSettings).toHaveBeenCalledOnce())
+    await user.click(screen.getByRole('button', { name: 'Send test email' }))
     const dialog = await screen.findByRole('dialog', { name: 'Send test email' })
     await user.type(within(dialog).getByLabelText('Recipient email'), 'real@example.com')
     await user.click(within(dialog).getByRole('button', { name: 'Send test email' }))
-    await waitFor(() => expect(testEmailSettings).toHaveBeenCalledWith(expect.objectContaining({ host: 'mailpit', defaultLocale: 'en', revision: 0, recipient: 'real@example.com' })))
-    expect(toast.success).toHaveBeenCalledWith('Test email queued. Final delivery depends on the recipient server.')
+    await waitFor(() => expect(testEmailSettings).toHaveBeenCalledWith({ recipient: 'real@example.com' }))
+    expect(toast.success).toHaveBeenCalledWith('Test email submitted. Delivery is still in progress.')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(saveEmailSettings).not.toHaveBeenCalled()
+    expect(saveEmailSettings).toHaveBeenCalledOnce()
   })
 
   it('shows a failure toast with the localized delivery problem', async () => {
     const testEmailSettings = vi.fn().mockRejectedValue(new ApiProblemError({ type: '/problems/mail-not-configured', title: 'mail unavailable', status: 503, code: 'mail_not_configured' }))
     const api = mockApi({
-      getEmailSettings: vi.fn().mockResolvedValue({ configured: false, passwordSet: false, revision: 0 }),
+      getEmailSettings: vi.fn().mockResolvedValue({ configured: true, host: 'smtp.example.com', port: 587, security: 'starttls', passwordSet: false, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 1, autoRetryCount: 9, retentionDays: 30 }),
       testEmailSettings,
     })
     const user = userEvent.setup()
     renderWithQueryClient(<EmailSettingsPage api={api} />)
 
     await screen.findByRole('heading', { name: 'System settings' })
-    await user.type(screen.getByLabelText('SMTP host'), 'smtp.example.com')
-    await user.type(screen.getByLabelText('From address'), 'no-reply@example.com')
-    await user.type(screen.getByLabelText('From name'), 'Temvia')
-    await user.click(screen.getByRole('combobox', { name: 'Default email language' }))
-    await user.click(await screen.findByRole('option', { name: 'English' }))
     await user.click(screen.getByRole('button', { name: 'Send test email' }))
     const dialog = await screen.findByRole('dialog', { name: 'Send test email' })
     await user.type(within(dialog).getByLabelText('Recipient email'), 'real@example.com')
     await user.click(within(dialog).getByRole('button', { name: 'Send test email' }))
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Test email failed.', { description: 'Email service is not configured. Contact an administrator.' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Test email could not be submitted.', { description: 'Email service is not configured. Contact an administrator.' }))
   })
 
   it('requires a valid recipient before sending a test', async () => {
-    const testEmailSettings = vi.fn().mockResolvedValue(undefined)
+    const testEmailSettings = vi.fn().mockResolvedValue({ status: 'accepted' })
     const api = mockApi({
-      getEmailSettings: vi.fn().mockResolvedValue({ configured: false, passwordSet: false, revision: 0 }),
+      getEmailSettings: vi.fn().mockResolvedValue({ configured: true, host: 'smtp.example.com', port: 587, security: 'starttls', passwordSet: false, fromAddress: 'no-reply@example.com', fromName: 'Temvia', defaultLocale: 'en', revision: 1, autoRetryCount: 9, retentionDays: 30 }),
       testEmailSettings,
     })
     const user = userEvent.setup()
     renderWithQueryClient(<EmailSettingsPage api={api} />)
 
     await screen.findByRole('heading', { name: 'System settings' })
-    await user.click(screen.getByRole('combobox', { name: 'Default email language' }))
-    await user.click(await screen.findByRole('option', { name: 'English' }))
     await user.click(screen.getByRole('button', { name: 'Send test email' }))
     const dialog = await screen.findByRole('dialog', { name: 'Send test email' })
     await user.type(within(dialog).getByLabelText('Recipient email'), 'not-an-email')

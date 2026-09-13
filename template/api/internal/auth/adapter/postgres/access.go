@@ -1003,7 +1003,15 @@ func (s *Store) createInvitation(ctx context.Context, actorID, createdBy, name, 
 			return domain.Invitation{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_mail_outbox (kind, invitation_id, reset_selector, locale, expires_at, created_at) VALUES ('user_invitation', $1::uuid, $2, $3, $4, $5)`, invitation.ID, selector, string(locale), invitation.ExpiresAt, invitation.CreatedAt); err != nil {
+	systemName, err := mailTaskSystemName(ctx, tx)
+	if err != nil {
+		return domain.Invitation{}, err
+	}
+	material, err := s.sealMailTaskMaterial(application.MailTaskMaterial{Version: 1, Kind: application.MailUserInvitation, Name: invitation.Name, Email: invitation.Email, Locale: locale, SystemName: systemName, CreatedAt: invitation.CreatedAt, ExpiresAt: invitation.ExpiresAt, ResetSelector: selector, VerifierDigest: digest})
+	if err != nil {
+		return domain.Invitation{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_mail_outbox (kind, invitation_id, reset_selector, recipient_email, recipient_name, locale, system_name, material_ciphertext, expires_at, created_at) VALUES ('user_invitation', $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)`, invitation.ID, selector, invitation.Email, invitation.Name, string(locale), systemName, nullableBytes(material), invitation.ExpiresAt, invitation.CreatedAt); err != nil {
 		return domain.Invitation{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1397,7 +1405,8 @@ func (s *Store) resendInvitation(ctx context.Context, actorID, id string, locale
 			return domain.Invitation{}, domain.Invitation{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), lease_token = NULL, lease_expires_at = NULL, last_error_code = 'superseded' WHERE invitation_id = $1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, id); err != nil {
+	// Keep materialized historical tasks; only legacy rows need supersession.
+	if _, err := tx.ExecContext(ctx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), lease_token = NULL, lease_expires_at = NULL, last_error_code = 'superseded' WHERE invitation_id = $1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, id); err != nil {
 		return domain.Invitation{}, domain.Invitation{}, err
 	}
 	if err := tx.QueryRowContext(ctx, `UPDATE auth_user_invitations SET selector = $2, verifier_digest = $3, locale = $4, expires_at = clock_timestamp() + ($5 * INTERVAL '1 second'), revision = revision + 1, updated_at = clock_timestamp() WHERE id = $1::uuid RETURNING expires_at, updated_at, revision`, id, selector, digest, string(locale), ttl.Seconds()).Scan(&invitation.ExpiresAt, &invitation.UpdatedAt, &invitation.Revision); err != nil {
@@ -1405,7 +1414,15 @@ func (s *Store) resendInvitation(ctx context.Context, actorID, id string, locale
 	}
 	invitation.Locale = locale
 	invitation.Roles = before.Roles
-	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_mail_outbox (kind, invitation_id, reset_selector, locale, expires_at, created_at) VALUES ('user_invitation', $1::uuid, $2, $3, $4, clock_timestamp())`, id, selector, string(locale), invitation.ExpiresAt); err != nil {
+	systemName, err := mailTaskSystemName(ctx, tx)
+	if err != nil {
+		return domain.Invitation{}, domain.Invitation{}, err
+	}
+	material, err := s.sealMailTaskMaterial(application.MailTaskMaterial{Version: 1, Kind: application.MailUserInvitation, Name: invitation.Name, Email: invitation.Email, Locale: locale, SystemName: systemName, CreatedAt: invitation.UpdatedAt, ExpiresAt: invitation.ExpiresAt, ResetSelector: selector, VerifierDigest: digest})
+	if err != nil {
+		return domain.Invitation{}, domain.Invitation{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_mail_outbox (kind, invitation_id, reset_selector, recipient_email, recipient_name, locale, system_name, material_ciphertext, expires_at, created_at) VALUES ('user_invitation', $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)`, id, selector, invitation.Email, invitation.Name, string(locale), systemName, nullableBytes(material), invitation.ExpiresAt, invitation.UpdatedAt); err != nil {
 		return domain.Invitation{}, domain.Invitation{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1449,6 +1466,11 @@ func (s *Store) revokeInvitation(ctx context.Context, actorID, id string) (domai
 		if err := authorizeInvitationRoleIDsTx(ctx, tx, actorPermissions, roleIDs); err != nil {
 			return domain.Invitation{}, err
 		}
+	}
+	// Revoke the legacy queue row only; durable material is independent of the
+	// invitation authority and remains available for management retry.
+	if _, err := tx.ExecContext(ctx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), lease_token = NULL, lease_expires_at = NULL, last_error_code = 'superseded' WHERE invitation_id = $1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, id); err != nil {
+		return domain.Invitation{}, err
 	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM auth_user_invitations WHERE id = $1::uuid`, id)
 	if err != nil {
@@ -1627,6 +1649,11 @@ func (s *Store) CompleteInvitationWithLocale(ctx context.Context, selector, dige
 	}
 	if !valid || !equalDigest(stored, digest) {
 		return application.ErrInvitationInvalid
+	}
+	// Consume the invitation generation at the same transaction boundary as
+	// the account creation. Materialized task rows remain historical copies.
+	if _, err := tx.ExecContext(ctx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), lease_token = NULL, lease_expires_at = NULL, last_error_code = 'superseded' WHERE invitation_id = $1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, invitationID); err != nil {
+		return err
 	}
 	var userID string
 	if err := tx.QueryRowContext(ctx, `INSERT INTO auth_users (name, email, email_canonical, password_hash, locale) VALUES ($1, $2, $3, $4, $5) RETURNING id::text`, name, email, canonical, passwordHash, locale).Scan(&userID); err != nil {

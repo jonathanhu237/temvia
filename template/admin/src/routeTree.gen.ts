@@ -16,6 +16,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedEmailTasksRouteImport } from './routes/_authenticated/email-tasks'
 import { Route as AuthenticatedInvitationsRouteImport } from './routes/_authenticated/invitations'
 import { Route as AuthenticatedOnlineUsersRouteImport } from './routes/_authenticated/online-users'
 import { Route as AuthenticatedOperationLogsRouteImport } from './routes/_authenticated/operation-logs'
@@ -56,6 +57,11 @@ const SetupRoute = SetupRouteImport.update({
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedEmailTasksRoute = AuthenticatedEmailTasksRouteImport.update({
+  id: '/email-tasks',
+  path: '/email-tasks',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedInvitationsRoute =
@@ -105,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
+  '/email-tasks': typeof AuthenticatedEmailTasksRoute
   '/invitations': typeof AuthenticatedInvitationsRoute
   '/online-users': typeof AuthenticatedOnlineUsersRoute
   '/operation-logs': typeof AuthenticatedOperationLogsRoute
@@ -119,6 +126,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
+  '/email-tasks': typeof AuthenticatedEmailTasksRoute
   '/invitations': typeof AuthenticatedInvitationsRoute
   '/online-users': typeof AuthenticatedOnlineUsersRoute
   '/operation-logs': typeof AuthenticatedOperationLogsRoute
@@ -136,6 +144,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
+  '/_authenticated/email-tasks': typeof AuthenticatedEmailTasksRoute
   '/_authenticated/invitations': typeof AuthenticatedInvitationsRoute
   '/_authenticated/online-users': typeof AuthenticatedOnlineUsersRoute
   '/_authenticated/operation-logs': typeof AuthenticatedOperationLogsRoute
@@ -154,6 +163,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/setup'
+    | '/email-tasks'
     | '/invitations'
     | '/online-users'
     | '/operation-logs'
@@ -168,6 +178,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/setup'
+    | '/email-tasks'
     | '/invitations'
     | '/online-users'
     | '/operation-logs'
@@ -184,6 +195,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/setup'
+    | '/_authenticated/email-tasks'
     | '/_authenticated/invitations'
     | '/_authenticated/online-users'
     | '/_authenticated/operation-logs'
@@ -254,6 +266,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/email-tasks': {
+      id: '/_authenticated/email-tasks'
+      path: '/email-tasks'
+      fullPath: '/email-tasks'
+      preLoaderRoute: typeof AuthenticatedEmailTasksRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/invitations': {
       id: '/_authenticated/invitations'
       path: '/invitations'
@@ -307,6 +326,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedRouteChildren {
+  AuthenticatedEmailTasksRoute: typeof AuthenticatedEmailTasksRoute
   AuthenticatedInvitationsRoute: typeof AuthenticatedInvitationsRoute
   AuthenticatedOnlineUsersRoute: typeof AuthenticatedOnlineUsersRoute
   AuthenticatedOperationLogsRoute: typeof AuthenticatedOperationLogsRoute
@@ -318,6 +338,7 @@ interface AuthenticatedRouteChildren {
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedEmailTasksRoute: AuthenticatedEmailTasksRoute,
   AuthenticatedInvitationsRoute: AuthenticatedInvitationsRoute,
   AuthenticatedOnlineUsersRoute: AuthenticatedOnlineUsersRoute,
   AuthenticatedOperationLogsRoute: AuthenticatedOperationLogsRoute,

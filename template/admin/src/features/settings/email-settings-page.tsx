@@ -17,7 +17,7 @@ import { notifyRequestError, notifySuccess, readFailureFeedback, useRequestError
 import { useAccessDraftStore, type EmailSettingsDraft } from '@/features/access/drafts'
 
 const emptyDraft: EmailSettingsDraft = {
-  host: '', port: 587, security: 'starttls', authentication: false, username: '', password: '', clearPassword: false, passwordSet: false, fromAddress: '', fromName: 'Temvia', revision: 0, configured: false, submitting: false, conflict: false,
+  host: '', port: 587, security: 'starttls', authentication: false, username: '', password: '', clearPassword: false, passwordSet: false, fromAddress: '', fromName: 'Temvia', defaultLocale: undefined, autoRetryCount: 9, retentionDays: 30, revision: 0, configured: false, submitting: false, conflict: false,
 }
 
 export function EmailSettingsPage({ api, canWrite = true, showTitle = true }: { api: ApiClient; canWrite?: boolean; showTitle?: boolean }) {
@@ -29,6 +29,8 @@ export function EmailSettingsPage({ api, canWrite = true, showTitle = true }: { 
   const [testRecipient, setTestRecipient] = useState('')
   const [testRecipientError, setTestRecipientError] = useState(false)
   const [localeError, setLocaleError] = useState(false)
+  const [policyError, setPolicyError] = useState<string | undefined>()
+  const [submittedTaskID, setSubmittedTaskID] = useState<string | undefined>()
   const query = useQuery({ queryKey: ['settings', 'email'], queryFn: ({ signal }) => api.getEmailSettings ? api.getEmailSettings(signal) : Promise.reject(new Error('missing getEmailSettings')), retry: false })
   useRequestErrorToast(query.error, query.isError, t, readFailureFeedback(query.error, { unavailableTitle: t('email.readUnavailableTitle'), unavailableDescription: t('email.readUnavailableDescription'), forbiddenTitle: t('access:forbiddenTitle'), forbiddenDescription: t('access:forbiddenDescription') }))
 
@@ -38,17 +40,23 @@ export function EmailSettingsPage({ api, canWrite = true, showTitle = true }: { 
   }, [draft, query.data, setDraft])
 
   const current = draft ?? (query.data ? fromSettings(query.data) : emptyDraft)
+  const authoritative = query.data ? fromSettings(query.data) : undefined
+  const isDirty = Boolean(authoritative && (current.host !== authoritative.host || current.port !== authoritative.port || current.security !== authoritative.security || current.authentication !== authoritative.authentication || current.username !== authoritative.username || current.password !== '' || Boolean(current.clearPassword) || current.fromAddress !== authoritative.fromAddress || current.fromName !== authoritative.fromName || current.defaultLocale !== authoritative.defaultLocale || current.autoRetryCount !== authoritative.autoRetryCount || current.retentionDays !== authoritative.retentionDays))
+  const submittedTask = useQuery({ queryKey: ['settings', 'email', 'test', submittedTaskID], queryFn: ({ signal }) => api.getSubmittedTestEmailStatus ? api.getSubmittedTestEmailStatus(submittedTaskID!, signal) : Promise.reject(new Error('missing getSubmittedTestEmailStatus')), enabled: Boolean(submittedTaskID && api.getSubmittedTestEmailStatus), refetchInterval: (result) => result.state.data && ['sent', 'failed'].includes(result.state.data.status) ? false : 1500, retry: false })
   const save = useMutation({
     retry: false,
     mutationFn: async () => {
       if (!api.saveEmailSettings) throw new Error('missing saveEmailSettings')
       if (!current.defaultLocale) throw new Error('default locale required')
+      if (current.autoRetryCount < 0 || current.autoRetryCount > 100 || !Number.isInteger(current.autoRetryCount) || current.retentionDays < 1 || current.retentionDays > 3650 || !Number.isInteger(current.retentionDays)) throw new Error('invalid email task policy')
       setDraft({ ...current, submitting: true })
-      return api.saveEmailSettings({ host: current.host, port: current.port, security: current.security, username: current.username, password: current.password || undefined, clearPassword: current.clearPassword, fromAddress: current.fromAddress, fromName: current.fromName, defaultLocale: current.defaultLocale, revision: current.revision })
+      return api.saveEmailSettings({ host: current.host, port: current.port, security: current.security, username: current.username, password: current.password || undefined, clearPassword: current.clearPassword, fromAddress: current.fromAddress, fromName: current.fromName, defaultLocale: current.defaultLocale, autoRetryCount: current.autoRetryCount, retentionDays: current.retentionDays, revision: current.revision })
     },
     onSuccess: (saved) => {
       setDraft({ ...fromSettings(saved), password: '', submitting: false, conflict: false })
       setLocaleError(false)
+      setPolicyError(undefined)
+      queryClient.setQueryData(['settings', 'email'], saved)
       notifySuccess(t('email.saveSuccess'))
       void queryClient.invalidateQueries({ queryKey: ['settings', 'email'] })
     },
@@ -58,6 +66,10 @@ export function EmailSettingsPage({ api, canWrite = true, showTitle = true }: { 
       setDraft({ ...latestDraft, submitting: false, conflict })
       if (value instanceof Error && value.message === 'default locale required') {
         setLocaleError(true)
+        return
+      }
+      if (value instanceof Error && value.message === 'invalid email task policy') {
+        setPolicyError(t('email.policyInvalid'))
         return
       }
       notifyRequestError(value, t, conflict
@@ -70,20 +82,30 @@ export function EmailSettingsPage({ api, canWrite = true, showTitle = true }: { 
     mutationFn: async (recipient: string) => {
       if (!api.testEmailSettings) throw new Error('missing testEmailSettings')
       if (!current.defaultLocale) throw new Error('default locale required')
-      return api.testEmailSettings({ host: current.host, port: current.port, security: current.security, username: current.username, password: current.password || undefined, clearPassword: current.clearPassword, fromAddress: current.fromAddress, fromName: current.fromName, defaultLocale: current.defaultLocale, revision: current.revision, recipient })
+      if (isDirty) throw new Error('email settings must be saved first')
+      return api.testEmailSettings({ recipient })
     },
-    onSuccess: () => {
+    onSuccess: (accepted) => {
       setTestDialogOpen(false)
       setTestRecipient('')
       setTestRecipientError(false)
-      notifySuccess(t('email.testSuccess'))
+      const taskID = accepted && typeof accepted === 'object' && 'task' in accepted ? accepted.task?.id : undefined
+      setSubmittedTaskID(taskID)
+      notifySuccess(t('email.testSubmitted'))
     },
     onError: (value) => {
+      if (value instanceof Error && value.message === 'email settings must be saved first') {
+        notifyRequestError(value, t, { title: t('email.testNotSavedTitle'), description: t('email.testNotSavedDescription') })
+        return
+      }
       notifyRequestError(value, t, { title: t('email.testFailed'), description: translateRateLimitedProblemWithFields(value, t, 'testEmailRateLimited') })
     },
   })
+  useEffect(() => {
+    if (submittedTask.data?.status === 'sent') notifySuccess(t('email.testDelivered'))
+  }, [submittedTask.data?.status, t])
   if (query.isPending) return <p role="status">{t('common:loading')}</p>
-  const update = (patch: Partial<EmailSettingsDraft>) => { setLocaleError(false); setDraft({ ...current, ...patch, conflict: false }) }
+  const update = (patch: Partial<EmailSettingsDraft>) => { setLocaleError(false); setPolicyError(undefined); setDraft({ ...current, ...patch, conflict: false }) }
   const busy = save.isPending || test.isPending
   const disabled = busy || !canWrite || current.conflict
   const hasSettings = Boolean(query.data || draft)
@@ -109,8 +131,10 @@ export function EmailSettingsPage({ api, canWrite = true, showTitle = true }: { 
           <Separator />
           <FieldGroup className="grid gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor="smtp-from-address">{t('email.fromAddress')}</FieldLabel><Input id="smtp-from-address" type="email" value={current.fromAddress} onChange={(event) => update({ fromAddress: event.target.value })} disabled={disabled} /></Field><Field><FieldLabel htmlFor="smtp-from-name">{t('email.fromName')}</FieldLabel><Input id="smtp-from-name" value={current.fromName} onChange={(event) => update({ fromName: event.target.value })} disabled={disabled} /></Field></FieldGroup>
           <Field className="max-w-xs" data-invalid={localeError || undefined}><FieldLabel htmlFor="smtp-default-locale">{t('email.defaultLocale')}</FieldLabel><Select value={current.defaultLocale ?? ''} onValueChange={(value) => update({ defaultLocale: value as 'en' | 'zh-CN' })} disabled={disabled}><SelectTrigger id="smtp-default-locale" aria-invalid={localeError}><SelectValue placeholder={t('email.chooseLocale')} /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="zh-CN">{t('common:chinese')}</SelectItem><SelectItem value="en">{t('common:english')}</SelectItem></SelectGroup></SelectContent></Select>{localeError ? <FieldError>{t('email.chooseLocale')}</FieldError> : null}</Field>
+          <FieldGroup className="grid gap-4 sm:grid-cols-2"><Field data-invalid={Boolean(policyError)}><FieldLabel htmlFor="email-auto-retry-count">{t('email.autoRetryCount')}</FieldLabel><Input id="email-auto-retry-count" type="number" min={0} max={100} step={1} value={current.autoRetryCount} onChange={(event) => update({ autoRetryCount: Number(event.target.value) })} disabled={disabled} /><FieldDescription>{t('email.autoRetryDescription')}</FieldDescription>{policyError ? <FieldError>{policyError}</FieldError> : null}</Field><Field><FieldLabel htmlFor="email-retention-days">{t('email.retentionDays')}</FieldLabel><Input id="email-retention-days" type="number" min={1} max={3650} step={1} value={current.retentionDays} onChange={(event) => update({ retentionDays: Number(event.target.value) })} disabled={disabled} /><FieldDescription>{t('email.retentionDescription')}</FieldDescription></Field></FieldGroup>
         </FieldGroup>
-        <div className="flex flex-wrap justify-end gap-2">{canWrite ? <><Button type="button" variant="outline" disabled={disabled} onClick={() => { if (!current.defaultLocale) { setLocaleError(true); return }; setTestRecipient(''); setTestRecipientError(false); setTestDialogOpen(true) }}><Send aria-hidden="true" data-icon="inline-start" />{t('email.sendTest')}</Button><Button type="submit" disabled={disabled || !current.defaultLocale}><Save aria-hidden="true" data-icon="inline-start" />{save.isPending ? t('common:saving') : t('common:save')}</Button></> : null}</div>
+        <div className="flex flex-wrap justify-end gap-2">{canWrite ? <><Button type="button" variant="outline" disabled={disabled} onClick={() => { if (!current.defaultLocale) { setLocaleError(true); return }; if (isDirty) { notifyRequestError(new Error('email settings must be saved first'), t, { title: t('email.testNotSavedTitle'), description: t('email.testNotSavedDescription') }); return }; setTestRecipient(''); setTestRecipientError(false); setTestDialogOpen(true) }}><Send aria-hidden="true" data-icon="inline-start" />{t('email.sendTest')}</Button><Button type="submit" disabled={disabled || !current.defaultLocale}><Save aria-hidden="true" data-icon="inline-start" />{save.isPending ? t('common:saving') : t('common:save')}</Button></> : null}</div>
+        {submittedTaskID ? <p role="status" className="text-sm text-muted-foreground">{submittedTask.data?.status === 'sent' ? t('email.testDelivered') : submittedTask.data?.status === 'failed' ? t('email.testDeliveryFailed') : t('email.testSubmitted')}</p> : null}
       </form>}
     </SettingsSection>
     <Dialog open={testDialogOpen && !forbidden} onOpenChange={(open) => { if (test.isPending) return; setTestDialogOpen(open); if (!open) setTestRecipientError(false) }}>
@@ -146,5 +170,5 @@ function isStaleSettingsError(error: unknown): boolean {
 
 function fromSettings(settings: EmailSettings): EmailSettingsDraft {
   const passwordSet = settings.passwordSet
-  return { host: settings.host ?? '', port: settings.port ?? 587, security: settings.security ?? 'starttls', authentication: Boolean(settings.username || passwordSet), username: settings.username ?? '', password: '', clearPassword: false, passwordSet, fromAddress: settings.fromAddress ?? '', fromName: settings.fromName ?? '', defaultLocale: settings.defaultLocale, revision: settings.revision, configured: settings.configured, submitting: false, conflict: false }
+  return { host: settings.host ?? '', port: settings.port ?? 587, security: settings.security ?? 'starttls', authentication: Boolean(settings.username || passwordSet), username: settings.username ?? '', password: '', clearPassword: false, passwordSet, fromAddress: settings.fromAddress ?? '', fromName: settings.fromName ?? '', defaultLocale: settings.defaultLocale, autoRetryCount: settings.autoRetryCount ?? 9, retentionDays: settings.retentionDays ?? 30, revision: settings.revision, configured: settings.configured, submitting: false, conflict: false }
 }

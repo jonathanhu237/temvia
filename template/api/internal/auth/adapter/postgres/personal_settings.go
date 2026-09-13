@@ -117,6 +117,11 @@ func (s *Store) ChangePassword(ctx context.Context, userID string, expectedAuthV
 	if currentVersion != expectedAuthVersion {
 		return domain.User{}, time.Time{}, application.ErrStaleRevision
 	}
+	// The account row is locked above; invalidate legacy rows that lack a
+	// durable material snapshot. Materialized tasks remain independent history.
+	if _, err := tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), lease_token = NULL, lease_expires_at = NULL, last_error_code = 'superseded' WHERE user_id = $1::uuid AND kind = 'password_reset' AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, userID); err != nil {
+		return domain.User{}, time.Time{}, err
+	}
 	var user domain.User
 	var changedAt time.Time
 	if err := tx.QueryRowContext(operationCtx, `
@@ -132,18 +137,24 @@ func (s *Store) ChangePassword(ctx context.Context, userID string, expectedAuthV
 	if _, err := tx.ExecContext(operationCtx, `DELETE FROM auth_password_resets WHERE user_id = $1::uuid`, userID); err != nil {
 		return domain.User{}, time.Time{}, err
 	}
-	if _, err := tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), last_error_code = 'superseded' WHERE user_id = $1::uuid AND kind = 'password_reset' AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, userID); err != nil {
-		return domain.User{}, time.Time{}, err
-	}
 	if notificationTTL <= 0 {
 		notificationTTL = 24 * time.Hour
 	}
 	if !locale.Valid() {
 		locale = domain.LocaleEnglish
 	}
+	systemName, err := mailTaskSystemName(operationCtx, tx)
+	if err != nil {
+		return domain.User{}, time.Time{}, err
+	}
+	expiresAt := changedAt.Add(notificationTTL)
+	material, err := s.sealMailTaskMaterial(application.MailTaskMaterial{Version: 1, Kind: application.MailPasswordChanged, Name: user.Name, Email: user.Email, Locale: locale, SystemName: systemName, CreatedAt: changedAt, ExpiresAt: expiresAt})
+	if err != nil {
+		return domain.User{}, time.Time{}, err
+	}
 	if _, err := tx.ExecContext(operationCtx, `
-		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, locale, expires_at)
-		VALUES ('password_changed', $1::uuid, $2, $3, clock_timestamp() + ($4 * INTERVAL '1 second'))`, userID, user.Email, locale, notificationTTL.Seconds()); err != nil {
+		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, recipient_name, locale, system_name, material_ciphertext, expires_at, created_at)
+		VALUES ('password_changed', $1::uuid, $2, $3, $4, $5, $6, $7, $8)`, userID, user.Email, user.Name, locale, systemName, nullableBytes(material), expiresAt, changedAt); err != nil {
 		return domain.User{}, time.Time{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -182,9 +193,9 @@ func (s *Store) RequestEmailChange(ctx context.Context, userID string, newEmail 
 	if err := lockEmailChangeTarget(operationCtx, tx, newEmail.Canonical); err != nil {
 		return domain.EmailChangeRequest{}, err
 	}
-	var currentEmail, currentCanonical string
+	var currentName, currentEmail, currentCanonical string
 	var disabled bool
-	if err := tx.QueryRowContext(operationCtx, `SELECT email, email_canonical, disabled_at IS NOT NULL FROM auth_users WHERE id = $1::uuid FOR UPDATE`, userID).Scan(&currentEmail, &currentCanonical, &disabled); err != nil {
+	if err := tx.QueryRowContext(operationCtx, `SELECT name, email, email_canonical, disabled_at IS NOT NULL FROM auth_users WHERE id = $1::uuid FOR UPDATE`, userID).Scan(&currentName, &currentEmail, &currentCanonical, &disabled); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.EmailChangeRequest{}, application.ErrAccountNotFound
 		}
@@ -210,12 +221,14 @@ func (s *Store) RequestEmailChange(ctx context.Context, userID string, newEmail 
 		locale = domain.LocaleEnglish
 	}
 	var previousRevision int64
-	var previousResendAfter time.Time
-	if err := tx.QueryRowContext(operationCtx, `SELECT revision, resend_after FROM auth_email_change_requests WHERE user_id = $1::uuid FOR UPDATE`, userID).Scan(&previousRevision, &previousResendAfter); errors.Is(err, sql.ErrNoRows) {
+	var previousResendAfter, previousCreatedAt time.Time
+	var hasPrevious bool
+	if err := tx.QueryRowContext(operationCtx, `SELECT revision, resend_after, created_at FROM auth_email_change_requests WHERE user_id = $1::uuid FOR UPDATE`, userID).Scan(&previousRevision, &previousResendAfter, &previousCreatedAt); errors.Is(err, sql.ErrNoRows) {
 		previousRevision = 0
 	} else if err != nil {
 		return domain.EmailChangeRequest{}, err
 	} else {
+		hasPrevious = true
 		// Request and resend share one per-user authority. The row lock makes
 		// this cooldown check atomic with replacement, including an exhausted
 		// request and a changed destination address. A caller must wait for the
@@ -228,31 +241,50 @@ func (s *Store) RequestEmailChange(ctx context.Context, userID string, newEmail 
 			return domain.EmailChangeRequest{}, application.ErrEmailChangeResendTooSoon
 		}
 	}
-	// Replacing a request must also invalidate all old code tasks. Delete the
-	// old row first so its foreign-keyed outbox rows cascade away; changing the
-	// request primary key in place would violate the default NO ACTION update
-	// rule and could leave an old generation attached to the new request.
+	// Invalidate only legacy rows lacking a durable snapshot. Materialized
+	// tasks remain independently retryable historical messages.
+	if _, err := tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), last_error_code = 'superseded', lease_token = NULL, lease_expires_at = NULL WHERE user_id = $1::uuid AND kind = 'email_change_code' AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, userID); err != nil {
+		return domain.EmailChangeRequest{}, err
+	}
 	if _, err := tx.ExecContext(operationCtx, `DELETE FROM auth_email_change_requests WHERE user_id = $1::uuid`, userID); err != nil {
 		return domain.EmailChangeRequest{}, err
 	}
 	var request domain.EmailChangeRequest
+	var createdAt any
+	if hasPrevious {
+		createdAt = previousCreatedAt
+	}
 	if err := tx.QueryRowContext(operationCtx, `
 		WITH timestamps AS MATERIALIZED (SELECT statement_timestamp() AS now)
 		INSERT INTO auth_email_change_requests (user_id, old_email, new_email, new_email_canonical, selector, verifier_digest, expires_at, resend_after, attempts_remaining, revision, created_at, updated_at)
-		SELECT $1::uuid, $2, $3, $4, $5, $6, timestamps.now + ($7 * INTERVAL '1 second'), timestamps.now + interval '60 seconds', 5, $8, timestamps.now, timestamps.now
+		SELECT $1::uuid, $2, $3, $4, $5, $6, timestamps.now + ($7 * INTERVAL '1 second'), timestamps.now + interval '60 seconds', 5, $8, COALESCE($9::timestamptz, timestamps.now), timestamps.now
 		FROM timestamps
 		RETURNING id::text, user_id::text, old_email, new_email, expires_at, resend_after, attempts_remaining, revision, created_at, selector, verifier_digest`,
-		userID, currentEmail, newEmail.Display, newEmail.Canonical, selector, digest, ttl.Seconds(), previousRevision+1).Scan(
+		userID, currentEmail, newEmail.Display, newEmail.Canonical, selector, digest, ttl.Seconds(), previousRevision+1, createdAt).Scan(
 		&request.ID, &request.UserID, &request.OldEmail, &request.NewEmail, &request.ExpiresAt,
 		&request.ResendAfter, &request.AttemptsRemaining, &request.Revision, &request.CreatedAt, &request.Selector, &request.VerifierDigest); err != nil {
 		return domain.EmailChangeRequest{}, err
 	}
-	if _, err := tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), last_error_code = 'superseded' WHERE user_id = $1::uuid AND kind = 'email_change_code' AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, userID); err != nil {
+	systemName, err := mailTaskSystemName(operationCtx, tx)
+	if err != nil {
+		return domain.EmailChangeRequest{}, err
+	}
+	// A replacement keeps the authority's original creation timestamp for
+	// cooldown/audit semantics, but the newly queued delivery is a new task and
+	// must receive its own creation timestamp for ordering and retention.
+	taskCreatedAt := request.CreatedAt
+	if hasPrevious {
+		if err := tx.QueryRowContext(operationCtx, `SELECT clock_timestamp()`).Scan(&taskCreatedAt); err != nil {
+			return domain.EmailChangeRequest{}, err
+		}
+	}
+	material, err := s.sealMailTaskMaterial(application.MailTaskMaterial{Version: 1, Kind: application.MailEmailChangeCode, Name: currentName, Email: newEmail.Display, Locale: locale, SystemName: systemName, CreatedAt: taskCreatedAt, ExpiresAt: request.ExpiresAt, EmailSelector: selector, VerifierDigest: digest})
+	if err != nil {
 		return domain.EmailChangeRequest{}, err
 	}
 	if _, err := tx.ExecContext(operationCtx, `
-		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, email_change_request_id, email_change_selector, locale, expires_at)
-		VALUES ('email_change_code', $1::uuid, $2, $3::uuid, $4, $5, $6)`, userID, newEmail.Display, request.ID, selector, locale, request.ExpiresAt); err != nil {
+		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, recipient_name, email_change_request_id, email_change_selector, locale, system_name, material_ciphertext, expires_at, created_at)
+		VALUES ('email_change_code', $1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10)`, userID, newEmail.Display, currentName, request.ID, selector, locale, systemName, nullableBytes(material), request.ExpiresAt, taskCreatedAt); err != nil {
 		return domain.EmailChangeRequest{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -272,7 +304,8 @@ func (s *Store) ResendEmailChange(ctx context.Context, userID string, selector, 
 	var request domain.EmailChangeRequest
 	var canonical string
 	var disabled bool
-	if err := tx.QueryRowContext(operationCtx, `SELECT disabled_at IS NOT NULL FROM auth_users WHERE id = $1::uuid FOR UPDATE`, userID).Scan(&disabled); err != nil {
+	var currentName string
+	if err := tx.QueryRowContext(operationCtx, `SELECT name, disabled_at IS NOT NULL FROM auth_users WHERE id = $1::uuid FOR UPDATE`, userID).Scan(&currentName, &disabled); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.EmailChangeRequest{}, application.ErrAccountNotFound
 		}
@@ -313,6 +346,11 @@ func (s *Store) ResendEmailChange(ctx context.Context, userID string, selector, 
 	if !locale.Valid() {
 		locale = domain.LocaleEnglish
 	}
+	// Invalidate only legacy rows before replacing the authority. Materialized
+	// tasks retain their original code and can be retried without reissuing it.
+	if _, err := tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), lease_token = NULL, lease_expires_at = NULL, last_error_code = 'superseded' WHERE user_id = $1::uuid AND kind = 'email_change_code' AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, userID); err != nil {
+		return domain.EmailChangeRequest{}, err
+	}
 	if err := tx.QueryRowContext(operationCtx, `
 		UPDATE auth_email_change_requests
 		SET selector = $2, verifier_digest = $3, expires_at = clock_timestamp() + ($4 * INTERVAL '1 second'),
@@ -323,12 +361,23 @@ func (s *Store) ResendEmailChange(ctx context.Context, userID string, selector, 
 		&request.ResendAfter, &request.AttemptsRemaining, &request.Revision, &request.CreatedAt, &request.Selector, &request.VerifierDigest); err != nil {
 		return domain.EmailChangeRequest{}, err
 	}
-	if _, err := tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), last_error_code = 'superseded' WHERE user_id = $1::uuid AND kind = 'email_change_code' AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, userID); err != nil {
+	systemName, err := mailTaskSystemName(operationCtx, tx)
+	if err != nil {
+		return domain.EmailChangeRequest{}, err
+	}
+	// A resend is a new delivery task even though the authority request keeps
+	// its original creation timestamp for audit and expiry semantics.
+	var taskCreatedAt time.Time
+	if err := tx.QueryRowContext(operationCtx, `SELECT clock_timestamp()`).Scan(&taskCreatedAt); err != nil {
+		return domain.EmailChangeRequest{}, err
+	}
+	material, err := s.sealMailTaskMaterial(application.MailTaskMaterial{Version: 1, Kind: application.MailEmailChangeCode, Name: currentName, Email: request.NewEmail, Locale: locale, SystemName: systemName, CreatedAt: taskCreatedAt, ExpiresAt: request.ExpiresAt, EmailSelector: selector, VerifierDigest: digest})
+	if err != nil {
 		return domain.EmailChangeRequest{}, err
 	}
 	if _, err := tx.ExecContext(operationCtx, `
-		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, email_change_request_id, email_change_selector, locale, expires_at)
-		VALUES ('email_change_code', $1::uuid, $2, $3::uuid, $4, $5, $6)`, userID, request.NewEmail, request.ID, selector, locale, request.ExpiresAt); err != nil {
+		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, recipient_name, email_change_request_id, email_change_selector, locale, system_name, material_ciphertext, expires_at, created_at)
+		VALUES ('email_change_code', $1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10)`, userID, request.NewEmail, currentName, request.ID, selector, locale, systemName, nullableBytes(material), request.ExpiresAt, taskCreatedAt); err != nil {
 		return domain.EmailChangeRequest{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -397,7 +446,7 @@ func (s *Store) CompleteEmailChange(ctx context.Context, userID, requestID strin
 			return domain.User{}, time.Time{}, err
 		}
 		if remaining <= 0 {
-			_, _ = tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), last_error_code = 'invalid_email_change' WHERE email_change_request_id = $1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, requestID)
+			_, _ = tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), lease_token = NULL, lease_expires_at = NULL, last_error_code = 'invalid_email_change' WHERE email_change_request_id = $1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, requestID)
 		}
 		if err := tx.Commit(); err != nil {
 			return domain.User{}, time.Time{}, err
@@ -417,6 +466,14 @@ func (s *Store) CompleteEmailChange(ctx context.Context, userID, requestID strin
 	if occupied {
 		return domain.User{}, time.Time{}, application.ErrEmailAlreadyRegistered
 	}
+	// Stop only legacy deliveries before consuming the authority. Materialized
+	// task rows preserve the original notification independently.
+	if _, err := tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), lease_token = NULL, lease_expires_at = NULL, last_error_code = 'superseded' WHERE email_change_request_id = $1::uuid AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, requestID); err != nil {
+		return domain.User{}, time.Time{}, err
+	}
+	if _, err := tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), finished_at = clock_timestamp(), lease_token = NULL, lease_expires_at = NULL, last_error_code = 'superseded' WHERE user_id = $1::uuid AND kind = 'password_reset' AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL AND material_ciphertext IS NULL`, userID); err != nil {
+		return domain.User{}, time.Time{}, err
+	}
 	var user domain.User
 	var changedAt time.Time
 	if err := tx.QueryRowContext(operationCtx, `
@@ -435,18 +492,24 @@ func (s *Store) CompleteEmailChange(ctx context.Context, userID, requestID strin
 	if _, err := tx.ExecContext(operationCtx, `DELETE FROM auth_password_resets WHERE user_id = $1::uuid`, userID); err != nil {
 		return domain.User{}, time.Time{}, err
 	}
-	if _, err := tx.ExecContext(operationCtx, `UPDATE auth_mail_outbox SET canceled_at = clock_timestamp(), last_error_code = 'superseded' WHERE user_id = $1::uuid AND kind = 'password_reset' AND sent_at IS NULL AND canceled_at IS NULL AND dead_at IS NULL`, userID); err != nil {
-		return domain.User{}, time.Time{}, err
-	}
 	if notificationTTL <= 0 {
 		notificationTTL = 24 * time.Hour
 	}
 	if !locale.Valid() {
 		locale = domain.LocaleEnglish
 	}
+	systemName, err := mailTaskSystemName(operationCtx, tx)
+	if err != nil {
+		return domain.User{}, time.Time{}, err
+	}
+	expiresAt := changedAt.Add(notificationTTL)
+	material, err := s.sealMailTaskMaterial(application.MailTaskMaterial{Version: 1, Kind: application.MailEmailChanged, Name: user.Name, Email: request.OldEmail, Locale: locale, SystemName: systemName, CreatedAt: changedAt, ExpiresAt: expiresAt})
+	if err != nil {
+		return domain.User{}, time.Time{}, err
+	}
 	if _, err := tx.ExecContext(operationCtx, `
-		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, locale, expires_at)
-		VALUES ('email_changed', $1::uuid, $2, $3, clock_timestamp() + ($4 * INTERVAL '1 second'))`, userID, request.OldEmail, locale, notificationTTL.Seconds()); err != nil {
+		INSERT INTO auth_mail_outbox (kind, user_id, recipient_email, recipient_name, locale, system_name, material_ciphertext, expires_at, created_at)
+		VALUES ('email_changed', $1::uuid, $2, $3, $4, $5, $6, $7, $8)`, userID, request.OldEmail, user.Name, locale, systemName, nullableBytes(material), expiresAt, changedAt); err != nil {
 		return domain.User{}, time.Time{}, err
 	}
 	if err := tx.Commit(); err != nil {

@@ -23,6 +23,53 @@ type fieldValueError struct{ field string }
 
 func (e fieldValueError) Error() string { return "invalid value for " + e.field }
 
+type emailRetryCountField struct {
+	value   int
+	present bool
+}
+
+func (f *emailRetryCountField) UnmarshalJSON(data []byte) error {
+	return unmarshalStrictOptionalInt(data, "autoRetryCount", &f.value, &f.present)
+}
+
+func (f emailRetryCountField) pointer() *int {
+	if !f.present {
+		return nil
+	}
+	value := f.value
+	return &value
+}
+
+type emailRetentionDaysField struct {
+	value   int
+	present bool
+}
+
+func (f *emailRetentionDaysField) UnmarshalJSON(data []byte) error {
+	return unmarshalStrictOptionalInt(data, "retentionDays", &f.value, &f.present)
+}
+
+func (f emailRetentionDaysField) pointer() *int {
+	if !f.present {
+		return nil
+	}
+	value := f.value
+	return &value
+}
+
+func unmarshalStrictOptionalInt(data []byte, field string, value *int, present *bool) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return fieldValueError{field: field}
+	}
+	var parsed int
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return fieldValueError{field: field}
+	}
+	*value = parsed
+	*present = true
+	return nil
+}
+
 func decodeJSONObject(r *http.Request, target any, allowed map[string]struct{}) error {
 	if r.ContentLength > maxJSONBody {
 		return errBodyTooLarge
@@ -58,6 +105,10 @@ func decodeJSONObject(r *http.Request, target any, allowed map[string]struct{}) 
 		return errInvalidJSON
 	}
 	if err := json.Unmarshal(encoded, target); err != nil {
+		var fieldErr fieldValueError
+		if errors.As(err, &fieldErr) {
+			return fieldErr
+		}
 		var typeError *json.UnmarshalTypeError
 		if errors.As(err, &typeError) && typeError.Field != "" {
 			return fieldValueError{field: typeError.Field}

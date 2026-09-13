@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"sync"
@@ -16,6 +17,13 @@ import (
 	"example.com/temvia/api/internal/auth/domain"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
+
+func mailJobSummary(job *application.MailJob) string {
+	if job == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("id=%s kind=%s user=%s invitation=%s email=%s attempts=%d round=%d roundAttempts=%d", job.ID, job.Kind, job.UserID, job.InvitationID, job.Email, job.Attempts, job.Round, job.RoundAttempts)
+}
 
 func TestStoreIntegrationSetupLifecycleAndConcurrency(t *testing.T) {
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
@@ -32,7 +40,7 @@ func TestStoreIntegrationSetupLifecycleAndConcurrency(t *testing.T) {
 		_ = db.Close()
 		t.Fatal(err)
 	}
-	store := NewStore(db)
+	store := newTestStore(db)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
@@ -145,7 +153,7 @@ func TestStoreIntegrationRejectsNonExactSchemaVersions(t *testing.T) {
 		}
 	})
 
-	store := NewStore(db)
+	store := newTestStore(db)
 	for _, test := range []struct {
 		name    string
 		version int64
@@ -170,6 +178,19 @@ func TestStoreIntegrationRejectsNonExactSchemaVersions(t *testing.T) {
 }
 
 func resetAuthState(ctx context.Context, db *sql.DB) error {
+	// Mail tasks intentionally no longer cascade from users, authorities, or
+	// invitations. Isolate the durable task history before deleting those
+	// fixtures, and remove attempts explicitly so a failed test cannot poison
+	// the next integration case.
+	if _, err := db.ExecContext(ctx, `DELETE FROM auth_mail_task_attempts`); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM auth_mail_outbox`); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM auth_email_settings`); err != nil {
+		return err
+	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM auth_deleted_user_identities`); err != nil {
 		return err
 	}
@@ -213,7 +234,7 @@ func TestStoreIntegrationOperationLogPersistenceAndRetention(t *testing.T) {
 		_ = db.Close()
 		t.Fatal(err)
 	}
-	store := NewStore(db)
+	store := newTestStore(db)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
@@ -295,7 +316,7 @@ func TestStoreIntegrationPasswordRecoveryOutboxAndVersionedSessions(t *testing.T
 		_ = db.Close()
 		t.Fatal(err)
 	}
-	store := NewStore(db)
+	store := newTestStore(db)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
@@ -347,8 +368,8 @@ func TestStoreIntegrationPasswordRecoveryOutboxAndVersionedSessions(t *testing.T
 		FROM auth_mail_outbox WHERE user_id = $1::uuid AND kind = 'password_reset'`, userID).Scan(&outboxCount, &canceledCount); err != nil {
 		t.Fatal(err)
 	}
-	if outboxCount != 2 || canceledCount != 1 {
-		t.Fatalf("replacement outbox rows = %d total, %d canceled; want 2, 1", outboxCount, canceledCount)
+	if outboxCount != 2 || canceledCount != 0 {
+		t.Fatalf("replacement outbox rows = %d total, %d canceled; want 2, 0 durable originals retained", outboxCount, canceledCount)
 	}
 	if err := store.PreflightPasswordReset(ctx, materialOne.Selector, materialOne.VerifierDigest); !errors.Is(err, application.ErrInvalidPasswordResetToken) {
 		t.Fatalf("PreflightPasswordReset(old) error = %v", err)
@@ -360,28 +381,43 @@ func TestStoreIntegrationPasswordRecoveryOutboxAndVersionedSessions(t *testing.T
 	const leaseOne = "00000000-0000-4000-8000-000000000011"
 	job, err := store.ClaimMail(ctx, leaseOne, time.Minute)
 	if err != nil || job == nil {
-		t.Fatalf("ClaimMail(first) = %#v, %v", job, err)
+		t.Fatalf("ClaimMail(first) = %s, %v", mailJobSummary(job), err)
 	}
-	if job.Kind != application.MailPasswordReset || !bytes.Equal(job.ResetSelector, materialTwo.Selector) || !bytes.Equal(job.VerifierDigest, materialTwo.VerifierDigest) || job.Attempts != 1 {
-		t.Fatalf("claimed reset job = %#v", job)
+	// Materialized tasks expose only the worker-safe claim projection. The
+	// selector and verifier digest are reconstructed from encrypted material by
+	// the dispatcher, rather than being asserted on this store-level result.
+	if job.Kind != application.MailPasswordReset || len(job.EncryptedMaterial) == 0 || job.Attempts != 1 {
+		t.Fatalf("claimed reset job = %s", mailJobSummary(job))
 	}
 	const wrongLease = "00000000-0000-4000-8000-000000000012"
 	if marked, err := store.MarkMailSent(ctx, job.ID, wrongLease); err != nil || marked {
 		t.Fatalf("MarkMailSent(wrong lease) = %t, %v", marked, err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE auth_mail_outbox SET available_at = clock_timestamp() - interval '2 seconds', lease_expires_at = clock_timestamp() - interval '1 second' WHERE id = $1::uuid`, job.ID); err != nil {
+	if _, err := db.ExecContext(ctx, `
+		WITH db_clock AS (SELECT clock_timestamp() AS now)
+		UPDATE auth_mail_outbox AS o
+		SET available_at = db_clock.now - interval '2 seconds',
+			lease_expires_at = db_clock.now - interval '1 second'
+		FROM db_clock
+		WHERE o.id = $1::uuid`, job.ID); err != nil {
 		t.Fatal(err)
 	}
 	const leaseTwo = "00000000-0000-4000-8000-000000000013"
 	reclaimed, err := store.ClaimMail(ctx, leaseTwo, time.Minute)
 	if err != nil || reclaimed == nil || reclaimed.ID != job.ID || reclaimed.Attempts != 2 {
-		t.Fatalf("ClaimMail(after lease expiry) = %#v, %v", reclaimed, err)
+		t.Fatalf("ClaimMail(after lease expiry) = %s, %v", mailJobSummary(reclaimed), err)
 	}
 	if retried, err := store.RetryMail(ctx, reclaimed.ID, reclaimed.LeaseToken, 10*time.Minute, "temporary"); err != nil || !retried {
 		t.Fatalf("RetryMail() = %t, %v", retried, err)
 	}
-	if available, err := store.ClaimMail(ctx, "00000000-0000-4000-8000-000000000014", time.Minute); err != nil || available != nil {
-		t.Fatalf("ClaimMail(before retry availability) = %#v, %v", available, err)
+	// The replacement email is an independent retained task and remains
+	// claimable while the first task waits for its retry deadline.
+	available, err := store.ClaimMail(ctx, "00000000-0000-4000-8000-000000000014", time.Minute)
+	if err != nil || available == nil || available.ID == reclaimed.ID || available.Kind != application.MailPasswordReset {
+		t.Fatalf("ClaimMail(other retained reset) = %s, %v", mailJobSummary(available), err)
+	}
+	if early, err := store.ClaimMail(ctx, "00000000-0000-4000-8000-000000000016", time.Minute); err != nil || early != nil {
+		t.Fatalf("ClaimMail(before retry availability) = %s, %v", mailJobSummary(early), err)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE auth_mail_outbox SET available_at = clock_timestamp() - interval '1 second' WHERE id = $1::uuid`, reclaimed.ID); err != nil {
 		t.Fatal(err)
@@ -389,10 +425,17 @@ func TestStoreIntegrationPasswordRecoveryOutboxAndVersionedSessions(t *testing.T
 	const leaseThree = "00000000-0000-4000-8000-000000000015"
 	retriedJob, err := store.ClaimMail(ctx, leaseThree, time.Minute)
 	if err != nil || retriedJob == nil || retriedJob.ID != job.ID || retriedJob.Attempts != 3 {
-		t.Fatalf("ClaimMail(after retry delay) = %#v, %v", retriedJob, err)
+		t.Fatalf("ClaimMail(after retry delay) = %s, %v", mailJobSummary(retriedJob), err)
 	}
 	if dead, err := store.DeadLetterMail(ctx, retriedJob.ID, retriedJob.LeaseToken, "permanent"); err != nil || !dead {
 		t.Fatalf("DeadLetterMail() = %t, %v", dead, err)
+	}
+	var attemptRows int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_mail_task_attempts WHERE task_id = $1::uuid`, job.ID).Scan(&attemptRows); err != nil {
+		t.Fatal(err)
+	}
+	if attemptRows != 3 {
+		t.Fatalf("durable attempt rows = %d, want 3 after lease recovery", attemptRows)
 	}
 
 	materialThree, err := domain.NewPasswordResetMaterial(key, bytes.Repeat([]byte{0x33}, domain.PasswordResetSelectorBytes))
@@ -420,8 +463,8 @@ func TestStoreIntegrationPasswordRecoveryOutboxAndVersionedSessions(t *testing.T
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM auth_mail_outbox WHERE user_id = $1::uuid AND kind = 'password_changed' AND created_at >= $2`, userID, changedAt.Add(-time.Second)).Scan(&notificationRows); err != nil {
 		t.Fatal(err)
 	}
-	if authVersion != 2 || resetRows != 0 || pendingResetRows != 0 || notificationRows != 1 {
-		t.Fatalf("completion state = auth_version %d, resets %d, pending reset mail %d, notices %d", authVersion, resetRows, pendingResetRows, notificationRows)
+	if authVersion != 2 || resetRows != 0 || pendingResetRows != 2 || notificationRows != 1 {
+		t.Fatalf("completion state = auth_version %d, resets %d, pending durable reset mail %d, notices %d", authVersion, resetRows, pendingResetRows, notificationRows)
 	}
 	if err := store.PreflightPasswordReset(ctx, materialThree.Selector, materialThree.VerifierDigest); !errors.Is(err, application.ErrInvalidPasswordResetToken) {
 		t.Fatalf("PreflightPasswordReset(replay) error = %v", err)
@@ -429,7 +472,7 @@ func TestStoreIntegrationPasswordRecoveryOutboxAndVersionedSessions(t *testing.T
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO auth_mail_outbox (kind, user_id, locale, expires_at, created_at, sent_at)
-		SELECT 'password_changed', $1::uuid, 'en', clock_timestamp() + interval '1 hour', clock_timestamp() - interval '8 days', clock_timestamp() - interval '8 days'
+		SELECT 'password_changed', $1::uuid, 'en', clock_timestamp() + interval '1 hour', clock_timestamp() - interval '31 days', clock_timestamp() - interval '31 days'
 		FROM generate_series(1, 150)`, userID); err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +570,7 @@ func TestStoreIntegrationRBACAndInvitationLifecycle(t *testing.T) {
 		_ = db.Close()
 		t.Fatal(err)
 	}
-	store := NewStore(db)
+	store := newTestStore(db)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
@@ -633,8 +676,10 @@ func TestStoreIntegrationRBACAndInvitationLifecycle(t *testing.T) {
 		t.Fatalf("duplicate invitation = %v, want pending conflict", err)
 	}
 	job, err := store.ClaimMail(ctx, "00000000-0000-4000-8000-000000000031", time.Minute)
-	if err != nil || job == nil || job.Kind != application.MailUserInvitation || job.InvitationID != invitation.ID || !bytes.Equal(job.InvitationSelector, selector) {
-		t.Fatalf("ClaimMail(invitation) = %#v, %v", job, err)
+	// The invitation selector/digest live in encrypted worker material for a
+	// durable task; the store claim is intentionally only a safe projection.
+	if err != nil || job == nil || job.Kind != application.MailUserInvitation || job.InvitationID != invitation.ID || len(job.EncryptedMaterial) == 0 || len(job.InvitationSelector) != 0 || len(job.VerifierDigest) != 0 {
+		t.Fatalf("ClaimMail(invitation) = %s, %v", mailJobSummary(job), err)
 	}
 
 	if err := store.CompleteInvitation(ctx, selector, material.VerifierDigest, "$argon2id$invited"); err != nil {
@@ -674,7 +719,7 @@ func TestStoreIntegrationAccessListQueryOptions(t *testing.T) {
 		_ = db.Close()
 		t.Fatal(err)
 	}
-	store := NewStore(db)
+	store := newTestStore(db)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()

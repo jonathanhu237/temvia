@@ -22,6 +22,31 @@ type dispatcherOutboxFake struct {
 	errorCode string
 }
 
+// recordingDispatcherOutboxFake exercises the late-result path without
+// requiring a PostgreSQL integration test. The real Store uses the same
+// task/round/attempt identity for its upsert.
+type recordingDispatcherOutboxFake struct {
+	dispatcherOutboxFake
+	markResult    bool
+	recorded      bool
+	recordContext error
+	recordOutcome string
+	recordCode    string
+}
+
+func (f *recordingDispatcherOutboxFake) MarkMailSent(ctx context.Context, id, leaseToken string) (bool, error) {
+	f.sent = true
+	return f.markResult, nil
+}
+
+func (f *recordingDispatcherOutboxFake) RecordMailAttempt(ctx context.Context, _ string, _ int, _ int, outcome, code string) error {
+	f.recorded = true
+	f.recordContext = ctx.Err()
+	f.recordOutcome = outcome
+	f.recordCode = code
+	return nil
+}
+
 func (f *dispatcherOutboxFake) ClaimMail(_ context.Context, leaseToken string, _ time.Duration) (*MailJob, error) {
 	if f.job == nil {
 		return nil, nil
@@ -64,6 +89,26 @@ type dispatcherMailerFake struct {
 	err     error
 }
 
+type dispatcherRetryPolicyFake struct {
+	retries int
+	err     error
+}
+
+func (f *dispatcherRetryPolicyFake) CurrentMailRetryCount(context.Context) (int, error) {
+	return f.retries, f.err
+}
+
+type dispatcherMailerProviderFake struct {
+	mailer Mailer
+	calls  int
+	err    error
+}
+
+func (f *dispatcherMailerProviderFake) CurrentMailer(context.Context) (Mailer, error) {
+	f.calls++
+	return f.mailer, f.err
+}
+
 type dispatcherIdentityFake struct {
 	identity SystemIdentityView
 	err      error
@@ -81,6 +126,15 @@ func (f *dispatcherMailerFake) Send(_ context.Context, message OutgoingMail) err
 	return f.err
 }
 
+type cancelOnSendMailer struct {
+	cancel context.CancelFunc
+}
+
+func (m *cancelOnSendMailer) Send(_ context.Context, _ OutgoingMail) error {
+	m.cancel()
+	return nil
+}
+
 type cancellationAwareMailer struct {
 	started chan struct{}
 	release chan struct{}
@@ -93,6 +147,88 @@ func (m *cancellationAwareMailer) Send(ctx context.Context, _ OutgoingMail) erro
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func TestMailDispatcherFailsClosedForMissingMaterialWhenConfigured(t *testing.T) {
+	created := time.Unix(100, 0)
+	outbox := &dispatcherOutboxFake{job: &MailJob{
+		ID:            "00000000-0000-4000-8000-000000000017",
+		Kind:          MailPasswordChanged,
+		Name:          "Ada",
+		Email:         "ada@example.com",
+		Locale:        domain.LocaleEnglish,
+		CreatedAt:     created,
+		ExpiresAt:     created.Add(time.Hour),
+		Attempts:      1,
+		Round:         1,
+		RoundAttempts: 1,
+	}}
+	mailer := &dispatcherMailerFake{}
+	dispatcher := NewMailDispatcher(outbox, mailer, &fakeRandom{value: 9}, bytes.Repeat([]byte{0x61}, 32), "https://admin.example", time.Second, time.Second, time.Second, time.Minute)
+	box, err := NewMailTaskSecretBox(bytes.Repeat([]byte{0x62}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.SetMailTaskSecretBox(box)
+	dispatcher.now = func() time.Time { return created }
+	if err := dispatcher.ProcessOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !outbox.retried || outbox.dead || mailer.message != (OutgoingMail{}) {
+		t.Fatalf("missing material state = %#v, message=%#v", outbox, mailer.message)
+	}
+}
+
+func TestMailDispatcherRecordsLateSentAttemptWithDetachedAckContext(t *testing.T) {
+	created := time.Unix(100, 0)
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	outbox := &recordingDispatcherOutboxFake{
+		dispatcherOutboxFake: dispatcherOutboxFake{job: &MailJob{
+			ID:            "00000000-0000-4000-8000-000000000016",
+			Kind:          MailPasswordChanged,
+			Name:          "Ada",
+			Email:         "ada@example.com",
+			Locale:        domain.LocaleEnglish,
+			CreatedAt:     created,
+			ExpiresAt:     created.Add(time.Hour),
+			Round:         1,
+			RoundAttempts: 1,
+		}},
+	}
+	mailer := &cancelOnSendMailer{cancel: cancel}
+	dispatcher := NewMailDispatcher(outbox, mailer, &fakeRandom{value: 9}, bytes.Repeat([]byte{0x61}, 32), "https://admin.example", time.Second, time.Second, time.Second, time.Minute)
+	dispatcher.now = func() time.Time { return created }
+	if err := dispatcher.ProcessOnce(parent); err != nil {
+		t.Fatal(err)
+	}
+	if !outbox.sent || !outbox.recorded || outbox.recordContext != nil || outbox.recordOutcome != MailTaskOutcomeSent || outbox.recordCode != "" {
+		t.Fatalf("late sent attempt = %#v", outbox)
+	}
+}
+
+func TestMailDispatcherResolvesMailerFromProviderForEachDelivery(t *testing.T) {
+	created := time.Unix(100, 0)
+	outbox := &dispatcherOutboxFake{job: &MailJob{
+		ID:        "00000000-0000-4000-8000-000000000015",
+		Kind:      MailPasswordChanged,
+		Name:      "Ada",
+		Email:     "ada@example.com",
+		Locale:    domain.LocaleEnglish,
+		CreatedAt: created,
+		ExpiresAt: created.Add(time.Hour),
+	}}
+	mailer := &dispatcherMailerFake{}
+	provider := &dispatcherMailerProviderFake{mailer: mailer}
+	dispatcher := NewMailDispatcher(outbox, nil, &fakeRandom{value: 9}, bytes.Repeat([]byte{0x61}, 32), "https://admin.example", time.Second, time.Second, time.Second, time.Minute)
+	dispatcher.SetMailerProvider(provider)
+	dispatcher.now = func() time.Time { return created.Add(time.Minute) }
+	if err := dispatcher.ProcessOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 1 || !outbox.sent || mailer.message.To != "ada@example.com" {
+		t.Fatalf("provider delivery state = calls:%d sent:%v message:%#v", provider.calls, outbox.sent, mailer.message)
 	}
 }
 
@@ -414,6 +550,30 @@ func TestMailDispatcherUsesOneIdentityAcrossLocales(t *testing.T) {
 
 }
 
+func TestMailDispatcherDoesNotUseDefaultRetryBudgetWhenPolicyReadFails(t *testing.T) {
+	created := time.Unix(100, 0)
+	outbox := &dispatcherOutboxFake{job: &MailJob{
+		ID:        "00000000-0000-4000-8000-000000000014",
+		Kind:      MailPasswordChanged,
+		Name:      "Ada",
+		Email:     "ada@example.com",
+		Locale:    domain.LocaleEnglish,
+		CreatedAt: created,
+		ExpiresAt: created.Add(time.Hour),
+		Attempts:  1,
+	}}
+	dispatcher := NewMailDispatcher(outbox, &dispatcherMailerFake{err: &MailDeliveryError{Code: "temporary", Temporary: true}}, &fakeRandom{value: 9}, bytes.Repeat([]byte{0x61}, 32), "https://admin.example", time.Second, time.Second, time.Second, time.Minute)
+	dispatcher.SetMailRetryPolicyProvider(&dispatcherRetryPolicyFake{err: errors.New("settings unavailable")})
+	dispatcher.now = func() time.Time { return created.Add(time.Minute) }
+
+	if err := dispatcher.ProcessOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if outbox.retried || !outbox.dead || outbox.errorCode != "dependency" {
+		t.Fatalf("policy dependency state = %#v", outbox)
+	}
+}
+
 func TestMailDispatcherRetriesWhenIdentityDependencyFails(t *testing.T) {
 	created := time.Unix(100, 0)
 	outbox := &dispatcherOutboxFake{job: &MailJob{
@@ -433,7 +593,7 @@ func TestMailDispatcherRetriesWhenIdentityDependencyFails(t *testing.T) {
 	if err := dispatcher.ProcessOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !outbox.retried || outbox.errorCode != "temporary" || outbox.sent || outbox.dead || outbox.discarded {
+	if !outbox.retried || outbox.errorCode != "dependency" || outbox.sent || outbox.dead || outbox.discarded {
 		t.Fatalf("identity dependency state = %#v", outbox)
 	}
 }

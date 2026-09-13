@@ -46,6 +46,8 @@ export type EmailSettingsDraft = {
   fromAddress: string
   fromName: string
   defaultLocale?: 'en' | 'zh-CN'
+  autoRetryCount: number
+  retentionDays: number
   revision: number
   configured: boolean
   submitting: boolean
