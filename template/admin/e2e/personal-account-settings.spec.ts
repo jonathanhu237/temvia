@@ -15,6 +15,51 @@ test.skip(!enabled, 'set E2E_PERSONAL_SETTINGS=1 with a disposable account to ru
 
 type MailpitMessage = Record<string, unknown>
 
+test('opens personal settings from the account menu across sidebar layouts', async ({ page }) => {
+  requirePersonalCredentials()
+  await signIn(page, email!, password!)
+
+  const desktopSidebar = page.locator('[data-sidebar="sidebar"]').first()
+  await expect(desktopSidebar.getByText('Personal settings', { exact: true })).toHaveCount(0)
+
+  const accountTrigger = page.getByRole('button', { name: /, Menu$/ })
+  await accountTrigger.click()
+  const personalItem = page.getByRole('menuitem', { name: 'Personal settings', exact: true })
+  const logoutItem = page.getByRole('menuitem', { name: 'Log out', exact: true })
+  await expect(personalItem).toBeVisible()
+  await expect(logoutItem).toBeVisible()
+  const personalBox = await personalItem.boundingBox()
+  const logoutBox = await logoutItem.boundingBox()
+  expect(personalBox).not.toBeNull()
+  expect(logoutBox).not.toBeNull()
+  expect(personalBox!.y).toBeLessThan(logoutBox!.y)
+
+  await personalItem.click()
+  await expect(page).toHaveURL(/\/personal-settings$/)
+  await expect(personalItem).toBeHidden()
+  await accountTrigger.click()
+  await expect(page.getByRole('menuitem', { name: 'Personal settings', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('menuitem', { name: 'Personal settings', exact: true })).toHaveAttribute('data-active', 'true')
+  await page.keyboard.press('Escape')
+
+  // The account menu remains reachable when the desktop sidebar is collapsed.
+  await page.getByRole('button', { name: 'Menu', exact: true }).click()
+  await accountTrigger.click()
+  await expect(page.getByRole('menuitem', { name: 'Personal settings', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // The same menu selection closes the Sheet-backed mobile sidebar after routing.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  const mobileSidebar = page.locator('[data-sidebar="sidebar"][data-mobile="true"]')
+  await page.getByRole('button', { name: 'Menu', exact: true }).click()
+  await expect(mobileSidebar).toBeVisible()
+  await mobileSidebar.getByRole('button', { name: /, Menu$/ }).click()
+  await page.getByRole('menuitem', { name: 'Personal settings', exact: true }).click()
+  await expect(page).toHaveURL(/\/personal-settings$/)
+  await expect(mobileSidebar).toBeHidden()
+})
+
 test('keeps profile, preferences, avatar crop, and security controls account-scoped', async ({ page }) => {
   requirePersonalCredentials()
   await signIn(page, email!, password!)

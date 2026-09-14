@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, ChevronDown, History, House, LogOut, Mail, Monitor, Settings, ShieldCheck, UserCog, UserRound, Users } from 'lucide-react'
+import { Activity, Check, ChevronDown, History, House, LogOut, Mail, Monitor, Settings, ShieldCheck, UserCog, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import {
   Sidebar,
   SidebarContent,
@@ -20,6 +20,7 @@ import {
   SidebarMenuSubItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from '@/components/ui/sidebar'
 import { translateProblemWithFields } from '@/shared/api/problems'
 import { notifyRequestError, notifySuccess } from '@/shared/feedback'
@@ -30,6 +31,50 @@ import { clearAccessDrafts, useAccessDraftStore } from '@/features/access/drafts
 import { IdentityMark } from '@/features/identity/system-identity'
 import { UserAvatar } from './user-avatar'
 import { changeAccountLocale, restoreGuestLocale } from '@/shared/i18n'
+
+function AccountMenu({ user, isPersonalSettings, logoutPending, onLogout }: { user: User; isPersonalSettings: boolean; logoutPending: boolean; onLogout: () => void }) {
+  const { setOpenMobile } = useSidebar()
+  const { t } = useTranslation(['common', 'auth'])
+
+  return <DropdownMenu modal={false}>
+    <DropdownMenuTrigger asChild>
+      <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent" aria-label={`${user.name}, ${t('menu')}`}>
+        <UserAvatar user={user} className="size-8 rounded-md" />
+        <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left group-data-[collapsible=icon]:hidden">
+          <span className="w-full truncate text-sm font-medium">{user.name}</span>
+          <span className="w-full truncate text-xs text-muted-foreground">{user.email}</span>
+        </span>
+      </SidebarMenuButton>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent side="top" align="start" className="w-64">
+      <DropdownMenuLabel className="font-normal">
+        <p className="truncate text-sm font-medium">{user.name}</p>
+        <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+      </DropdownMenuLabel>
+      <DropdownMenuSeparator />
+      <DropdownMenuGroup>
+        <DropdownMenuItem
+          asChild
+          data-active={isPersonalSettings ? 'true' : undefined}
+          onSelect={() => setOpenMobile(false)}
+        >
+          <Link to="/personal-settings" aria-current={isPersonalSettings ? 'page' : undefined}>
+            <UserCog aria-hidden="true" data-icon="inline-start" />
+            {t('personalSettings')}
+            {isPersonalSettings ? <Check aria-hidden="true" className="ml-auto" /> : null}
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuGroup>
+      <DropdownMenuSeparator />
+      <DropdownMenuGroup>
+        <DropdownMenuItem disabled={logoutPending} onSelect={(event) => { event.preventDefault(); onLogout() }}>
+          <LogOut aria-hidden="true" data-icon="inline-start" />
+          {logoutPending ? t('auth:loggingOut') : t('logout')}
+        </DropdownMenuItem>
+      </DropdownMenuGroup>
+    </DropdownMenuContent>
+  </DropdownMenu>
+}
 
 export function AuthenticatedShell({ api, user: initialUser, children }: { api: ApiClient; user: User; children: React.ReactNode }) {
   const { t } = useTranslation(['common', 'auth', 'problems', 'access', 'operationLog', 'onlineUsers', 'emailTasks'])
@@ -116,14 +161,6 @@ export function AuthenticatedShell({ api, user: initialUser, children }: { api: 
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={location.pathname.startsWith('/personal-settings')} tooltip={t('personalSettings')}>
-                    <Link to="/personal-settings" aria-current={location.pathname.startsWith('/personal-settings') ? 'page' : undefined}>
-                      <UserCog aria-hidden="true" data-icon="inline-start" />
-                      <span>{t('personalSettings')}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
                 {hasAccessMenu ? (
                   <SidebarMenuItem>
                     <SidebarMenuButton type="button" isActive={accessMenuActive} tooltip={t('access:usersAccess')} aria-expanded={accessMenuExpanded} onClick={() => setAccessMenuOpen((open) => !open)}>
@@ -159,28 +196,7 @@ export function AuthenticatedShell({ api, user: initialUser, children }: { api: 
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <DropdownMenu modal={false}>
-            <DropdownMenuTrigger asChild>
-              <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent" aria-label={`${user.name}, ${t('menu')}`}>
-                <UserAvatar user={user} className="size-8 rounded-md" />
-                <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left group-data-[collapsible=icon]:hidden">
-                  <span className="w-full truncate text-sm font-medium">{user.name}</span>
-                  <span className="w-full truncate text-xs text-muted-foreground">{user.email}</span>
-                </span>
-              </SidebarMenuButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="w-64">
-              <DropdownMenuLabel className="font-normal">
-                <p className="truncate text-sm font-medium">{user.name}</p>
-                <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem disabled={logout.isPending} onSelect={(event) => { event.preventDefault(); logout.mutate() }}>
-                <LogOut aria-hidden="true" data-icon="inline-start" />
-                {logout.isPending ? t('auth:loggingOut') : t('logout')}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <AccountMenu user={user} isPersonalSettings={location.pathname.startsWith('/personal-settings')} logoutPending={logout.isPending} onLogout={() => logout.mutate()} />
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
