@@ -7,6 +7,16 @@ The language used for account invitations and password recovery in Temvia admini
 **Invitation link**:
 A single-use link that lets an invited person set a password and activate their account.
 
+**Administrator-created account（管理员创建的账号）**:
+An account an administrator creates directly, with an initial password they hand to the person who will use it, instead of sending an invitation. It needs no email delivery.
+_Avoid_: Manual registration, self-registration
+
+**Initial password（初始密码）**:
+The password an administrator sets or generates when creating an account. It is shown to the administrator only once, right after creation, and never recorded in operation history.
+
+**Required password change（必须修改密码）**:
+The state of an administrator-created account that must replace its initial password at its first sign-in. Until then the session can only read the account, change the password, or sign out. Changing or resetting one's own password ends it.
+
 **Invitation language**:
 The language used in an invitation email, independent of the sender's current interface language.
 _Avoid_: Account language, interface language
